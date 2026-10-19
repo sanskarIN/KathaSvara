@@ -309,6 +309,17 @@ async fn synthesize(
 }
 
 #[tauri::command]
+fn discard_audio(app: tauri::AppHandle, audio_id: String) -> Result<(), String> {
+    Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.")?;
+    let path = app_dir(&app)?.join("audio").join(format!("{audio_id}.wav"));
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Unable to delete local audio preview: {error}")),
+    }
+}
+
+#[tauri::command]
 fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> Result<(), String> {
     Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.")?;
     let source = app_dir(&app)?.join("audio").join(format!("{audio_id}.wav"));
@@ -334,7 +345,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, inspect_script, check_engine, synthesize, export_wav
+            save_project, load_project, list_projects, inspect_script, check_engine, synthesize, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
