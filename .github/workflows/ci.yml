@@ -77,7 +77,7 @@ jobs:
   preview-release:
     name: Publish v0.1.0 source-only pre-release
     # Explicit one-time opt-in; never release on ordinary commits or pull requests.
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'release: publish v0.1.0 developer pre-release' }}
+    if: "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'release: publish v0.1.0 developer pre-release' }}"
     needs: [python, frontend, rust-windows]
     runs-on: ubuntu-latest
     permissions:
