@@ -12,6 +12,9 @@
 - Configurable model-supported expressiveness and guidance.
 - Actual synthesis-to-WAV pipeline, format verification, desktop playback and user-requested WAV export.
 - Dark/light appearance, saved story list, helpful errors, About and support links.
+- Review normalized Hindi and speech segments **before** synthesis without loading a model; changes require explicit approval.
+- Import locally selected UTF-8 `.txt` / `.md` stories (250 KB maximum); voice settings persist in local UI preferences.
+- Detect stale audio when the script or voice settings change; bound Python inference runtime and validate WAV chunk integrity.
 - Python, Rust and TypeScript unit-test foundations.
 
 Source components may require integration fixes before the milestone can be published. No model weights or sample generated voices are bundled.
@@ -37,6 +40,7 @@ Detailed Windows, Linux and macOS instructions: [development setup](docs/install
 | Hindi input and local story storage | Implemented in source; desktop build unverified |
 | Chatterbox Hindi adapter | Implemented in source; **real synthesis unverified** |
 | WAV writing, preview and export | Implemented in source; end-to-end unverified |
+| Inspect Hindi text and import TXT / Markdown | Implemented in source; desktop interaction unverified |
 | Python tests | Test suite committed; CI execution pending |
 | Multi-character voices | Future milestone |
 | Full audio timeline and music mixing | Future milestone |
