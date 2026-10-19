@@ -9,12 +9,29 @@ import sys
 from pathlib import Path
 
 from .engine import VoiceSettings
+from .hindi import split_for_engine, validate_story
 from .synthesis import synthesize
 
 
 def handle(request: dict[str, object]) -> dict[str, object]:
     if request.get("action") == "health":
         return {"ok": True, "engine": "chatterbox-multilingual", "language": "hi"}
+    if request.get("action") == "inspect":
+        text = request.get("text")
+        if not isinstance(text, str):
+            raise TypeError("Inspection requires story text.")
+        normalized = validate_story(text)
+        chunks = split_for_engine(normalized)
+        return {
+            "ok": True,
+            "result": {
+                "normalized": normalized,
+                "characters": len(normalized),
+                "chunks": chunks,
+                "chunk_count": len(chunks),
+                "changed": normalized != text,
+            },
+        }
     if request.get("action") != "synthesize":
         raise ValueError("Unsupported action.")
     text = request.get("text")
