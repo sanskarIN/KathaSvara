@@ -5,8 +5,8 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from typing import Any
 
 
