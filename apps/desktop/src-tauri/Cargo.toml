@@ -1,0 +1,18 @@
+[package]
+name = "kathasvara"
+version = "0.1.0"
+edition = "2021"
+description = "KathaSvara local-first Hindi storytelling desktop bridge"
+license = "MPL-2.0"
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+tauri = { version = "2" }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+atomicwrites = "0.4"
