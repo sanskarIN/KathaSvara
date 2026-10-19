@@ -283,13 +283,22 @@ async fn synthesize(
         let folder = app_dir(&app)?.join("audio");
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         let path = folder.join(format!("{audio_id}.wav"));
-        let data = invoke_python(json!({
+        let data = match invoke_python(json!({
             "action":"synthesize",
             "text":text,
             "output":path,
             "exaggeration":exaggeration,
             "cfg_weight":cfg_weight
-        }))?;
+        })) {
+            Ok(response) => response,
+            Err(error) => {
+                // A terminated or timed-out Python worker cannot execute its
+                // own temporary-file cleanup. Remove only this UUID's files.
+                let _ = fs::remove_file(&path);
+                let _ = fs::remove_file(folder.join(format!("{audio_id}.partial.wav")));
+                return Err(error);
+            }
+        };
         let size = fs::metadata(&path).map_err(|_| "Audio file was not created.".to_string())?.len();
         if size > MAX_GENERATED_WAV {
             let _ = fs::remove_file(&path);
