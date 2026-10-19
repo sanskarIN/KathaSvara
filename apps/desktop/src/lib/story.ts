@@ -42,6 +42,12 @@ export const STARTER_STORY =
   "आज की कहानी शुरू होती है एक ऐसे गाँव से, जहाँ हर शाम एक पुरानी घंटी अपने आप बज उठती थी।\n\n" +
   "लोग हैरान थे। कोई नहीं जानता था कि उस घंटी के पीछे कौन-सा रहस्य छिपा था।";
 
+export function importedStoryTitle(name: string): string | null {
+  if (!/\.(txt|md)$/i.test(name)) return null;
+  const base = name.replace(/\.(txt|md)$/i, "").trim();
+  return base.slice(0, 120) || "Imported story";
+}
+
 export function validateText(text: string): string | null {
   if (!text.trim()) return "कहानी लिखें या पेस्ट करें।";
   if ([...text].length > 3000) return "Please split stories longer than 3000 characters.";
