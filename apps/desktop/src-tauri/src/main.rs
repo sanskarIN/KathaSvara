@@ -212,8 +212,53 @@ async fn check_engine() -> Result<String, String> {
 }
 
 fn inspect_wav(data: &[u8]) -> Result<(), String> {
+    const INVALID: &str = "Generated audio is not valid mono 16-bit PCM WAV.";
     if data.len() < 44 || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
-        return Err("Output is not a valid RIFF/WAVE file.".into());
+        return Err(INVALID.into());
+    }
+    let riff_size = u32::from_le_bytes(data[4..8].try_into().map_err(|_| INVALID)?) as usize;
+    if riff_size.checked_add(8) != Some(data.len()) {
+        return Err("WAV RIFF length does not match its file size.".into());
+    }
+    let mut index = 12usize;
+    let mut found_format = false;
+    let mut found_samples = false;
+    while index + 8 <= data.len() {
+        let marker = &data[index..index + 4];
+        let size = u32::from_le_bytes(
+            data[index + 4..index + 8].try_into().map_err(|_| INVALID)?
+        ) as usize;
+        let next = index.checked_add(8)
+            .and_then(|value| value.checked_add(size))
+            .and_then(|value| value.checked_add(size % 2))
+            .ok_or(INVALID)?;
+        if next > data.len() {
+            return Err("WAV chunk extends beyond its file size.".into());
+        }
+        if marker == b"fmt " {
+            if size < 16 {
+                return Err(INVALID.into());
+            }
+            let fmt = &data[index + 8..index + 24];
+            let codec = u16::from_le_bytes([fmt[0], fmt[1]]);
+            let channels = u16::from_le_bytes([fmt[2], fmt[3]]);
+            let sample_rate = u32::from_le_bytes(fmt[4..8].try_into().map_err(|_| INVALID)?);
+            let block_align = u16::from_le_bytes([fmt[12], fmt[13]]);
+            let bits_per_sample = u16::from_le_bytes([fmt[14], fmt[15]]);
+            if codec != 1 || channels != 1 || !(8_000..=192_000).contains(&sample_rate)
+                || block_align != 2 || bits_per_sample != 16
+            {
+                return Err(INVALID.into());
+            }
+            found_format = true;
+        }
+        if marker == b"data" && size >= 2 && size.is_multiple_of(2) {
+            found_samples = true;
+        }
+        index = next;
+    }
+    if index != data.len() || !found_format || !found_samples {
+        return Err(INVALID.into());
     }
     Ok(())
 }
