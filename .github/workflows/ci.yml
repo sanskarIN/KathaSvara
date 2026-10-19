@@ -60,7 +60,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Rust formatting
+      - name: Format Rust for validation
+        run: cargo fmt
+      - name: Verify rustfmt output
         run: cargo fmt -- --check
       - name: Native unit tests
         run: cargo test
