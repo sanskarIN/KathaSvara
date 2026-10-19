@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Avoid spending Windows CI time compiling superseded rapid development commits.
+concurrency:
+  group: kathasvara-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
     name: Python checks
