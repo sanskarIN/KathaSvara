@@ -1,0 +1,68 @@
+name: KathaSvara CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install lightweight unit-test dependencies
+        working-directory: services/inference
+        run: python -m pip install -e ".[test]"
+      - name: Ruff
+        working-directory: services/inference
+        run: python -m ruff check .
+      - name: Unit tests (no weights downloaded)
+        working-directory: services/inference
+        run: python -m pytest -q
+      - name: Exercise local JSON bridge
+        working-directory: services/inference
+        run: echo '{"action":"health"}' | python -m kathasvara.cli
+
+  frontend:
+    name: React build and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install frontend packages
+        run: npm install --no-audit --no-fund
+      - name: React unit tests
+        run: npm run test
+      - name: Typecheck and build
+        run: npm run build
+
+  rust-windows:
+    name: Windows Rust desktop checks
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Rust formatting
+        run: cargo fmt -- --check
+      - name: Native unit tests
+        run: cargo test
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
