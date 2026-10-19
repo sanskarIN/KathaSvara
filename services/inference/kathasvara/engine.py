@@ -6,6 +6,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
 
@@ -15,9 +16,9 @@ class VoiceSettings:
     cfg_weight: float = 0.5
 
     def validate(self) -> None:
-        if not 0.25 <= self.exaggeration <= 2.0:
+        if not math.isfinite(self.exaggeration) or not 0.25 <= self.exaggeration <= 2.0:
             raise ValueError("Expressiveness must be between 0.25 and 2.0.")
-        if not 0.0 <= self.cfg_weight <= 1.0:
+        if not math.isfinite(self.cfg_weight) or not 0.0 <= self.cfg_weight <= 1.0:
             raise ValueError("Guidance must be between 0.0 and 1.0.")
 
 
@@ -35,11 +36,14 @@ class ChatterboxHindi:
             raise RuntimeError(
                 'Speech engine missing. Install Python 3.11 and pip install -e ".[tts]".'
             ) from exc
-        device = (
-            "cuda" if torch.cuda.is_available()
-            else "mps" if torch.backends.mps.is_available()
-            else "cpu"
-        )
+        # Not every installed PyTorch build supports the MPS backend.
+        mps = getattr(torch.backends, "mps", None)
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif mps is not None and mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
         self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
 
     @property
