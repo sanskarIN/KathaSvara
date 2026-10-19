@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="KathaSvara — an open-source Hindi voice and storytelling production studio.">
+  <title>KathaSvara — Give Every Story a Voice</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.7 Inter, "Noto Sans Devanagari", system-ui, sans-serif; --bg:#0e1019; --text:#f8f6ff; --sub:#b8b2c7; --accent:#d0a5fa; --edge:#343145; }
+    * { box-sizing:border-box } body { margin:0; background:radial-gradient(ellipse at 80% 2%,#322040,#0e1019 58%); color:var(--text); }
+    a { color:var(--accent) } a:focus-visible { outline:3px solid var(--accent); outline-offset:4px }
+    .wrap { width:min(1080px,92%); margin:auto } header { display:flex; align-items:center; justify-content:space-between; padding:28px 0; gap:15px; }
+    .logo { font-weight:800; font-size:22px; letter-spacing:-.5px } .logo span { display:inline-grid; place-items:center; width:38px; height:38px; margin-right:9px; border-radius:12px; background:#cfa8fd; color:#271437 }
+    nav a { margin-left:19px; text-decoration:none; font-size:14px; }
+    .hero { max-width:820px; padding:100px 0 76px } .overline { font-size:12px; letter-spacing:3px; font-weight:750; color:var(--accent) }
+    h1 { font-size:clamp(48px,8vw,90px); letter-spacing:-4px; line-height:1.06; margin:22px 0 } h1 em { font-style:normal; color:var(--accent) }
+    .lede { color:var(--sub); font-size:19px; max-width:650px; }
+    .actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:32px } .button { display:inline-block; padding:14px 20px; background:#cba2ff; color:#251535; font-weight:750; border-radius:11px; text-decoration:none; }
+    .button.ghost { background:transparent; border:1px solid var(--edge); color:var(--text) }
+    .notice { border:1px solid var(--edge); background:#211c2a; border-radius:14px; padding:16px 20px; margin:0 0 50px; color:var(--sub) }
+    .notice strong { color:#f8cf9a }
+    h2 { font-size:32px; letter-spacing:-1px; margin:55px 0 22px }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px } .card { border-radius:18px; border:1px solid var(--edge); padding:28px; background:#181923; min-height:188px }
+    .card b { font-size:17px } .card p, .muted { color:var(--sub); font-size:14px }
+    .roadmap { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; padding-bottom:50px } .roadmap div { border-left:2px solid #8761b8; padding-left:16px } .roadmap span { display:block; color:var(--accent); font-size:14px }
+    footer { border-top:1px solid var(--edge); padding:25px 0 55px; color:var(--sub); font-size:14px }
+    .link-group { display:flex; gap:15px; flex-wrap:wrap }
+    @media(max-width:700px) { nav a { margin-left:9px; font-size:12px } .hero { padding:50px 0 } h1 { letter-spacing:-2px } .grid,.roadmap { grid-template-columns:1fr } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="logo"><span aria-hidden="true">क</span>KathaSvara</div><nav aria-label="Main"><a href="#features">Features</a><a href="#roadmap">Roadmap</a><a href="https://github.com/sanskarIN/KathaSvara">GitHub ↗</a></nav></header>
+  <main>
+    <section class="hero"><div class="overline">OPEN SOURCE · LOCAL FIRST · हिन्दी</div><h1>Give Every Story <em>a Voice.</em></h1>
+      <p class="lede">कथास्वर — a Hindi-first storytelling and audio production studio built with Python, Rust and TypeScript.</p>
+      <div class="actions"><a class="button" href="https://github.com/sanskarIN/KathaSvara">Explore source code ↗</a><a class="button ghost" href="https://github.com/sanskarIN/KathaSvara/blob/main/docs/installation/development.md">Development setup</a></div>
+    </section>
+    <aside class="notice"><strong>Development preview — not yet released.</strong> Hindi audio synthesis, Windows installers and full end-to-end desktop integration remain subject to real validation. No downloadable production build is advertised here.</aside>
+    <section id="features"><div class="overline">STUDIO FOUNDATION</div><h2>Built around Hindi stories</h2>
+      <div class="grid">
+        <article class="card"><b>01 · Story editor</b><p>Compose in Devanagari and preserve scripts in local project files.</p></article>
+        <article class="card"><b>02 · Local speech adapter</b><p>Optional Chatterbox multilingual model integration, awaiting full hardware testing.</p></article>
+        <article class="card"><b>03 · WAV workflow</b><p>Audio preview and WAV export code, requiring end-to-end validation.</p></article>
+      </div>
+    </section>
+    <section id="roadmap"><div class="overline">WHAT COMES NEXT</div><h2>Quality before speed</h2><div class="roadmap">
+      <div><span>v0.1.0 · Development</span><strong>Hindi voice foundation</strong><p class="muted">Validate the model, UI and audio export before first pre-release.</p></div>
+      <div><span>v0.1.1 · Planned</span><strong>Runtime reliability</strong><p class="muted">Compatibility, packaging and stronger fault recovery.</p></div>
+      <div><span>v0.2.0 · Planned</span><strong>Multiple characters</strong><p class="muted">Speaker assignment and reusable voice profiles.</p></div>
+    </div></section>
+    <section><div class="overline">MADE FOR STORYTELLERS</div><h2>कहानी वाली शाम</h2><p class="muted">हर शाम, एक नई कहानी। Explore the <a href="https://www.youtube.com/@KahaniWaliShaam">Hindi Kahani YouTube channel</a>.</p></section>
+    <section><h2>Support this open-source project</h2><p class="muted">Support is entirely voluntary. No donation unlocks functionality.</p><div class="link-group"><a href="https://buymeacoffee.com/SanskarCodes">Buy Me a Coffee ↗</a><a href="https://razorpay.me/@SanskarCodes">Razorpay ↗</a><a href="https://paypal.me/SanskarCodes">PayPal.me ↗</a></div></section>
+  </main>
+  <footer><p>MPL-2.0 original source · Model weights and third-party assets retain their own terms.</p><div class="link-group"><a href="https://github.com/sanskarIN">Creator GitHub</a><a href="https://sanskarin.github.io">Personal website</a><a href="https://sanskarin.github.io/contact/#send-a-message">Contact</a><a href="mailto:sanskarprogrammer@gmail.com">Email</a><a href="https://github.com/sanskarIN/KathaSvara/blob/main/LICENSE">License</a></div></footer>
+</div>
+</body>
+</html>
