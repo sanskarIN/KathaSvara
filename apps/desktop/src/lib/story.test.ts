@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
-import { countText, readSavedNumber, validateText } from "./story";
+import { countText, importedStoryTitle, readSavedNumber, validateText } from "./story";
 
 describe("Hindi editor", () => {
   it("counts Unicode text without stripping Devanagari marks", () => {
@@ -30,5 +30,22 @@ describe("safe saved voice settings", () => {
   it("accepts permitted persisted values, including zero guidance", () => {
     expect(readSavedNumber("0.7", 0.25, 2, 0.5)).toBe(0.7);
     expect(readSavedNumber("0", 0, 1, 0.5)).toBe(0);
+  });
+});
+
+describe("plain text story import", () => {
+  it("accepts case-insensitive TXT and Markdown extensions", () => {
+    expect(importedStoryTitle("राजा भोज.md")).toBe("राजा भोज");
+    expect(importedStoryTitle("my-story.TXT")).toBe("my-story");
+  });
+
+  it("rejects binary file types and blank filenames", () => {
+    expect(importedStoryTitle("model.bin")).toBeNull();
+    expect(importedStoryTitle("secret.json")).toBeNull();
+    expect(importedStoryTitle(".txt")).toBe("Imported story");
+  });
+
+  it("keeps project titles inside storage limits", () => {
+    expect(importedStoryTitle("a".repeat(200) + ".txt")?.length).toBe(120);
   });
 });
