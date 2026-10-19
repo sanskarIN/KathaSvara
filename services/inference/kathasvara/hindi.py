@@ -14,7 +14,7 @@ MAX_CHUNK_LENGTH = 280
 def normalize_hindi(text: str) -> str:
     """Normalize Unicode and whitespace without rewriting words or amounts."""
     if not isinstance(text, str):
-        raise ValueError("Story text must be a string.")
+        raise TypeError("Story text must be a string.")
     normalized = unicodedata.normalize(
         "NFC", text.replace("\r\n", "\n").replace("\r", "\n")
     )
