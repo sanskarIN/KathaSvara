@@ -60,3 +60,9 @@ Provide a JSON request through stdin:
     {"action":"synthesize","text":"नमस्कार! कथास्वर में आपका स्वागत है।","output":"OUTPUT","exaggeration":0.5,"cfg_weight":0.5}
 
 A successful response must include output WAV metadata. Listen to the file and independently check Hindi pronunciation, pauses and artifacts. A passing Python unit test or JSON health check alone does **not** establish model readiness.
+
+## Story import and Hindi inspection
+
+The Story editor can import a UTF-8 `.txt` or `.md` file using the operating system's file chooser. Only files up to 250 KB are accepted. Import starts a new unsaved project and asks before replacing the current editor. Larger stories can be preserved as text but must be split into smaller generation jobs (3000 Unicode code points per request).
+
+Use **Inspect Hindi pronunciation text** to see the exact normalized text and speech chunks. This offline inspection requires the Python bridge but does not load or download a speech model. It does not change the story unless **Apply normalized text** is selected. Edits to text or voice controls invalidate the audio preview so stale audio cannot be accidentally exported. The current worker has a 10-minute speech-generation timeout; this is a safety limit rather than a performance guarantee.
