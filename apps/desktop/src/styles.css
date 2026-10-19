@@ -117,3 +117,14 @@ audio { display: block; width: 100%; margin: 13px 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Inspection remains opt-in: users can review text changes before synthesis. */
+.inspect-button { margin-top: 18px; }
+.inspection-panel { margin-top: 15px; border: 1px solid var(--border); padding: 16px; background: var(--surface-2); border-radius: 12px; }
+.inspection-panel p { margin: 9px 0; }
+.inspection-panel details { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 11px; }
+.inspection-panel summary { cursor: pointer; font-weight: 650; font-size: 12px; }
+.inspection-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.8 "Noto Sans Devanagari", "Mangal", sans-serif; }
+.inspection-panel ol { max-height: 230px; overflow-y: auto; padding-left: 23px; color: var(--muted); font-size: 13px; }
+.inspection-panel li { margin: 7px 0; line-height: 1.65; }
+.inspection-panel .secondary-button { margin-top: 12px; }
