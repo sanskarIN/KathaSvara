@@ -22,3 +22,23 @@ The desktop serializes a request, starts one Python process, reads JSON output a
 Only allowlisted commands are exposed to the renderer. The Python interpreter may be overridden by an environment variable for development; the application does not execute arbitrary user-supplied command text. Generated audio output paths are constructed from UUIDs under app data. The WAV export destination comes from a native user save dialog and refuses to overwrite an existing file.
 
 All handwritten application source is licensed under MPL-2.0. Third-party model/weight licenses remain independent.
+
+## Inspect-before-synthesize contract (development)
+
+A local inspection request is available without installing or loading a model:
+
+```json
+{"action":"inspect","text":" राजा  भोज।\nक्या हुआ?"}
+```
+
+A successful response contains `ok: true`, `result.normalized`, `result.characters`, `result.chunk_count`, `result.chunks`, and `result.changed`. The renderer shows the exact normalized Hindi and proposed speech segments for review; it does not silently overwrite the original script. Applying normalized text is an explicit user action.
+
+Voice parameters `exaggeration` and `cfg_weight` are validated as finite numbers; unsupported emotion or fake voice-identity controls are not exposed.
+
+## Process and export limits
+
+The current one-shot Python subprocess has a 15-second timeout for health and inspection and a 600-second timeout for real synthesis. Failure terminates the child process; this is a basic safety boundary and is not a replacement for cancellation or a supervised persistent model worker. Engine logs emitted to stdout may precede the final JSON response; only the final valid JSON line is considered.
+
+Rust checks the RIFF header, chunk boundaries, mono PCM16 format and non-empty sample data before allowing playback/export. Native WAV export refuses to overwrite existing files. This does not establish natural voice quality; real Hindi listening tests remain mandatory.
+
+Local TXT/Markdown import is browser-mediated by an explicitly selected file. The app does not receive a general read-filesystem capability. Files must be 250 KB or smaller and import creates a new, unsaved story. Voice preferences and UI theme use the local WebView storage; story projects are saved separately in app data.
