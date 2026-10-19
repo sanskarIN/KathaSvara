@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   AudioResult,
   countText,
+  importedStoryTitle,
   GenerationStatus,
   STARTER_STORY,
   StoryProject,
@@ -80,6 +81,38 @@ export default function App() {
   function changeGuidance(value: number) {
     invalidateGeneration();
     setCfgWeight(value);
+  }
+
+  async function importStoryFile(event: ChangeEvent<HTMLInputElement>) {
+    const picker = event.currentTarget;
+    const file = picker.files?.item(0);
+    picker.value = "";
+    if (!file) return;
+    const title = importedStoryTitle(file.name);
+    if (!title) {
+      setMessage("Only UTF-8 .txt and .md story files can be imported.");
+      return;
+    }
+    if (file.size > 250_000) {
+      setMessage("Story file is too large. The 250 KB import limit protects the editor.");
+      return;
+    }
+    if (project.text.trim() && !window.confirm("Replace the current editor with a new imported story? Save the current project first if needed.")) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (text.includes("\u0000")) {
+        setMessage("The selected file appears to be binary rather than a text story.");
+        return;
+      }
+      invalidateGeneration();
+      setProject({ id: "", title, text: text.replace(/\r\n?/g, "\n") });
+      setMessage("Story imported as a new unsaved project. Review it before generating or saving.");
+      setPage("studio");
+    } catch (error) {
+      setMessage("Unable to read selected story file: " + errorMessage(error));
+    }
   }
 
   async function inspectScript() {
@@ -236,6 +269,8 @@ export default function App() {
                 <label htmlFor="story-text" className="field-label">NARRATION TEXT</label>
                 <textarea id="story-text" className="story-text" lang="hi" spellCheck value={project.text} onChange={(e) => changeScript(e.target.value)} aria-describedby="script-stats" placeholder="अपनी कहानी यहाँ लिखें..." />
                 <div id="script-stats" className="editor-footer"><span>{counts.characters.toLocaleString("en-IN")} / 3,000 characters</span><span>{counts.words} words</span></div>
+                <label className="import-control" htmlFor="import-story">Import UTF-8 text or Markdown story</label>
+                <input id="import-story" type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => void importStoryFile(event)} />
                 <button className="quiet-button inspect-button" disabled={working} onClick={() => void inspectScript()}>Inspect Hindi pronunciation text ↗</button>
                 {inspection && (
                   <div className="inspection-panel" aria-label="Hindi text inspection">
