@@ -99,7 +99,7 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<StoryProject>, String> {
             }
         }
     }
-    items.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    items.sort_by_key(|a| a.title.to_lowercase());
     Ok(items)
 }
 
