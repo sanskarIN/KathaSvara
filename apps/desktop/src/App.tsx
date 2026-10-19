@@ -9,6 +9,8 @@ import {
   STARTER_STORY,
   StoryProject,
   SUPPORT_LINKS,
+  TextInspection,
+  readSavedNumber,
   validateText,
 } from "./lib/story";
 
@@ -28,19 +30,75 @@ export default function App() {
     id: "", title: "मेरी पहली कहानी", text: STARTER_STORY,
   });
   const [projects, setProjects] = useState<StoryProject[]>([]);
-  const [exaggeration, setExaggeration] = useState(0.5);
-  const [cfgWeight, setCfgWeight] = useState(0.5);
+  const [exaggeration, setExaggeration] = useState(() =>
+    readSavedNumber(localStorage.getItem("kathasvara-exaggeration"), 0.25, 2, 0.5),
+  );
+  const [cfgWeight, setCfgWeight] = useState(() =>
+    readSavedNumber(localStorage.getItem("kathasvara-guidance"), 0, 1, 0.5),
+  );
+  const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [status, setStatus] = useState<GenerationStatus>("waiting");
   const [message, setMessage] = useState("अभी तक कोई ऑडियो तैयार नहीं हुआ है।");
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const [working, setWorking] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  // Invalidates in-flight results when the user edits any generation input.
+  const generationRevision = useRef(0);
   const counts = countText(project.text);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("kathasvara-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("kathasvara-exaggeration", String(exaggeration));
+    localStorage.setItem("kathasvara-guidance", String(cfgWeight));
+  }, [exaggeration, cfgWeight]);
+
+  function invalidateGeneration() {
+    generationRevision.current += 1;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setAudio(null);
+    setInspection(null);
+    setStatus("waiting");
+  }
+
+  function changeScript(text: string) {
+    invalidateGeneration();
+    setProject((previous) => ({ ...previous, text }));
+  }
+
+  function changeExaggeration(value: number) {
+    invalidateGeneration();
+    setExaggeration(value);
+  }
+
+  function changeGuidance(value: number) {
+    invalidateGeneration();
+    setCfgWeight(value);
+  }
+
+  async function inspectScript() {
+    const error = validateText(project.text);
+    if (error) {
+      setMessage(error);
+      return;
+    }
+    const revision = generationRevision.current;
+    try {
+      const inspected = await invoke<TextInspection>("inspect_script", { text: project.text });
+      if (revision !== generationRevision.current) return;
+      setInspection(inspected);
+      setMessage("Review how Hindi will be normalized and split before generating.");
+    } catch (error) {
+      setInspection(null);
+      setMessage("Inspection failed: " + errorMessage(error));
+    }
+  }
 
   async function refreshProjects() {
     try {
@@ -53,8 +111,10 @@ export default function App() {
   async function saveProject() {
     try {
       const updated = await invoke<StoryProject>("save_project", { project });
-      setProject(updated);
-      setMessage("Project saved locally.");
+      setProject((current) =>
+        current.id === project.id ? { ...current, id: updated.id } : current,
+      );
+      setMessage("Project saved locally. Changes made during saving may need another save.");
       await refreshProjects();
     } catch (error) {
       setMessage("Save failed: " + errorMessage(error));
@@ -64,9 +124,8 @@ export default function App() {
   async function openProject(id: string) {
     try {
       const loaded = await invoke<StoryProject>("load_project", { id });
+      invalidateGeneration();
       setProject(loaded);
-      setAudio(null);
-      setStatus("waiting");
       setPage("studio");
       setMessage("Project loaded. Generate a new preview when ready.");
     } catch (error) {
@@ -81,6 +140,7 @@ export default function App() {
       setMessage(invalid);
       return;
     }
+    const revision = generationRevision.current;
     setWorking(true);
     setAudio(null);
     setStatus("loading");
@@ -91,12 +151,18 @@ export default function App() {
         exaggeration,
         cfgWeight,
       });
+      if (revision !== generationRevision.current) {
+        setMessage("Script or voice settings changed during synthesis. Generate again to hear the new version.");
+        return;
+      }
       setAudio(result);
       setStatus("completed");
       setMessage("Hindi WAV ready. Listen before exporting to check pronunciation and quality.");
     } catch (error) {
-      setStatus("failed");
-      setMessage(errorMessage(error));
+      if (revision === generationRevision.current) {
+        setStatus("failed");
+        setMessage(errorMessage(error));
+      }
     } finally {
       setWorking(false);
     }
@@ -168,17 +234,39 @@ export default function App() {
                 <label htmlFor="story-title" className="field-label">PROJECT TITLE</label>
                 <input id="story-title" className="title-input" value={project.title} maxLength={120} onChange={(e) => setProject({ ...project, title: e.target.value })} />
                 <label htmlFor="story-text" className="field-label">NARRATION TEXT</label>
-                <textarea id="story-text" className="story-text" lang="hi" spellCheck value={project.text} onChange={(e) => setProject({ ...project, text: e.target.value })} aria-describedby="script-stats" placeholder="अपनी कहानी यहाँ लिखें..." />
+                <textarea id="story-text" className="story-text" lang="hi" spellCheck value={project.text} onChange={(e) => changeScript(e.target.value)} aria-describedby="script-stats" placeholder="अपनी कहानी यहाँ लिखें..." />
                 <div id="script-stats" className="editor-footer"><span>{counts.characters.toLocaleString("en-IN")} / 3,000 characters</span><span>{counts.words} words</span></div>
+                <button className="quiet-button inspect-button" disabled={working} onClick={() => void inspectScript()}>Inspect Hindi pronunciation text ↗</button>
+                {inspection && (
+                  <div className="inspection-panel" aria-label="Hindi text inspection">
+                    <div className="section-label">BEFORE GENERATION</div>
+                    <p>{inspection.characters} normalized characters · {inspection.chunk_count} speech segment(s)</p>
+                    <p>{inspection.changed
+                      ? "Spaces or Unicode normalization changed. Original script has not been modified."
+                      : "No normalization changes needed."}</p>
+                    <details>
+                      <summary>Show exact text and speech segments</summary>
+                      <pre lang="hi">{inspection.normalized}</pre>
+                      <ol lang="hi">{inspection.chunks.map((part, index) => (
+                        <li key={index}>{part}</li>
+                      ))}</ol>
+                    </details>
+                    {inspection.changed && (
+                      <button className="secondary-button" onClick={() => changeScript(inspection.normalized)}>
+                        Apply normalized text to editor
+                      </button>
+                    )}
+                  </div>
+                )}
               </section>
               <div className="right-column">
                 <section className="panel voice-panel">
                   <div className="section-label">02 / VOICE</div><h2>Voice settings</h2>
                   <div className="engine"><span className="engine-mark">◈</span><div><strong>Chatterbox Multilingual</strong><small>Local model · Hindi (hi)</small></div><span className="experimental">Setup required</span></div>
                   <label className="range-label" htmlFor="exaggeration">Expressiveness <strong>{exaggeration.toFixed(2)}</strong></label>
-                  <input id="exaggeration" type="range" min="0.25" max="2" step="0.05" value={exaggeration} onChange={(e) => setExaggeration(Number(e.target.value))} />
-                  <label className="range-label" htmlFor="cfg">Guidance / Pace <strong>{cfgWeight.toFixed(2)}</strong></label>
-                  <input id="cfg" type="range" min="0" max="1" step="0.05" value={cfgWeight} onChange={(e) => setCfgWeight(Number(e.target.value))} />
+                  <input id="exaggeration" type="range" min="0.25" max="2" step="0.05" value={exaggeration} onChange={(e) => changeExaggeration(Number(e.target.value))} />
+                  <label className="range-label" htmlFor="cfg">CFG guidance <strong>{cfgWeight.toFixed(2)}</strong></label>
+                  <input id="cfg" type="range" min="0" max="1" step="0.05" value={cfgWeight} onChange={(e) => changeGuidance(Number(e.target.value))} />
                   <p className="helper">Only controls supported by the selected model are shown. Generating does not upload your script.</p>
                   <button className="primary-button" disabled={working} onClick={() => void generate()}>{working ? "Generating speech…" : "✦ Generate Hindi Voice"}</button>
                 </section>
@@ -198,7 +286,7 @@ export default function App() {
           )}
 
           {page === "projects" && (
-            <section className="panel"><div className="panel-heading"><div className="section-label">YOUR WORK</div><button className="secondary-button" onClick={() => { setProject({ id:"", title:"नई कहानी", text:"" }); setAudio(null); setStatus("waiting"); setPage("studio"); }}>+ New story</button></div>
+            <section className="panel"><div className="panel-heading"><div className="section-label">YOUR WORK</div><button className="secondary-button" onClick={() => { invalidateGeneration(); setProject({ id:"", title:"नई कहानी", text:"" }); setPage("studio"); }}>+ New story</button></div>
               <h2>Saved stories</h2><p>Stored in the application data folder on this device.</p>
               {projects.length === 0 ? <div className="empty-preview">No saved projects yet. Save a script in Voice Studio.</div> : <ul className="project-list">{projects.map((item) => <li key={item.id}><div><strong>{item.title}</strong><small>{countText(item.text).characters} characters</small></div><button className="secondary-button" onClick={() => void openProject(item.id)}>Open →</button></li>)}</ul>}
             </section>
