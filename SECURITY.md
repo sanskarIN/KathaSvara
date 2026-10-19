@@ -13,6 +13,7 @@ Report privately using the [contact page](https://sanskarin.github.io/contact/#s
 - Model checkpoints may be downloaded by Chatterbox on first use. Review repository/model provenance, checkpoint formats and terms before installing.
 - Current source is not a self-contained installer and has not been independently security audited.
 - The desktop renderer is granted only core permissions and a save-file dialog; exported WAVs are restricted to generated audio IDs.
+- A dedicated delete command removes only generated UUID-named `.wav` files in the application's audio directory. Clearing a preview or editing generation inputs removes the previous cached WAV where possible; a failed cleanup is reported or tolerated without exposing unrestricted filesystem deletion.
 - User scripts and voices should remain private. Consent is required to use another person's voice samples.
 
 Never disclose credentials, access tokens or private sample audio in issues, logs or pull requests.
