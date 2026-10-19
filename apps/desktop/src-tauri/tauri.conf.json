@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KathaSvara",
+  "version": "0.1.0",
+  "identifier": "io.github.sanskarin.kathasvara",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "KathaSvara — कथास्वर",
+        "width": 1220,
+        "height": 790,
+        "minWidth": 900,
+        "minHeight": 610
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; media-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
