@@ -2,7 +2,7 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Development status:** v0.1.0 remains **under development**. Source code now includes a genuine Chatterbox Multilingual adapter, but a real Hindi model-generation run, complete desktop build and Windows installer have **not yet been verified**. This is not a completed standalone release.
+> **Pre-release scope:** v0.1.0 is a **source-only developer preview**, not a standalone or stable application. The GitHub release job publishes only after automated checks pass; check [Releases](https://github.com/sanskarIN/KathaSvara/releases) for publication status. Real Hindi model generation, audible quality, the launched Windows desktop and any installer remain **unverified**. No desktop binaries or voice samples are provided.
 
 ## What the development source implements
 
@@ -17,7 +17,7 @@
 - Detect stale audio when the script or voice settings change; bound Python inference runtime and validate WAV chunk integrity.
 - Python, Rust and TypeScript unit-test foundations.
 
-Source components may require integration fixes before the milestone can be published. No model weights or sample generated voices are bundled.
+This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.1.0 pre-release notes](docs/releases/v0.1.0-notes.md) for precise limitations.
 
 ## Quick start (development mode only)
 
