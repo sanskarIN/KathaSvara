@@ -5,7 +5,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, Any
+from typing import Any, Protocol
 
 from .engine import ChatterboxHindi, VoiceSettings
 from .hindi import split_for_engine, validate_story
