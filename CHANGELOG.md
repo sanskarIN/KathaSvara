@@ -19,6 +19,8 @@
 - Reject NaN/Infinity voice parameters and use safer optional GPU-backend detection.
 - Bound the local Python worker execution time and validate WAV chunk structure before playback/export.
 - Added test cases and tightened CI scheduling to cancel superseded runs.
+- Added explicit **Clear preview** handling and UUID-scoped deletion of cached WAV files when audio becomes stale.
+- Clean up UUID-specific partial audio output if an inference worker fails or times out.
 
 ### Not yet verified
 
