@@ -73,3 +73,43 @@ jobs:
         run: cargo test
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  preview-release:
+    name: Publish v0.1.0 source-only pre-release
+    # Explicit one-time opt-in; never release on ordinary commits or pull requests.
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'release: publish v0.1.0 developer pre-release' }}
+    needs: [python, frontend, rust-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse duplicate v0.1.0 tag or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.0" > /dev/null 2>&1; then
+            echo "::error::v0.1.0 Git tag already exists; refusing to overwrite it."
+            exit 1
+          fi
+          if gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::v0.1.0 release already exists."
+            exit 1
+          fi
+      - name: Publish explicitly scoped developer preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.1.0 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "KathaSvara v0.1.0 — Developer Preview (Source Only)" \
+            --notes-file docs/releases/v0.1.0-notes.md \
+            --prerelease
+      - name: Confirm release visibility and pre-release flag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.1.0" \
+            --jq '"Release: " + .html_url + " | prerelease=" + (.prerelease|tostring)'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.1.0" --jq '.prerelease')" = "true"
