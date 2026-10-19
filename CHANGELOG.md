@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v0.1.0 development
+## v0.1.0 — Source-only developer preview (pre-release candidate)
 
 ### Added
 
@@ -25,3 +25,5 @@
 ### Not yet verified
 
 Real Hindi synthesis, supported OS desktop launches, complete end-to-end export, dependency compatibility, Windows packaging and standalone release artifacts. No v0.1.0 GitHub Release is claimed here.
+
+> Publication is performed only by the passing v0.1.0 GitHub Actions release job. This changelog does not by itself confirm that a GitHub Release is live.
