@@ -10,6 +10,8 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
 use tauri::Manager;
 use uuid::Uuid;
@@ -23,6 +25,15 @@ struct StoryProject {
     id: String,
     title: String,
     text: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TextInspection {
+    normalized: String,
+    characters: usize,
+    chunks: Vec<String>,
+    chunk_count: usize,
+    changed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,9 +144,41 @@ fn invoke_python(request: Value) -> Result<Value, String> {
             .write_all(request.to_string().as_bytes())
             .map_err(|_| "Unable to send synthesis request.".to_string())?;
     }
+    let max_wait = if request.get("action").and_then(Value::as_str) == Some("synthesize") {
+        Duration::from_secs(600)
+    } else {
+        Duration::from_secs(15)
+    };
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Unable to monitor the local inference process.".into());
+            }
+        }
+        if started.elapsed() >= max_wait {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Local inference timed out. Check model installation or hardware.".into());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
     let response = child.wait_with_output().map_err(|e| e.to_string())?;
-    let data: Value = serde_json::from_slice(&response.stdout)
-        .map_err(|_| "Inference service did not return valid JSON.".to_string())?;
+    if response.stdout.len() > 1_048_576 {
+        return Err("Inference response exceeds the maximum allowed size.".into());
+    }
+    // Upstream model libraries may print progress to stdout. The final JSON
+    // response is a complete line, not necessarily the entire output stream.
+    let data: Value = response
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+        .last()
+        .ok_or_else(|| "Inference service did not return valid JSON.".to_string())?;
     if !response.status.success() || data.get("ok") != Some(&Value::Bool(true)) {
         return Err(
             data.get("message").and_then(Value::as_str)
@@ -144,6 +187,21 @@ fn invoke_python(request: Value) -> Result<Value, String> {
         );
     }
     Ok(data)
+}
+
+#[tauri::command]
+async fn inspect_script(text: String) -> Result<TextInspection, String> {
+    if text.trim().is_empty() || text.chars().count() > MAX_TEXT_LENGTH {
+        return Err("Enter between 1 and 3000 characters of story text.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({"action": "inspect", "text": text}))?;
+        serde_json::from_value(
+            response.get("result").cloned().ok_or("Missing inspection data.")?
+        ).map_err(|_| "Malformed Hindi inspection response.".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -231,7 +289,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, check_engine, synthesize, export_wav
+            save_project, load_project, list_projects, inspect_script, check_engine, synthesize, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
