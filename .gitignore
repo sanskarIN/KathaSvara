@@ -1,0 +1,25 @@
+# Local runtimes, credentials, generated audio, and models
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.huggingface/
+models/
+outputs/
+*.wav
+*.mp3
+*.flac
+*.ogg
+node_modules/
+dist/
+target/
+apps/desktop/src-tauri/gen/
+.DS_Store
+Thumbs.db
+*.log
