@@ -12,7 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 tts = ["chatterbox-tts", "numpy>=1.24", "soundfile>=0.12"]
-test = ["pytest>=8", "ruff>=0.7"]
+test = ["pytest>=8", "ruff>=0.7", "numpy>=1.24", "soundfile>=0.12"]
 
 [tool.setuptools.packages.find]
 include = ["kathasvara*"]
