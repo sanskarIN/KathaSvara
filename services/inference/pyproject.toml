@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kathasvara-inference"
+version = "0.1.0"
+description = "Offline-first Hindi storytelling speech adapter"
+requires-python = ">=3.11"
+license = {text = "MPL-2.0"}
+dependencies = []
+
+[project.optional-dependencies]
+tts = ["chatterbox-tts", "numpy>=1.24", "soundfile>=0.12"]
+test = ["pytest>=8", "ruff>=0.7"]
+
+[tool.setuptools.packages.find]
+include = ["kathasvara*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
