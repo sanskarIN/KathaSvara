@@ -351,5 +351,44 @@ mod tests {
     #[test]
     fn riff_validation_rejects_invalid_bytes() {
         assert!(inspect_wav(&[0u8; 50]).is_err());
+        assert!(inspect_wav(b"RIFF").is_err());
+    }
+
+    fn minimal_pcm_wav() -> Vec<u8> {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&38u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&24_000u32.to_le_bytes());
+        wav.extend_from_slice(&48_000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&2u32.to_le_bytes());
+        wav.extend_from_slice(&[0u8, 0u8]);
+        wav
+    }
+
+    #[test]
+    fn wav_validation_accepts_mono_pcm16() {
+        assert!(inspect_wav(&minimal_pcm_wav()).is_ok());
+    }
+
+    #[test]
+    fn wav_validation_rejects_corrupt_chunk_length() {
+        let mut wav = minimal_pcm_wav();
+        wav[40..44].copy_from_slice(&100u32.to_le_bytes());
+        assert!(inspect_wav(&wav).is_err());
+    }
+
+    #[test]
+    fn wav_validation_rejects_bad_channel_count() {
+        let mut wav = minimal_pcm_wav();
+        wav[22..24].copy_from_slice(&2u16.to_le_bytes());
+        assert!(inspect_wav(&wav).is_err());
     }
 }
