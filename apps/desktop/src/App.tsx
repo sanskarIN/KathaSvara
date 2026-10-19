@@ -63,6 +63,11 @@ export default function App() {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
+    if (audio) {
+      void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {
+        // A failed cache cleanup must not block further editing.
+      });
+    }
     setAudio(null);
     setInspection(null);
     setStatus("waiting");
@@ -185,6 +190,7 @@ export default function App() {
         cfgWeight,
       });
       if (revision !== generationRevision.current) {
+        void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
         setMessage("Script or voice settings changed during synthesis. Generate again to hear the new version.");
         return;
       }
@@ -198,6 +204,19 @@ export default function App() {
       }
     } finally {
       setWorking(false);
+    }
+  }
+
+  async function clearPreview() {
+    if (!audio) return;
+    const audioId = audio.audio_id;
+    setAudio(null);
+    setStatus("waiting");
+    try {
+      await invoke("discard_audio", { audioId });
+      setMessage("Local generated-audio preview deleted.");
+    } catch (error) {
+      setMessage("Preview hidden, but cache cleanup failed: " + errorMessage(error));
     }
   }
 
@@ -312,7 +331,7 @@ export default function App() {
                     <>
                       <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated Hindi WAV preview" />
                       <div className="audio-meta">{audio.duration_seconds.toFixed(1)} sec · {audio.sample_rate} Hz · {audio.chunks} chunk(s)</div>
-                      <div className="preview-actions"><button className="quiet-button" onClick={() => { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } }}>■ Stop</button><button className="secondary-button" onClick={() => void exportWav()}>Export WAV ↓</button></div>
+                      <div className="preview-actions"><button className="quiet-button" onClick={() => { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } }}>■ Stop</button><button className="quiet-button" onClick={() => void clearPreview()}>Clear preview</button><button className="secondary-button" onClick={() => void exportWav()}>Export WAV ↓</button></div>
                     </>
                   ) : <div className="empty-preview"><div className="waveform" aria-hidden="true">▂ ▆ ▃ █ ▅ ▇ ▃ ▅ ▂ ▆ ▃</div><span>Your audio preview appears here.</span></div>}
                 </section>
