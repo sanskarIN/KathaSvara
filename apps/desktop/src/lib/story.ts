@@ -14,6 +14,27 @@ export interface AudioResult {
   chunks: number;
 }
 
+export interface TextInspection {
+  normalized: string;
+  characters: number;
+  chunks: string[];
+  chunk_count: number;
+  changed: boolean;
+}
+
+export function readSavedNumber(
+  raw: string | null,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  if (raw === null || !raw.trim()) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : fallback;
+}
+
 export type GenerationStatus = "waiting" | "loading" | "completed" | "failed";
 
 export const STARTER_STORY =
