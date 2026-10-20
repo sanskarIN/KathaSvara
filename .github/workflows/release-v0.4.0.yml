@@ -200,10 +200,10 @@ jobs:
       - name: Confirm synchronized release versions
         run: |
           set -euo pipefail
-          grep -q '"version": "0.3.0"' apps/desktop/package.json
-          grep -q '"version": "0.3.0"' apps/desktop/src-tauri/tauri.conf.json
-          grep -q 'version = "0.3.0"' apps/desktop/src-tauri/Cargo.toml
-          grep -q 'version = "0.3.0"' services/inference/pyproject.toml
+          grep -q '"version": "0.4.0"' apps/desktop/package.json
+          grep -q '"version": "0.4.0"' apps/desktop/src-tauri/tauri.conf.json
+          grep -q 'version = "0.4.0"' apps/desktop/src-tauri/Cargo.toml
+          grep -q 'version = "0.4.0"' services/inference/pyproject.toml
           grep -q 'v0.4.0' release-assets/README.txt
       - name: Publish experimental release from tested SHA
         env:
