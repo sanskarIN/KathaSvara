@@ -2,7 +2,7 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Pre-release scope:** v0.1.0 is a **source-only developer preview**, not a standalone or stable application. The GitHub release job publishes only after automated checks pass; check [Releases](https://github.com/sanskarIN/KathaSvara/releases) for publication status. Real Hindi model generation, audible quality, the launched Windows desktop and any installer remain **unverified**. No desktop binaries or voice samples are provided.
+> **Latest release:** [v0.1.0 — Developer Preview (Source Only)](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) is **published as a GitHub pre-release**, not a standalone or stable application. Python, React and Windows Rust CI passed; real Hindi model generation, audible quality, the launched Windows desktop and installer packaging remain **unverified**. No desktop binaries, model weights or generated voice samples are included.
 
 ## What the development source implements
 
