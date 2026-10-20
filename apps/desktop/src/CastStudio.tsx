@@ -171,7 +171,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       const response = await invoke<DialogueParseResponse>("parse_dialogue", {
         title: document.title, text: document.text,
-        characters: document.characters.filter(char => char.id !== "narrator"),
+        characters: document.characters,
         scriptId: document.id,
       });
       if (!response.ok) throw new Error("Dialogue parser returned an unsuccessful response.");
