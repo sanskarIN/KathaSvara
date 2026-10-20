@@ -20,6 +20,15 @@ import {
 
 type Page = "studio" | "cast" | "projects" | "settings" | "about";
 type Theme = "dark" | "light";
+type CacheStats = { files: number; bytes: number; ignored_entries: number };
+type CachePruneReport = {
+  files_before: number; bytes_before: number; candidates: number;
+  bytes_reclaimable: number; dry_run: boolean; ignored_entries: number;
+};
+const CACHE_TARGET_MIB = 512;
+function asMiB(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -45,6 +54,9 @@ export default function App() {
   const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
+  const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
+  const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
+  const [checkingCache, setCheckingCache] = useState(false);
   const [status, setStatus] = useState<GenerationStatus>("waiting");
   const [message, setMessage] = useState("अभी तक कोई ऑडियो तैयार नहीं हुआ है।");
   const [audio, setAudio] = useState<AudioResult | null>(null);
@@ -266,6 +278,58 @@ export default function App() {
     }
   }
 
+  async function inspectCache() {
+    setCheckingCache(true);
+    try {
+      const report = await invoke<CacheStats>("inspect_segment_cache");
+      setCacheStats(report);
+      setCachePlan(null);
+      setMessage("Cache inspection complete. No files were changed.");
+    } catch (error) {
+      setMessage("Cache inspection failed: " + errorMessage(error));
+    } finally {
+      setCheckingCache(false);
+    }
+  }
+
+  async function previewCacheCleanup() {
+    setCheckingCache(true);
+    setCachePlan(null);
+    try {
+      const plan = await invoke<CachePruneReport>("prune_segment_cache", {
+        maxMib: CACHE_TARGET_MIB, dryRun: true,
+      });
+      setCachePlan(plan);
+      setMessage("Cache cleanup preview only; no files were deleted.");
+    } catch (error) {
+      setMessage("Cannot preview cache cleanup: " + errorMessage(error));
+    } finally {
+      setCheckingCache(false);
+    }
+  }
+
+  async function applyCacheCleanup() {
+    if (!cachePlan || cachePlan.candidates === 0) return;
+    if (!window.confirm(
+      `Delete eligible old cached speech segments above ${CACHE_TARGET_MIB} MiB? ` +
+      "Source projects and exported audio will not be touched. Deleted cached segments must be regenerated.",
+    )) return;
+    setCheckingCache(true);
+    setCachePlan(null);
+    try {
+      const result = await invoke<CachePruneReport>("prune_segment_cache", {
+        maxMib: CACHE_TARGET_MIB, dryRun: false,
+      });
+      setCacheStats(await invoke<CacheStats>("inspect_segment_cache"));
+      setMessage(`Removed ${asMiB(result.bytes_reclaimable)} of old segment-cache entries. ` +
+        "Projects and exported audio were not touched.");
+    } catch (error) {
+      setMessage("Cache cleanup failed: " + errorMessage(error));
+    } finally {
+      setCheckingCache(false);
+    }
+  }
+
   async function checkRuntime() {
     try {
       const result = await invoke<string>("check_engine");
@@ -299,7 +363,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <span className="side-tag">LOCAL FIRST</span>
           <p>Your scripts stay on your machine. No account required.</p>
-          <small>v0.2.0 · Development / Not released</small>
+          <small>v0.2.2 development · v0.2.1 preview published</small>
         </div>
       </aside>
 
@@ -395,6 +459,32 @@ export default function App() {
                 {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
               </button>
               <p className="helper">A successful bridge or dependency check does not confirm model weights or a real Hindi voice test.</p>
+              <section aria-label="Local segment-cache maintenance" className="diagnostic-report">
+                <h3>Generated segment cache</h3>
+                <p>Inspect or explicitly clean old content-addressed speech chunks.
+                  The 512 MiB cleanup retains files newer than 10 minutes and does
+                  not touch saved projects, generated previews, or exported WAV files.
+                  Older removed segments will require synthesis again.</p>
+                <div className="preview-actions">
+                  <button className="secondary-button" disabled={checkingCache}
+                    onClick={() => void inspectCache()}>Inspect cache</button>
+                  <button className="secondary-button" disabled={checkingCache}
+                    onClick={() => void previewCacheCleanup()}>Preview 512 MiB cleanup</button>
+                  <button className="quiet-button"
+                    disabled={checkingCache || !cachePlan || cachePlan.candidates === 0}
+                    onClick={() => void applyCacheCleanup()}>Confirm cleanup…</button>
+                </div>
+                {cacheStats && <p role="status">
+                  Current entries: {cacheStats.files} · {asMiB(cacheStats.bytes)}
+                  {cacheStats.ignored_entries > 0 &&
+                    ` · ${cacheStats.ignored_entries} unrelated entries ignored`}
+                </p>}
+                {cachePlan && <p role="status">
+                  Dry run: {cachePlan.candidates} eligible files,
+                  up to {asMiB(cachePlan.bytes_reclaimable)} reclaimable.
+                  No files removed in preview.
+                </p>}
+              </section>
               {diagnostics && (
                 <section aria-label="Local speech setup diagnostic" className="diagnostic-report">
                   <h3>Speech environment — {diagnostics.platform}</h3>
