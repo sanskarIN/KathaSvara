@@ -6,11 +6,11 @@
 
 ## v0.2.0 development — characters and scenes
 
-**Current work in progress:** [draft PR #4](https://github.com/sanskarIN/KathaSvara/pull/4) adds versioned scene/character models, a deterministic Hindi dialogue parser, manual speaker correction, supported per-character engine settings, and a multi-segment audio orchestration layer. It extends the existing React/Tauri/Rust/Python app and preserves the v0.1.x narrator project files separately. See [v0.2.0 architecture](docs/architecture/v0.2.0-story-pipeline.md) and [release gates](docs/releases/v0.2.0-development.md).
+**v0.2.0 experimental developer pre-release candidate:** [development PR #4](https://github.com/sanskarIN/KathaSvara/pull/4) adds versioned scene/character models, a deterministic Hindi dialogue parser, manual speaker correction, supported per-character engine settings, and a multi-segment audio orchestration layer. It extends the existing React/Tauri/Rust/Python app and preserves the v0.1.x narrator project files separately. See [v0.2.0 architecture](docs/architecture/v0.2.0-story-pipeline.md) and [release gates](docs/releases/v0.2.0-development.md).
 
 **This functionality is still being tested.** Identifying `राजा भोज:` and `मंत्री:` in a written script does not mean the installed Chatterbox model produces two distinctly recognizable voices. The engine currently exposes only documented Hindi expressiveness/guidance controls; real multi-speaker voice consistency and audio quality are not accepted.
 
-A [Windows CI workflow](.github/workflows/windows-portable-candidate.yml) experiments with creating an **unsigned unbundled EXE** as an artifact, but there is no v0.2.0 GitHub pre-release or verified end-user installer. The candidate needs external Python and model dependencies; do not treat it as production-ready.
+A [Windows CI workflow](.github/workflows/windows-portable-candidate.yml) builds an **unsigned unbundled EXE**, and the v0.2.0 release pipeline is configured to attach a freshly compiled copy after CI passes. See [GitHub Releases](https://github.com/sanskarIN/KathaSvara/releases) for whether publication actually succeeded. It requires external Python and model dependencies; do not treat it as a verified standalone installer.
 
 ## What the development source implements
 
