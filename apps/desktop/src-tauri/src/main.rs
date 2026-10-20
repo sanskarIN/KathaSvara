@@ -968,6 +968,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Parallel Rust test workers must not interleave global render/maintenance guards.
+    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
     fn sample_v2() -> StoryV2 {
         StoryV2 {
             schema_version: 2,
@@ -1011,6 +1013,7 @@ mod tests {
 
     #[test]
     fn active_render_guard_rejects_duplicate_and_resets_on_drop() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
         let id = Uuid::new_v4().to_string();
         assert!(!is_render_job_active(&id).unwrap());
         {
@@ -1024,6 +1027,7 @@ mod tests {
 
     #[test]
     fn history_filter_finds_older_matching_story_and_classifies_interruption() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
         let folder = std::env::temp_dir().join(format!("kathasvara-history-{}", Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
         let story_a = Uuid::new_v4().to_string();
@@ -1079,6 +1083,7 @@ mod tests {
 
     #[test]
     fn cache_prune_blocks_live_renders_and_render_guard_blocks_pruning() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
         let active_id = Uuid::new_v4().to_string();
         {
             let _render = ActiveRenderGuard::start(&active_id).unwrap();
