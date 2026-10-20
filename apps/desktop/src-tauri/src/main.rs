@@ -205,6 +205,19 @@ async fn inspect_script(text: String) -> Result<TextInspection, String> {
 }
 
 #[tauri::command]
+async fn diagnose_engine() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let response = invoke_python(json!({"action": "diagnose"}))?;
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| "The Python diagnostic response is incomplete.".to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn check_engine() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| invoke_python(json!({"action":"health"})))
         .await.map_err(|e| e.to_string())??;
@@ -354,7 +367,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, inspect_script, check_engine, synthesize, discard_audio, export_wav
+            save_project, load_project, list_projects, inspect_script, check_engine, diagnose_engine, synthesize, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
