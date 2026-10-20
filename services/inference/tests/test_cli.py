@@ -51,8 +51,9 @@ def test_non_finite_voice_settings_are_rejected(bad_value: float) -> None:
     with pytest.raises(ValueError):
         VoiceSettings(0.5, bad_value).validate()
 
+
 def test_actual_cli_inspection_process() -> None:
-    request = {"action": "inspect", "text": " राजा  भोज।\\nनमस्कार!"}
+    request = {"action": "inspect", "text": " राजा  भोज।\nनमस्कार!"}
     completed = subprocess.run(
         [sys.executable, "-m", "kathasvara.cli"],
         input=json.dumps(request, ensure_ascii=False),
@@ -65,7 +66,7 @@ def test_actual_cli_inspection_process() -> None:
     assert completed.returncode == 0, completed.stderr
     response = json.loads(completed.stdout)
     assert response["ok"] is True
-    assert response["result"]["normalized"] == "राजा भोज।\\nनमस्कार!"
+    assert response["result"]["normalized"] == "राजा भोज।\nनमस्कार!"
     assert response["result"]["chunks"] == ["राजा भोज।", "नमस्कार!"]
 
 
