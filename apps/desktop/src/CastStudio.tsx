@@ -93,7 +93,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       onMessage(errorString(error));
     }
   }
-  async function startRender(sceneId?: string, forceSegmentId?: string) {
+  async function startRender(sceneId?: string, forceSegmentId?: string, forceAll = false) {
     if (rendering) return;
     if (!document.scenes.length) {
       onMessage("Parse labeled dialogue before rendering selected scenes.");
@@ -117,7 +117,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         project: document,
         jobId: id,
         selectedSceneIds: sceneId ? [sceneId] : null,
-        forceSegmentIds: forceSegmentId ? [forceSegmentId] : null,
+        selectedSegmentIds: forceSegmentId ? [forceSegmentId] : null,
+        forceSegmentIds: forceAll
+          ? document.scenes.flatMap(scene => scene.segments.filter(seg => seg.kind === "speech").map(seg => seg.id))
+          : forceSegmentId ? [forceSegmentId] : null,
       });
       if (revision !== renderRevision.current) {
         await invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
@@ -301,6 +304,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="render-tools">
           <button className="primary-button" disabled={busy || rendering || !document.scenes.length}
             onClick={() => void startRender()}>Generate story dialogue WAV</button>
+          <button className="quiet-button" disabled={busy || rendering || !document.scenes.length}
+            onClick={() => void startRender(undefined, undefined, true)}>Force re-render story</button>
           {activeScene && <button className="secondary-button" disabled={busy || rendering}
             onClick={() => void startRender(activeScene.id)}>Generate selected scene</button>}
           <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
@@ -391,7 +396,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                   {segment.kind === "speech" && segment.speaker_id && (
                     <button className="quiet-button" disabled={rendering}
                       onClick={() => void startRender(activeScene.id, segment.id)}>
-                      Force refresh this line (renders scene)
+                      Regenerate / retry this line only
                     </button>
                   )}
                   {segment.kind === "speech" && segment.speaker_id === null && <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
