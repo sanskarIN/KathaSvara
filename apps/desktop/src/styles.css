@@ -139,3 +139,32 @@ audio { display: block; width: 100%; margin: 13px 0; }
 .diagnostic-report ul { padding-left: 22px; }
 .diagnostic-report li { padding: 3px 0; }
 .diagnostic-report p { line-height: 1.5; }
+
+/* v0.2.0 cast and scene workspace: independent of the classic narrator editor. */
+.cast-layout { display: grid; grid-template-columns: minmax(300px, 0.8fr) minmax(400px, 1.2fr); align-items: start; gap: 19px; }
+.cast-panel, .scene-panel { min-width: 0; }
+.cast-add, .cast-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 15px 0; }
+.cast-add input, .cast-list input, .scene-title-label input { min-width: 0; padding: 9px 10px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; }
+.cast-add input { flex: 1; }
+.cast-list { padding: 0; list-style: none; display: grid; gap: 12px; max-height: 640px; overflow-y: auto; }
+.cast-list li { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); padding: 15px; }
+.cast-list label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; }
+.cast-list label > input:not([type="range"]) { width: 100%; }
+.cast-voice-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.cast-voice-row label { min-width: 0; }
+.cast-voice-row input[type="range"] { width: 100%; }
+.cast-list .helper { line-height: 1.5; }
+.cast-panel h2, .scene-panel h2 { margin-bottom: 10px; }
+.cast-layout .scene-navigation { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.cast-layout .selected-scene { border-color: var(--accent); color: var(--accent); }
+.cast-layout .scene-segments { margin: 14px 0; padding: 0; list-style: none; display: grid; gap: 10px; max-height: 640px; overflow-y: auto; }
+.scene-segments li { padding: 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.segment-header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.segment-header select { padding: 9px; width: min(100%, 290px); font-size: 12px; }
+.scene-segments li p { font-size: 14px; line-height: 1.9; color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.cast-layout .dirty-label { color: #e5b471; font-size: 12px; }
+.cast-layout .saved-label { color: var(--positive); font-size: 12px; }
+.scene-title-label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); flex: 1 1 180px; }
+.scene-title-label input { width: 100%; }
+@media (max-width: 1180px) { .cast-layout { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { body { min-width: 780px; } }

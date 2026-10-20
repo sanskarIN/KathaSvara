@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
+import CastStudio from "./CastStudio";
+import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   AudioResult,
@@ -16,7 +18,7 @@ import {
   validateText,
 } from "./lib/story";
 
-type Page = "studio" | "projects" | "settings" | "about";
+type Page = "studio" | "cast" | "projects" | "settings" | "about";
 type Theme = "dark" | "light";
 
 function errorMessage(error: unknown): string {
@@ -32,6 +34,8 @@ export default function App() {
     id: "", title: "मेरी पहली कहानी", text: STARTER_STORY,
   });
   const [projects, setProjects] = useState<StoryProject[]>([]);
+  const [castDoc, setCastDoc] = useState<StoryV2>(() =>
+    legacyToStoryV2({ id: "", title: "मेरी पहली कहानी", text: STARTER_STORY }));
   const [exaggeration, setExaggeration] = useState(() =>
     readSavedNumber(localStorage.getItem("kathasvara-exaggeration"), 0.25, 2, 0.5),
   );
@@ -79,6 +83,8 @@ export default function App() {
   function changeScript(text: string) {
     invalidateGeneration();
     setProject((previous) => ({ ...previous, text }));
+    // Previous parsed scenes may not correspond to edited dialogue.
+    setCastDoc(previous => ({ ...previous, text, scenes: [] }));
   }
 
   function changeExaggeration(value: number) {
@@ -115,7 +121,10 @@ export default function App() {
         return;
       }
       invalidateGeneration();
-      setProject({ id: "", title, text: text.replace(/\r\n?/g, "\n") });
+      const normalized = text.replace(/\r\n?/g, "\n");
+      const imported = { id: "", title, text: normalized };
+      setProject(imported);
+      setCastDoc(legacyToStoryV2(imported));
       setMessage("Story imported as a new unsaved project. Review it before generating or saving.");
       setPage("studio");
     } catch (error) {
@@ -155,6 +164,7 @@ export default function App() {
       setProject((current) =>
         current.id === project.id ? { ...current, id: updated.id } : current,
       );
+      setCastDoc((current) => ({ ...current, id: updated.id }));
       setMessage("Project saved locally. Changes made during saving may need another save.");
       await refreshProjects();
     } catch (error) {
@@ -167,6 +177,7 @@ export default function App() {
       const loaded = await invoke<StoryProject>("load_project", { id });
       invalidateGeneration();
       setProject(loaded);
+      setCastDoc(legacyToStoryV2(loaded));
       setPage("studio");
       setMessage("Project loaded. Generate a new preview when ready.");
     } catch (error) {
@@ -266,6 +277,7 @@ export default function App() {
 
   const nav: { key: Page; icon: string; label: string }[] = [
     { key: "studio", icon: "◉", label: "Voice Studio" },
+    { key: "cast", icon: "♧", label: "Characters & Scenes" },
     { key: "projects", icon: "▤", label: "My Stories" },
     { key: "settings", icon: "⚙", label: "Settings" },
     { key: "about", icon: "ⓘ", label: "About" },
@@ -287,13 +299,13 @@ export default function App() {
         <div className="sidebar-bottom">
           <span className="side-tag">LOCAL FIRST</span>
           <p>Your scripts stay on your machine. No account required.</p>
-          <small>v0.1.1 · Developer preview</small>
+          <small>v0.2.0 · Development / Not released</small>
         </div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
-          <div><span className="eyebrow">CREATIVE AUDIO STUDIO</span><h1>{page === "studio" ? "Give Every Story a Voice." : page === "projects" ? "Your story library" : page === "settings" ? "Preferences" : "About KathaSvara"}</h1></div>
+          <div><span className="eyebrow">CREATIVE AUDIO STUDIO</span><h1>{page === "studio" ? "Give Every Story a Voice." : page === "cast" ? "Characters & Scenes" : page === "projects" ? "Your story library" : page === "settings" ? "Preferences" : "About KathaSvara"}</h1></div>
           <div className="header-actions"><span className="chip">हिन्दी · Hindi</span><button className="quiet-button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☀ Light" : "☾ Dark"}</button></div>
         </header>
 
@@ -303,7 +315,10 @@ export default function App() {
               <section className="panel editor-panel">
                 <div className="panel-heading"><div><div className="section-label">01 / SCRIPT</div><h2>Story editor</h2><p>Write in Hindi, naturally.</p></div><button className="quiet-button" onClick={() => void saveProject()}>Save project</button></div>
                 <label htmlFor="story-title" className="field-label">PROJECT TITLE</label>
-                <input id="story-title" className="title-input" value={project.title} maxLength={120} onChange={(e) => setProject({ ...project, title: e.target.value })} />
+                <input id="story-title" className="title-input" value={project.title} maxLength={120} onChange={(e) => {
+                  setProject({ ...project, title: e.target.value });
+                  setCastDoc(previous => ({ ...previous, title: e.target.value }));
+                }} />
                 <label htmlFor="story-text" className="field-label">NARRATION TEXT</label>
                 <textarea id="story-text" className="story-text" lang="hi" spellCheck value={project.text} onChange={(e) => changeScript(e.target.value)} aria-describedby="script-stats" placeholder="अपनी कहानी यहाँ लिखें..." />
                 <div id="script-stats" className="editor-footer"><span>{counts.characters.toLocaleString("en-IN")} / 3,000 characters</span><span>{counts.words} words</span></div>
@@ -358,8 +373,12 @@ export default function App() {
             </div>
           )}
 
+          {page === "cast" && (
+            <CastStudio document={castDoc} onChange={setCastDoc} onMessage={setMessage} />
+          )}
+
           {page === "projects" && (
-            <section className="panel"><div className="panel-heading"><div className="section-label">YOUR WORK</div><button className="secondary-button" onClick={() => { invalidateGeneration(); setProject({ id:"", title:"नई कहानी", text:"" }); setPage("studio"); }}>+ New story</button></div>
+            <section className="panel"><div className="panel-heading"><div className="section-label">YOUR WORK</div><button className="secondary-button" onClick={() => { invalidateGeneration(); setProject({ id:"", title:"नई कहानी", text:"" }); setCastDoc(legacyToStoryV2({ id:"", title:"नई कहानी", text:"" })); setPage("studio"); }}>+ New story</button></div>
               <h2>Saved stories</h2><p>Stored in the application data folder on this device.</p>
               {projects.length === 0 ? <div className="empty-preview">No saved projects yet. Save a script in Voice Studio.</div> : <ul className="project-list">{projects.map((item) => <li key={item.id}><div><strong>{item.title}</strong><small>{countText(item.text).characters} characters</small></div><button className="secondary-button" onClick={() => void openProject(item.id)}>Open →</button></li>)}</ul>}
             </section>
