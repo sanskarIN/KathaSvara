@@ -1,6 +1,12 @@
 name: Publish KathaSvara v0.2.1 experimental prerelease
 
 on:
+  # One-time guarded publication when this version-specific workflow reaches main.
+  # All jobs still rebuild/test the exact merging SHA; existing tags are never replaced.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v0.2.1.yml"
   workflow_dispatch:
     inputs:
       release_sha:
@@ -25,7 +31,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.release_sha || github.sha }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
