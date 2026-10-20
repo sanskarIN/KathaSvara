@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
 import {
-  addCharacter, assignSegment, moveScene, reassignAndRemoveCharacter,
+  addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
   renameScene, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
@@ -20,6 +20,7 @@ function errorString(error: unknown): string {
 
 export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newName, setNewName] = useState("");
+  const [newSceneTitle, setNewSceneTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(true);
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
@@ -50,6 +51,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       edit(previous => addCharacter(previous, newName));
       setNewName("");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function duplicateProfile(id: string) {
+    try {
+      edit(previous => duplicateCharacter(previous, id));
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function createScene() {
+    try {
+      edit(previous => addScene(previous, newSceneTitle));
+      setNewSceneTitle("");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -221,9 +237,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               <label>
                 <span>Character name</span>
                 <input value={char.name} disabled={char.id === "narrator"} maxLength={120}
-                  onChange={event => edit(doc => ({
-                    ...doc, characters: doc.characters.map(item => item.id === char.id ? { ...item, name: event.target.value } : item),
-                  }))} />
+                  onChange={event => {
+                    try { edit(doc => renameCharacter(doc, char.id, event.target.value)); }
+                    catch (error) { onMessage(errorString(error)); }
+                  }} />
               </label>
               <div className="cast-voice-row">
                 <label>Expression
@@ -242,7 +259,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                 </label>
               </div>
               <p className="helper">Hindi · Chatterbox Multilingual · pause {char.voice.pause_ms} ms · no distinct speaker verified</p>
-              {char.id !== "narrator" && <button className="quiet-button" onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
+              <div className="cast-actions">
+                <button className="quiet-button" onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
+                {char.id !== "narrator" && <button className="quiet-button" onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
+              </div>
             </li>
           ))}
         </ul>
@@ -278,6 +298,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
         {unresolved.length > 0 && <p role="alert">{unresolved.length} unknown speaker label(s): {unresolved.join(", ")}</p>}
+        <div className="cast-add">
+          <input placeholder="New scene title / नया दृश्य" aria-label="New scene title" value={newSceneTitle}
+            maxLength={120} onChange={event => setNewSceneTitle(event.target.value)} />
+          <button className="secondary-button" disabled={!newSceneTitle.trim() || busy || rendering} onClick={createScene}>+ Scene</button>
+        </div>
         <div className="scene-navigation" aria-label="Scenes">
           {document.scenes.map(scene => (
             <button key={scene.id} className={"quiet-button " + (activeScene?.id === scene.id ? "selected-scene" : "")}
@@ -314,6 +339,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     )}
                   </div>
                   <p lang="hi">{segment.original_text}</p>
+                  <label className="move-segment-label">Move line to scene
+                    <select aria-label={"Move line " + segment.id} value={activeScene.id}
+                      onChange={event => {
+                        try { edit(doc => moveSegment(doc, segment.id, event.target.value)); }
+                        catch (error) { onMessage(errorString(error)); }
+                      }}>
+                      {document.scenes.map(scene => <option key={scene.id} value={scene.id}>{scene.title}</option>)}
+                    </select>
+                  </label>
                   {segment.kind === "speech" && segment.speaker_id && (
                     <button className="quiet-button" disabled={rendering}
                       onClick={() => void startRender(activeScene.id, segment.id)}>
