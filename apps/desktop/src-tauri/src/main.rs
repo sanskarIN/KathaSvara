@@ -620,6 +620,27 @@ async fn prune_segment_cache(
 }
 
 #[tauri::command]
+async fn maintain_abandoned_wavs(
+    app: tauri::AppHandle,
+    dry_run: bool,
+) -> Result<Value, String> {
+    // Reuse the same in-app mutex as cache pruning, in addition to the
+    // OS-level Python cache lock shared by participating renderer processes.
+    let guard = CachePruneGuard::start()?;
+    let root = app_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let result = invoke_python(json!({
+            "action": "abandoned_wav_cleanup",
+            "root": root,
+            "dry_run": dry_run,
+        }))?;
+        result.get("result").cloned()
+            .ok_or_else(|| "Abandoned audio cleanup returned no report.".to_string())
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn check_engine() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| invoke_python(json!({"action":"health"})))
         .await.map_err(|e| e.to_string())??;
@@ -1134,7 +1155,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
