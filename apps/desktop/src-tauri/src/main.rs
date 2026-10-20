@@ -325,6 +325,8 @@ struct SegmentTiming {
     segment_id: String,
     start_seconds: f64,
     end_seconds: f64,
+    // Only returned to the current UI; never stored in a recovery journal.
+    effective_text: String,
 }
 
 fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String> {
@@ -334,10 +336,14 @@ fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String>
     }
     let mut result = Vec::with_capacity(times.len());
     let mut previous_end = 0.0;
+    let mut text_chars = 0_usize;
     for value in times {
         let timing: SegmentTiming = serde_json::from_value(value.clone())
             .map_err(|_| "Malformed measured subtitle cue.".to_string())?;
+        text_chars += timing.effective_text.chars().count();
         if timing.segment_id.is_empty() || timing.segment_id.len() > 80 ||
+            timing.effective_text.trim().is_empty() || text_chars > 100_000 ||
+            timing.effective_text.chars().any(|ch| ch == '\\0') ||
             !timing.start_seconds.is_finite() || !timing.end_seconds.is_finite() ||
             timing.start_seconds + 0.002 < previous_end ||
             timing.start_seconds < 0.0 || timing.end_seconds <= timing.start_seconds ||
@@ -1265,13 +1271,13 @@ mod tests {
     #[test]
     fn measured_segment_timeline_enforces_bounds_and_order() {
         let good = json!({"segments": [
-            {"segment_id":"one","start_seconds":0.0,"end_seconds":1.0},
-            {"segment_id":"two","start_seconds":1.14,"end_seconds":2.4}
+            {"segment_id":"one","start_seconds":0.0,"end_seconds":1.0,"effective_text":"नमस्कार"},
+            {"segment_id":"two","start_seconds":1.14,"end_seconds":2.4,"effective_text":"हिंदी"}
         ]});
         assert_eq!(parse_segment_timings(&good).unwrap().len(), 2);
         let bad = json!({"segments": [
-            {"segment_id":"one","start_seconds":0.0,"end_seconds":2.0},
-            {"segment_id":"two","start_seconds":1.0,"end_seconds":2.4}
+            {"segment_id":"one","start_seconds":0.0,"end_seconds":2.0,"effective_text":"नमस्कार"},
+            {"segment_id":"two","start_seconds":1.0,"end_seconds":2.4,"effective_text":"हिंदी"}
         ]});
         assert!(parse_segment_timings(&bad).is_err());
         assert!(parse_segment_timings(&json!({"segments":[]})).is_err());
