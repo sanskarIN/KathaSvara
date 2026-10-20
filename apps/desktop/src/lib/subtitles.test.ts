@@ -41,6 +41,23 @@ describe("Hindi per-dialogue SRT export", () => {
     )).toThrow("invalid");
   });
 
+  it("rejects overlaps after millisecond rounding, matching the native SRT validator", () => {
+    expect(() => buildDialogueSrt([
+      { segment_id: "a", start_seconds: 0, end_seconds: 1.0014 },
+      { segment_id: "b", start_seconds: 1.0007, end_seconds: 2 },
+    ], [
+      { segment_id: "a", text: "राजा भोज" },
+      { segment_id: "b", text: "मंत्री जी" },
+    ])).toThrow("invalid");
+  });
+
+  it("rejects sub-millisecond captions that round to zero duration", () => {
+    expect(() => buildDialogueSrt(
+      [{ segment_id: "a", start_seconds: 0.0001, end_seconds: 0.0003 }],
+      [{ segment_id: "a", text: "नमस्कार" }],
+    )).toThrow("invalid");
+  });
+
   it("rejects invalid, non-finite or overlong cue data", () => {
     expect(() => buildDialogueSrt(
       [{ segment_id: "a", start_seconds: NaN, end_seconds: 10 }],
