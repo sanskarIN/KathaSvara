@@ -45,7 +45,7 @@ No voice model, generated sample, or commercial voice-clone asset is bundled.
 KathaSvara app sources are MPL-2.0; third-party dependencies/checkpoints have
 separate license terms.
 
-The v0.2.1 release workflow can publish an experimental developer pre-release
+The guarded v0.3.0 release workflow can publish an experimental developer pre-release
 only after tests, executable compilation and SHA-256 verification succeed.
 This does NOT verify interactive launch or real Hindi narration on a clean machine.
 Manual playback, project persistence, save/export, source compatibility and audio
