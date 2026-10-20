@@ -138,11 +138,12 @@ def test_stream_writer_enforces_frame_limit_without_publishing(tmp_path: Path) -
     from kathasvara.audio_stream import StreamingWav
 
     out = tmp_path / "oversize.wav"
-    with pytest.raises(ValueError, match="20-minute"):
-        with StreamingWav(out, 24_000, sf, max_frames=10) as writer:
-            writer.write(np.full(8, 0.1, dtype=np.float32))
-            writer.write(np.full(3, 0.1, dtype=np.float32))
-            writer.finish()
+    with pytest.raises(ValueError, match="20-minute"), StreamingWav(
+        out, 24_000, sf, max_frames=10
+    ) as writer:
+        writer.write(np.full(8, 0.1, dtype=np.float32))
+        writer.write(np.full(3, 0.1, dtype=np.float32))
+        writer.finish()
     assert not out.exists()
     assert list(tmp_path.glob("*.partial.wav")) == []
 
