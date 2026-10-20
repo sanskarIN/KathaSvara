@@ -389,7 +389,7 @@ export default function App() {
                   <p><strong>Hindi speech playback tested:</strong> No</p>
                   <p>{diagnostics.help}</p>
                 </section>
-              )
+              )}
             </section>
           )}
 
