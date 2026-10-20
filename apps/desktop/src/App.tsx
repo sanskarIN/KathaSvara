@@ -25,6 +25,11 @@ type CachePruneReport = {
   files_before: number; bytes_before: number; candidates: number;
   bytes_reclaimable: number; dry_run: boolean; ignored_entries: number;
 };
+type AbandonedWavReport = {
+  dry_run: boolean; candidates: number; bytes_reclaimable: number;
+  removed: number; bytes_removed: number; ignored_entries: number;
+  age_hours: number; max_deletions: number;
+};
 const CACHE_TARGET_MIB = 512;
 function asMiB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
@@ -57,6 +62,8 @@ export default function App() {
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
   const [checkingCache, setCheckingCache] = useState(false);
+  const [cleanupPreview, setCleanupPreview] = useState<AbandonedWavReport | null>(null);
+  const [checkingPartials, setCheckingPartials] = useState(false);
   const [status, setStatus] = useState<GenerationStatus>("waiting");
   const [message, setMessage] = useState("अभी तक कोई ऑडियो तैयार नहीं हुआ है।");
   const [audio, setAudio] = useState<AudioResult | null>(null);
@@ -330,6 +337,40 @@ export default function App() {
     }
   }
 
+  async function inspectAbandonedAudio() {
+    setCheckingPartials(true);
+    setCleanupPreview(null);
+    try {
+      const report = await invoke<AbandonedWavReport>("maintain_abandoned_wavs", { dryRun: true });
+      setCleanupPreview(report);
+      setMessage("Abandoned partial WAV preview completed; no audio or projects were deleted.");
+    } catch (error) {
+      setMessage("Unable to inspect abandoned audio: " + errorMessage(error));
+    } finally {
+      setCheckingPartials(false);
+    }
+  }
+
+  async function removeAbandonedAudio() {
+    if (!cleanupPreview || cleanupPreview.candidates === 0) return;
+    if (!window.confirm(
+      "Permanently delete generated temporary WAV files older than 24 hours? " +
+      "Complete WAV recordings, project files, speech cache entries and render journals will be kept. " +
+      "No active render may be using the shared cache.",
+    )) return;
+    setCheckingPartials(true);
+    setCleanupPreview(null);
+    try {
+      const report = await invoke<AbandonedWavReport>("maintain_abandoned_wavs", { dryRun: false });
+      setMessage(`Removed ${report.removed} old temporary WAV files (${asMiB(report.bytes_removed)}). ` +
+        "Completed narration, cached segments, stories and render history remain untouched.");
+    } catch (error) {
+      setMessage("Abandoned-audio cleanup failed: " + errorMessage(error));
+    } finally {
+      setCheckingPartials(false);
+    }
+  }
+
   async function checkRuntime() {
     try {
       const result = await invoke<string>("check_engine");
@@ -483,6 +524,28 @@ export default function App() {
                   Dry run: {cachePlan.candidates} eligible files,
                   up to {asMiB(cachePlan.bytes_reclaimable)} reclaimable.
                   No files removed in preview.
+                </p>}
+              </section>
+              <section aria-label="Abandoned temporary narration cleanup" className="diagnostic-report">
+                <h3>Interrupted-render temporary audio</h3>
+                <p>After a crash, an unfinished WAV can remain on disk. Preview files older
+                  than 24 hours, then explicitly confirm cleanup. Only KathaSvara-generated
+                  partial WAV names are eligible. Completed narration, story projects,
+                  reusable speech segments and render history are never selected.
+                  Inspection and cleanup are blocked while a participating render is active.</p>
+                <div className="preview-actions">
+                  <button className="secondary-button" disabled={checkingPartials}
+                    onClick={() => void inspectAbandonedAudio()}>
+                    {checkingPartials ? "Inspecting temporary files…" : "Preview abandoned WAV cleanup"}
+                  </button>
+                  <button className="quiet-button"
+                    disabled={checkingPartials || !cleanupPreview || cleanupPreview.candidates === 0}
+                    onClick={() => void removeAbandonedAudio()}>Confirm temporary cleanup…</button>
+                </div>
+                {cleanupPreview && <p role="status">
+                  Dry run: {cleanupPreview.candidates} eligible incomplete WAV files
+                  ({asMiB(cleanupPreview.bytes_reclaimable)}) older than {cleanupPreview.age_hours} hours.
+                  No files deleted. Up to {cleanupPreview.max_deletions} files can be removed per confirmation.
                 </p>}
               </section>
               {diagnostics && (
