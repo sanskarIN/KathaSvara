@@ -145,3 +145,72 @@ def test_stream_writer_enforces_frame_limit_without_publishing(tmp_path: Path) -
             writer.finish()
     assert not out.exists()
     assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_journal_survives_failure_and_retry_reuses_valid_audio(tmp_path: Path) -> None:
+    import json
+
+    class FailSecondEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            if len(self.calls) == 1:
+                raise RuntimeError("Deliberate model failure")
+            return super().generate(text, settings)
+
+    doc = sample_doc()
+    journal = tmp_path / "jobs" / "first.manifest.json"
+    output = tmp_path / "failed.wav"
+    with pytest.raises(RuntimeError, match="Deliberate"):
+        render_story(
+            doc, output, tmp_path / "cache", FailSecondEngine(),
+            journal_path=journal,
+        )
+    history = json.loads(journal.read_text(encoding="utf-8"))
+    assert history["state"] == "failed"
+    assert history["done"] == 1 and history["total"] == 2
+    assert len(history["segments"]) == 1
+    assert "नमस्कार" not in journal.read_text(encoding="utf-8")
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+    retry = FakeEngine()
+    output = tmp_path / "retried.wav"
+    report = render_story(
+        doc, output, tmp_path / "cache", retry,
+        journal_path=tmp_path / "jobs" / "retried.manifest.json",
+    )
+    assert output.exists()
+    assert len(retry.calls) == 1
+    assert report["segments"][0]["cached"] is True
+    recovered = json.loads((tmp_path / "jobs" / "retried.manifest.json").read_text())
+    assert recovered["state"] == "completed" and recovered["done"] == 2
+
+
+def test_cancelled_journal_remembers_progress_without_releasing_wav(tmp_path: Path) -> None:
+    import json
+
+    completed: list[int] = []
+    path = tmp_path / "jobs" / "cancel.manifest.json"
+    with pytest.raises(RenderCancelled):
+        render_story(
+            sample_doc(), tmp_path / "cancel.wav", tmp_path / "cache",
+            FakeEngine(), journal_path=path,
+            on_progress=lambda done, total: completed.append(done),
+            is_cancelled=lambda: bool(completed),
+        )
+    journal = json.loads(path.read_text(encoding="utf-8"))
+    assert journal["state"] == "cancelled"
+    assert journal["done"] == 1
+    assert journal["error_type"] == "RenderCancelled"
+    assert not (tmp_path / "cancel.wav").exists()
+
+
+def test_render_journal_cannot_overwrite_existing_file(tmp_path: Path) -> None:
+    journal = tmp_path / "keep.json"
+    journal.write_text("important")
+    with pytest.raises(ValueError, match="already exists"):
+        render_story(
+            sample_doc(), tmp_path / "new.wav", tmp_path / "cache",
+            FakeEngine(), journal_path=journal,
+        )
+    assert journal.read_text() == "important"
+    assert not (tmp_path / "new.wav").exists()
