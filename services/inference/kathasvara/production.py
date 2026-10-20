@@ -60,6 +60,8 @@ def render_story(
     is_cancelled: Callable[[], bool] | None = None,
     *,
     use_cache: bool = True,
+    selected_scene_ids: set[str] | None = None,
+    force_segment_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Render resolved segments in order; cache content-addressed source audio.
 
@@ -74,9 +76,14 @@ def render_story(
     if any(seg.speaker_id is None for scene in doc.scenes for seg in scene.segments
            if seg.kind == "speech"):
         raise ValueError("Assign every unknown speaker manually before rendering.")
+    available_scenes = {scene.id for scene in doc.scenes}
+    if selected_scene_ids is not None and not selected_scene_ids.issubset(available_scenes):
+        raise ValueError("Requested scene does not belong to the story.")
     speech = [
         (seg, next(char for char in doc.characters if char.id == seg.speaker_id))
-        for scene in doc.scenes for seg in scene.segments if seg.kind == "speech"
+        for scene in doc.scenes
+        if selected_scene_ids is None or scene.id in selected_scene_ids
+        for seg in scene.segments if seg.kind == "speech"
     ]
     if not speech or len(speech) > MAX_RENDER_SEGMENTS:
         raise ValueError("A render needs 1–256 spoken segments.")
@@ -122,7 +129,7 @@ def render_story(
         cached = cache_dir / f"{key}.wav"
         segment_samples = None
         was_cached = False
-        if use_cache and cached.exists():
+        if use_cache and cached.exists() and seg.id not in (force_segment_ids or set()):
             try:
                 info = sf.info(str(cached))
                 if info.channels == 1 and info.samplerate == rate and info.frames > 0:
