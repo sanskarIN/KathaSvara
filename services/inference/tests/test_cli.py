@@ -165,3 +165,23 @@ def test_cache_protocol_inspection_and_dry_run_without_model(tmp_path) -> None:
 def test_cache_protocol_rejects_unsafe_arguments(payload: dict[str, object]) -> None:
     with pytest.raises((TypeError, ValueError)):
         handle(payload)
+
+
+def test_abandoned_wav_protocol_is_dry_run_by_default(tmp_path) -> None:
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    response = handle({"action": "abandoned_wav_cleanup", "root": str(tmp_path)})
+    assert response["ok"] is True
+    assert response["result"]["dry_run"] is True
+    assert response["result"]["removed"] == 0
+
+
+@pytest.mark.parametrize("payload", [
+    {"action": "abandoned_wav_cleanup"},
+    {"action": "abandoned_wav_cleanup", "root": "relative"},
+    {"action": "abandoned_wav_cleanup", "root": 3},
+    {"action": "abandoned_wav_cleanup", "root": "/tmp", "dry_run": "false"},
+])
+def test_abandoned_wav_protocol_rejects_invalid_targets(payload: dict[str, object]) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        handle(payload)
