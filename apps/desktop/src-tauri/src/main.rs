@@ -884,6 +884,61 @@ fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), Stri
     fs::write(path, b"cancel").map_err(|e| e.to_string())
 }
 
+fn finalize_rendered_story_wav(
+    output: &Path,
+    job_id: String,
+    data: &Value,
+) -> Result<AudioResult, String> {
+    // A valid long narration must remain exportable even when the webview
+    // cannot carry its full 25 MiB+ content in a base64 data URL.
+    let mut source = fs::File::open(output)
+        .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
+    let size = inspect_wav_file(&mut source)?;
+    let metadata = data.get("result").ok_or("Missing render metadata.")?;
+    let timings = parse_segment_timings(metadata)?;
+    let duration = metadata["duration_seconds"].as_f64()
+        .ok_or("Missing reported WAV duration.")?;
+    let rate = metadata["sample_rate"].as_u64()
+        .ok_or("Missing reported sample rate.")?;
+    let chunks = metadata["chunks"].as_u64()
+        .ok_or("Missing synthesis chunk count.")?;
+    if !duration.is_finite() || duration <= 0.0 || duration > 1200.0 ||
+        !(8_000..=192_000).contains(&rate) || !(1..=500).contains(&chunks) ||
+        timings.last().is_some_and(|cue| cue.end_seconds > duration + 0.005)
+    {
+        return Err("Render metadata has inconsistent audio duration or chunk counts.".into());
+    }
+    let preview_available = size <= MAX_GENERATED_WAV;
+    let data_url = if preview_available {
+        let bytes = fs::read(output).map_err(|e| e.to_string())?;
+        format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
+    } else {
+        String::new()
+    };
+    Ok(AudioResult {
+        audio_id: job_id,
+        data_url,
+        duration_seconds: duration,
+        sample_rate: rate as u32,
+        chunks: chunks as u32,
+        segment_timings: timings,
+        preview_available,
+        file_bytes: size,
+    })
+}
+
+fn finalize_or_remove_rendered_wav(
+    output: &Path,
+    job_id: String,
+    data: &Value,
+) -> Result<AudioResult, String> {
+    let result = finalize_rendered_story_wav(output, job_id, data);
+    if result.is_err() {
+        let _ = fs::remove_file(output);
+    }
+    result
+}
+
 #[tauri::command]
 async fn render_story_v2(
     app: tauri::AppHandle,
@@ -945,36 +1000,9 @@ async fn render_story_v2(
                 return Err(message);
             }
         };
-        // Large 20-minute WAVs stay on disk; do not reject valid narration just
-        // because the browser's 25 MiB inline preview transport is too small.
-        let mut source = fs::File::open(&output)
-            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
-        let size = match inspect_wav_file(&mut source) {
-            Ok(size) => size,
-            Err(reason) => {
-                let _ = fs::remove_file(&output);
-                return Err(reason);
-            }
-        };
-        let metadata = data.get("result").ok_or("Missing render metadata.")?;
-        let timings = parse_segment_timings(metadata)?;
-        let preview_available = size <= MAX_GENERATED_WAV;
-        let data_url = if preview_available {
-            let bytes = fs::read(&output).map_err(|e| e.to_string())?;
-            format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
-        } else {
-            String::new()
-        };
-        Ok(AudioResult {
-            audio_id: job_id,
-            data_url,
-            duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
-            sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
-            chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
-            segment_timings: timings,
-            preview_available,
-            file_bytes: size,
-        })
+        // Any metadata/preview failure after inference should clean the
+        // job-owned WAV. Previously such errors leaked orphan audio into app data.
+        finalize_or_remove_rendered_wav(&output, job_id, &data)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1026,14 +1054,67 @@ fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> R
     copy_validated_wav(&source, Path::new(&destination))
 }
 
+fn parse_srt_milliseconds(value: &str) -> Result<u64, String> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 12 || bytes[2] != b':' || bytes[5] != b':' || bytes[8] != b',' ||
+        bytes.iter().enumerate().any(|(index, byte)|
+            !matches!(index, 2 | 5 | 8) && !byte.is_ascii_digit())
+    {
+        return Err("Subtitle timestamp must use HH:MM:SS,mmm.".into());
+    }
+    let hours = value[0..2].parse::<u64>().map_err(|e| e.to_string())?;
+    let minutes = value[3..5].parse::<u64>().map_err(|e| e.to_string())?;
+    let seconds = value[6..8].parse::<u64>().map_err(|e| e.to_string())?;
+    let millis = value[9..12].parse::<u64>().map_err(|e| e.to_string())?;
+    if minutes >= 60 || seconds >= 60 {
+        return Err("Subtitle timestamp has invalid minutes or seconds.".into());
+    }
+    Ok(((hours * 60 + minutes) * 60 + seconds) * 1000 + millis)
+}
+
+fn validate_srt_content(content: &str) -> Result<(), String> {
+    if content.is_empty() || content.len() > 250_000 || content.contains('\r') {
+        return Err("Invalid or oversized UTF-8 SubRip content.".into());
+    }
+    let body = content.strip_suffix('\n').unwrap_or(content);
+    let mut previous_end = 0_u64;
+    let mut count = 0_usize;
+    for block in body.split("\n\n") {
+        count += 1;
+        if count > 256 {
+            return Err("A subtitle export supports at most 256 dialogue cues.".into());
+        }
+        let mut lines = block.split('\n');
+        let number = lines.next().unwrap_or("");
+        let timings = lines.next().unwrap_or("");
+        let subtitle = lines.next().unwrap_or("");
+        if number != count.to_string() || lines.next().is_some() ||
+            subtitle.trim().is_empty() || subtitle.chars().count() > 3000 ||
+            subtitle.chars().any(char::is_control)
+        {
+            return Err("Invalid SubRip cue index or dialogue text.".into());
+        }
+        let (start, end) = timings.split_once(" --> ")
+            .ok_or("Subtitle cue is missing the timing separator.")?;
+        let start_ms = parse_srt_milliseconds(start)?;
+        let end_ms = parse_srt_milliseconds(end)?;
+        if end_ms <= start_ms || start_ms < previous_end || end_ms > 1_200_000 {
+            return Err("Subtitle cues must be ordered and within 20 minutes.".into());
+        }
+        previous_end = end_ms;
+    }
+    if count == 0 {
+        return Err("Subtitle export needs a dialogue cue.".into());
+    }
+    Ok(())
+}
+
 fn write_srt(destination: &Path, content: &str) -> Result<(), String> {
     if !destination.is_absolute() ||
         destination.extension().and_then(|ext| ext.to_str()) != Some("srt") {
         return Err("Choose a new absolute .srt subtitle destination.".into());
     }
-    if content.is_empty() || content.len() > 250_000 || !content.starts_with("1\\n") {
-        return Err("Invalid or oversized SRT subtitle content.".into());
-    }
+    validate_srt_content(content)?;
     let mut file = fs::OpenOptions::new().write(true).create_new(true)
         .open(destination).map_err(|e| format!("Cannot create subtitle destination: {e}"))?;
     if let Err(error) = file.write_all(content.as_bytes()).and_then(|_| file.sync_all()) {
@@ -1259,13 +1340,35 @@ mod tests {
     }
 
     #[test]
-    fn subtitle_export_rejects_overwrite_and_invalid_timing() {
+    fn subtitle_export_accepts_real_line_breaks_and_refuses_overwrite() {
         let dest = std::env::temp_dir().join(format!("kathasvara-{}.srt", Uuid::new_v4()));
-        assert!(write_srt(&dest, "1\\n00:00:00,000 --> 00:00:00,500\\nनमस्कार!\\n").is_ok());
-        assert!(write_srt(&dest, "1\\nreplacement\\n").is_err());
-        assert!(write_srt(Path::new("relative.srt"), "1\\nwrong\\n").is_err());
-        assert!(dest.exists());
+        let valid = "1\n00:00:00,000 --> 00:00:00,500\nनमस्कार!\n\n2\n00:00:00,640 --> 00:00:01,250\nराजा भोज।\n";
+        write_srt(&dest, valid).unwrap();
+        assert_eq!(fs::read_to_string(&dest).unwrap(), valid);
+        assert!(write_srt(&dest, valid).is_err());
+        assert!(write_srt(Path::new("relative.srt"), valid).is_err());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), valid);
         fs::remove_file(dest).unwrap();
+    }
+
+    #[test]
+    fn subtitle_validation_rejects_literal_backslashes_and_corrupt_timestamps() {
+        assert!(validate_srt_content(r"1\n00:00:00,000 --> 00:00:00,500\nनमस्कार!").is_err());
+        let invalid = [
+            "1\nreplacement\n",
+            "1\n00:00:00,000 --> 00:00:00,500\n",
+            "1\n00:00:00,500 --> 00:00:00,000\nनमस्कार\n",
+            "1\n00:00:00,000 --> 00:00:00,500\nनमस्कार\n\n2\n00:00:00,490 --> 00:00:01,000\nधन्यवाद\n",
+            "1\n00:99:00,000 --> 00:99:01,000\nनमस्कार\n",
+            "1\n00:00:00.000 --> 00:00:00.500\nनमस्कार\n",
+            "1\n00:00:00,000 --> 00:20:00,001\nनमस्कार\n",
+            "2\n00:00:00,000 --> 00:00:00,500\nनमस्कार\n",
+            "1\r\n00:00:00,000 --> 00:00:00,500\r\nनमस्कार\r\n",
+            "1\n00:00:00,000 --> 00:00:00,500\nनमस्कार\nऔर\n",
+        ];
+        for text in invalid {
+            assert!(validate_srt_content(text).is_err(), "Invalid SRT unexpectedly passed.");
+        }
     }
 
     #[test]
@@ -1295,6 +1398,32 @@ mod tests {
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
         assert!(copy_validated_wav(&source, &exported).is_err());
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        let response = json!({"result": {
+            "duration_seconds": 568.0,
+            "sample_rate": 24000,
+            "chunks": 1,
+            "segments": [{
+                "segment_id": "test", "start_seconds": 0.0,
+                "end_seconds": 1.0, "effective_text": "नमस्कार"
+            }]
+        }});
+        let metadata = finalize_rendered_story_wav(
+            &source, Uuid::new_v4().to_string(), &response,
+        ).unwrap();
+        assert!(!metadata.preview_available);
+        assert!(metadata.data_url.is_empty());
+        assert_eq!(metadata.file_bytes, 44 + u64::from(sample_bytes));
+        assert!(source.exists());
+        // A WAV with missing/invalid worker metadata must not accumulate in
+        // app data even when its audio samples pass structural validation.
+        let orphan = folder.join("orphan.wav");
+        fs::copy(&source, &orphan).unwrap();
+        assert!(finalize_or_remove_rendered_wav(
+            &orphan, Uuid::new_v4().to_string(),
+            &json!({"result": {"segments": [], "duration_seconds": 568.0}}),
+        ).is_err());
+        assert!(!orphan.exists());
+        assert!(source.exists());
         fs::remove_dir_all(folder).unwrap();
     }
 

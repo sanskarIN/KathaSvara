@@ -31,20 +31,24 @@ export function buildDialogueSrt(timings: SegmentTiming[], lines: SubtitleLine[]
   }
   const scripts = new Map(lines.map(line => [line.segment_id, line.text]));
   const cues: string[] = [];
-  let previousEnd = 0;
+  let previousEndMs = 0;
   for (const timing of timings) {
     const { start_seconds: start, end_seconds: end } = timing;
     const content = (timing.effective_text ?? scripts.get(timing.segment_id))
       ?.replace(/\s+/gu, " ").trim();
+    // SubRip timestamps use integer milliseconds. Validate the same rounded
+    // positions that the native exporter will parse, not a different tolerance.
+    const startMs = Math.round(start * 1000);
+    const endMs = Math.round(end * 1000);
     if (!content || !Number.isFinite(start) || !Number.isFinite(end) ||
-        start < 0 || end <= start || start + 0.002 < previousEnd || end > 1200.1) {
+        startMs < 0 || endMs <= startMs || startMs < previousEndMs || endMs > 1_200_000) {
       throw new Error("Missing dialogue or invalid generated subtitle timings.");
     }
     if (content.length > 3000) {
       throw new Error("A subtitle line exceeds the 3000-character limit.");
     }
     cues.push(`${cues.length + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${content}`);
-    previousEnd = end;
+    previousEndMs = endMs;
   }
   return cues.join("\n\n") + "\n";
 }

@@ -6,6 +6,10 @@
 - Stream native WAV export to a new destination without buffering the entire recording; reject malformed RIFF/PCM16 headers, invalid durations, oversized files and existing export paths.
 - Carry ephemeral, pronunciation-glossary-adjusted spoken text alongside measured dialogue timings so Hindi SRT export matches the generated narration rather than a potentially changed source document.
 - Confirm through Python/Rust/React tests that persistent render journals do not record the story text and that large local WAV exports are bounded and safe.
+- Correct native SubRip export to accept real newlines instead of literal backslash characters; validate actual cue ordering, sequence numbers, timestamps, readable text, 20-minute duration and 256-cue bounds.
+- Validate rounded millisecond cue times consistently between React and Rust; reject zero-length/overlapping captions before writing.
+- Reject incomplete or inconsistent synthesis metadata and delete only the failed job's WAV rather than allowing silent orphan files after a completed Python subprocess.
+- Add Hindi SRT, malformed/escaped caption, native large-WAV recovery and rounded-timing regression cases.
 - **Not yet published:** [v0.4.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0) remains the latest experimental developer pre-release. Real Hindi speech/model quality and Windows clean-install acceptance remain open.
 
 ## [v0.4.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0)
