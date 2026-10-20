@@ -128,3 +128,45 @@ def test_cache_symlink_entries_remain_untouched(tmp_path: Path) -> None:
 def test_invalid_cleanup_flags_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="boolean"):
         cleanup_partial_wavs(tmp_path, dry_run="yes")  # type: ignore[arg-type]
+
+def test_scan_limit_fails_without_any_partial_deletion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kathasvara.temp_cleanup as maintenance
+
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    files = [
+        audio / f"{uuid.uuid4()}-{uuid.uuid4().hex}.partial.wav"
+        for _ in range(2)
+    ]
+    for path in files:
+        path.write_bytes(b"KEEP")
+        old = time.time() - 100_000
+        os.utime(path, (old, old))
+    monkeypatch.setattr(maintenance, "MAX_SCANNED_ENTRIES", 1)
+    with pytest.raises(ValueError, match="Too many entries"):
+        cleanup_partial_wavs(tmp_path, dry_run=False)
+    assert all(path.read_bytes() == b"KEEP" for path in files)
+
+
+def test_second_directory_symlink_refuses_before_deleting_first_directory(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    stale = audio / f"{uuid.uuid4()}-{uuid.uuid4().hex}.partial.wav"
+    stale.write_bytes(b"KEEP")
+    old = time.time() - 100_000
+    os.utime(stale, (old, old))
+    external = tmp_path / "external"
+    external.mkdir()
+    cache_link = tmp_path / "segment-cache"
+    try:
+        cache_link.symlink_to(external, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable.")
+    with pytest.raises(ValueError, match="symlinked"):
+        cleanup_partial_wavs(tmp_path, dry_run=False)
+    assert stale.read_bytes() == b"KEEP"
+
