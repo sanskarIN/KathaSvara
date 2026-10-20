@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, legacyToStoryV2,
-  makeCharacter, moveScene, moveSegment, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
+  makeCharacter, moveScene, moveSegment, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
   type StoryV2,
 } from "./story_v2";
 
@@ -94,5 +94,31 @@ describe("extended cast and scene editing", () => {
     const doc = fixture();
     expect(() => renameCharacter(doc, "raja", "Narrator")).toThrow("unique");
     expect(renameCharacter(doc, "raja", "राजा नया").characters[1].name).toBe("राजा नया");
+  });
+});
+
+describe("v0.2.1 non-destructive pronunciation authoring", () => {
+  it("edits only reviewed speech and invalidates stale segment metadata", () => {
+    const doc = fixture();
+    const result = reviewSpokenText(doc, "seg1", "नमस्कार जी");
+    const segment = result.scenes[0].segments[0];
+    expect(segment.original_text).toBe("नमस्कार");
+    expect(segment.spoken_text).toBe("नमस्कार जी");
+    expect(segment.audio_ref).toBeNull();
+    expect(segment.duration_seconds).toBeNull();
+    expect(segment.status).toBe("stale");
+    expect(doc.scenes[0].segments[0].spoken_text).toBe("नमस्कार");
+    expect(() => reviewSpokenText(doc, "seg1", " ")).toThrow("1–100000");
+    expect(() => reviewSpokenText(doc, "unknown", "hello")).toThrow("not found");
+  });
+  it("persists optional glossary and rejects duplicated original phrases", () => {
+    const doc = fixture();
+    const rules = [{ id: "a", original: "राजा भोज", spoken: "रजा भोज", enabled: true }];
+    const changed = setGlossary(doc, rules);
+    expect(changed.pronunciation_glossary).toEqual(rules);
+    expect(changed.text).toBe(doc.text);
+    expect(doc.pronunciation_glossary).toEqual([]);
+    expect(() => setGlossary(doc, [...rules, { ...rules[0], id: "b" }])).toThrow("unique");
+    expect(() => setGlossary(doc, [{ ...rules[0], spoken: "" }])).toThrow("unique");
   });
 });
