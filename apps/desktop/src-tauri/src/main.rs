@@ -739,7 +739,7 @@ fn read_render_history(
         return Ok(Vec::new());
     }
     let mut entries = Vec::new();
-    for result in fs::read_dir(&folder).map_err(|e| e.to_string())? {
+    for result in fs::read_dir(folder).map_err(|e| e.to_string())? {
         let entry = result.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
