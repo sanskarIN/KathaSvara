@@ -28,8 +28,8 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         characters = request.get("characters", [])
         if not isinstance(text, str) or not isinstance(title, str):
             raise TypeError("Dialogue parsing requires a story title and text.")
-        if not isinstance(characters, list) or len(characters) > 99:
-            raise ValueError("Expected at most 99 non-narrator character profiles.")
+        if not isinstance(characters, list) or len(characters) > 100:
+            raise ValueError("Expected at most 100 character profiles.")
         configured = [narrator()]
         for entry in characters:
             if not isinstance(entry, dict):
@@ -37,11 +37,15 @@ def handle(request: dict[str, object]) -> dict[str, object]:
             voice = entry.get("voice", {})
             if not isinstance(voice, dict):
                 raise TypeError("Invalid voice profile.")
-            configured.append(Character(
+            character = Character(
                 id=entry["id"], name=entry["name"],
                 voice=VoiceProfile(**voice),
                 description=entry.get("description", ""),
-            ))
+            )
+            if character.id == "narrator":
+                configured[0] = character
+            else:
+                configured.append(character)
         script_id = request.get("script_id")
         if script_id is not None and not isinstance(script_id, str):
             raise TypeError("Script ID must be a string.")
