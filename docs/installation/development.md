@@ -66,3 +66,13 @@ A successful response must include output WAV metadata. Listen to the file and i
 The Story editor can import a UTF-8 `.txt` or `.md` file using the operating system's file chooser. Only files up to 250 KB are accepted. Import starts a new unsaved project and asks before replacing the current editor. Larger stories can be preserved as text but must be split into smaller generation jobs (3000 Unicode code points per request).
 
 Use **Inspect Hindi pronunciation text** to see the exact normalized text and speech chunks. This offline inspection requires the Python bridge but does not load or download a speech model. It does not change the story unless **Apply normalized text** is selected. Edits to text or voice controls invalidate the audio preview so stale audio cannot be accidentally exported. The current worker has a 10-minute speech-generation timeout; this is a safety limit rather than a performance guarantee.
+
+## Inspect which local speech dependencies are available (v0.1.1 development)
+
+The **Settings → Inspect local TTS setup** control asks the Python subprocess for a lightweight `diagnose` report. You can also call the same protocol manually from `services/inference`:
+
+```sh
+echo '{"action":"diagnose"}' | python -m kathasvara.cli
+```
+
+The response reports the detected Python version, host platform, and whether the `numpy`, `soundfile`, `torch`, and `chatterbox` packages are import-discoverable. It never downloads model weights, imports the heavy synthesis model, or suggests that real Hindi speech quality has been validated. Installed packages are **necessary but not sufficient** for functioning synthesis: CUDA, compatible model revisions, GPU memory, sample quality, and playback must be checked separately. This feature is currently being developed on the `dev/v0.1.1-inference-reliability` branch, not included in the v0.1.0 release tag.
