@@ -177,7 +177,7 @@ fn invoke_python(request: Value) -> Result<Value, String> {
         .stdout
         .split(|byte| *byte == b'\n')
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
-        .last()
+        .next_back()
         .ok_or_else(|| "Inference service did not return valid JSON.".to_string())?;
     if !response.status.success() || data.get("ok") != Some(&Value::Bool(true)) {
         return Err(
