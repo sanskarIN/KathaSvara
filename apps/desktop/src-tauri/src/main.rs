@@ -677,7 +677,7 @@ fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>
         let updated = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         entries.push((updated, id.to_owned(), entry.path()));
     }
-    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    entries.sort_by_key(|item| std::cmp::Reverse(item.0));
     let mut reports = Vec::new();
     for (_, job_id, path) in entries.into_iter().take(20) {
         let Ok(bytes) = fs::read(path) else { continue; };
