@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — v0.2.0 character and scene foundation
+
+- Add validated schema v2 for cast, voice profiles, scenes and dialogue segments, retaining v0.1.x project data without in-place rewrite.
+- Parse explicitly labeled Hindi dialogue, narrator blocks, Markdown scene headings and stage directions; preserve unknown labels for manual resolution.
+- Add Rust/Tauri v2 story persistence, Hindi parse bridge and a dedicated cast/scene editor.
+- Add scene order, manual corrections, character duplication/reassignment and bounded per-character supported voice settings.
+- Add model-reusing multi-segment PCM16 render orchestration, SHA-256 content cache, pause/fade assembly, progress, cooperative cancel signal and selective regeneration.
+- Extend Python, Rust and TypeScript tests; start an unsigned Windows EXE candidate build workflow for internal verification.
+- **Not a public release.** Real distinct-character voices, Chatterbox listening tests, working Windows package, and full v0.2.0 acceptance are unverified.
+
+
 ## [v0.1.1 — Source-only developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1)
 
 - Add a no-download diagnostics action that reports whether optional Python TTS dependencies are discoverable.
