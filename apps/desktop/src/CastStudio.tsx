@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
+import { buildDialogueSrt } from "./lib/subtitles";
 import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
@@ -198,6 +199,28 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       }
     }
   }
+  async function exportSceneSubtitles() {
+    if (!audio?.segment_timings?.length) return;
+    try {
+      const lines = document.scenes.flatMap(scene =>
+        scene.segments.filter(segment => segment.kind === "speech")
+          .map(segment => ({ segment_id: segment.id, text: segment.spoken_text })),
+      );
+      // Timings are derived from actual rendered PCM frames, not reading-speed estimates.
+      const content = buildDialogueSrt(audio.segment_timings, lines);
+      const destination = await save({
+        title: "Export segment-timed Hindi SubRip subtitles",
+        defaultPath: "kathasvara-dialogue.srt",
+        filters: [{ name: "SubRip subtitles", extensions: ["srt"] }],
+      });
+      if (!destination) return;
+      await invoke("export_subtitles", { destination, content });
+      onMessage("Measured dialogue-level .srt captions exported. Review caption timing and text before publishing.");
+    } catch (error) {
+      onMessage("Cannot export dialogue subtitles: " + errorString(error));
+    }
+  }
+
   async function exportAudio() {
     if (!audio) return;
     try {
@@ -391,8 +414,13 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           {audio && <>
             <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated dialogue preview" />
             <small>{audio.duration_seconds.toFixed(1)} seconds · {audio.sample_rate} Hz · {audio.chunks} synthesis chunks</small>
+            <p className="helper">Subtitles are aligned to measured dialogue segments, not individual words.
+              Review Hindi punctuation and timing before adding them to a video.</p>
             <div className="cast-actions">
               <button className="secondary-button" onClick={() => void exportAudio()}>Export WAV</button>
+              <button className="secondary-button"
+                disabled={!audio.segment_timings?.length}
+                onClick={() => void exportSceneSubtitles()}>Export dialogue SRT</button>
               <button className="quiet-button" onClick={() => void clearAudio()}>Clear preview</button>
             </div>
           </>}
