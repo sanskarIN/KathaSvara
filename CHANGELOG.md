@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.2 — Unreleased development
+
+- Add model-free inspection of the local SHA-256 speech-segment cache and opt-in bounded oldest-entry cleanup.
+- Provide a dry-run plan before asking for explicit confirmation in the desktop Settings page; preserve recent cache entries and ignore symlinks, projects, and unrelated output files.
+- Protect the Rust/Python bridge against oversized worker output deadlocks by continuing to drain stdout without exceeding the response memory cap.
+- Extend regression coverage and document remaining recovery, streaming-audio and manual real-model acceptance tasks.
+- **Not yet published:** this development work does not change the verified v0.2.1 GitHub pre-release.
+
 ## [v0.2.1 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1)
 
 - Add a validated project-local pronunciation glossary (NFC, Devanagari-aware word boundaries, escaped literal matching, deterministic nonrecursive overrides), plus no-model exact pre-TTS text preview.

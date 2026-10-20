@@ -361,14 +361,24 @@ const MAX_PYTHON_RESPONSE: usize = 1_048_576;
 fn read_bounded_response(mut source: impl Read) -> Result<Vec<u8>, String> {
     let mut response = Vec::new();
     let mut chunk = [0_u8; 8192];
+    let mut exceeded_limit = false;
     loop {
         let size = source.read(&mut chunk)
             .map_err(|_| "Cannot read the local inference response.".to_string())?;
-        if size == 0 { return Ok(response); }
-        if response.len().saturating_add(size) > MAX_PYTHON_RESPONSE {
-            return Err("Inference response exceeds the maximum allowed size.".into());
+        if size == 0 {
+            return if exceeded_limit {
+                Err("Inference response exceeds the maximum allowed size.".into())
+            } else {
+                Ok(response)
+            };
         }
-        response.extend_from_slice(&chunk[..size]);
+        // Keep draining stdout after overflow. Stopping the read early can
+        // block the child on a full pipe while the parent waits for its exit.
+        if response.len().saturating_add(size) > MAX_PYTHON_RESPONSE {
+            exceeded_limit = true;
+        } else if !exceeded_limit {
+            response.extend_from_slice(&chunk[..size]);
+        }
     }
 }
 
@@ -464,6 +474,41 @@ async fn diagnose_engine() -> Result<Value, String> {
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+fn cache_budget_bytes(max_mib: u32) -> Result<u64, String> {
+    if !(16..=2_048).contains(&max_mib) {
+        return Err("Cache budget must be between 16 and 2048 MiB.".into());
+    }
+    Ok(u64::from(max_mib) * 1024 * 1024)
+}
+
+#[tauri::command]
+async fn inspect_segment_cache(app: tauri::AppHandle) -> Result<Value, String> {
+    let cache = app_dir(&app)?.join("segment-cache");
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({"action": "cache_stats", "cache": cache}))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Cache inspection returned no report.".to_string())
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn prune_segment_cache(
+    app: tauri::AppHandle,
+    max_mib: u32,
+    dry_run: bool,
+) -> Result<Value, String> {
+    let budget = cache_budget_bytes(max_mib)?;
+    let cache = app_dir(&app)?.join("segment-cache");
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({
+            "action": "cache_prune", "cache": cache,
+            "max_bytes": budget, "dry_run": dry_run,
+        }))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Cache maintenance returned no report.".to_string())
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -725,7 +770,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, synthesize, render_story_v2, story_render_progress, cancel_story_render, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, cancel_story_render, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -840,6 +885,21 @@ mod tests {
         let bytes = vec![b'a'; MAX_PYTHON_RESPONSE + 1];
         assert!(read_bounded_response(std::io::Cursor::new(bytes))
             .expect_err("response should be bounded").contains("maximum allowed size"));
+    }
+
+    #[test]
+    fn cache_budget_rejects_excessive_requests() {
+        assert_eq!(cache_budget_bytes(512).unwrap(), 512 * 1024 * 1024);
+        assert!(cache_budget_bytes(0).is_err());
+        assert!(cache_budget_bytes(2_049).is_err());
+    }
+
+    #[test]
+    fn oversized_response_is_fully_drained_without_growing_memory() {
+        let payload = vec![b'a'; MAX_PYTHON_RESPONSE * 4];
+        let mut input = std::io::Cursor::new(payload);
+        assert!(read_bounded_response(&mut input).is_err());
+        assert_eq!(input.position() as usize, MAX_PYTHON_RESPONSE * 4);
     }
 
     #[test]

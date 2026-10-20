@@ -8,6 +8,7 @@ import json
 import sys
 from pathlib import Path
 
+from .cache import CACHE_BUDGET_BYTES, inspect_cache, prune_cache
 from .diagnostics import diagnose
 from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
@@ -23,6 +24,18 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "engine": "chatterbox-multilingual", "language": "hi"}
     if request.get("action") == "diagnose":
         return {"ok": True, "result": diagnose()}
+    if request.get("action") in ("cache_stats", "cache_prune"):
+        cache_path = request.get("cache")
+        if not isinstance(cache_path, str):
+            raise TypeError("Cache maintenance requires an absolute cache directory.")
+        cache = Path(cache_path)
+        if request["action"] == "cache_stats":
+            return {"ok": True, "result": inspect_cache(cache)}
+        report = prune_cache(
+            cache, max_bytes=request.get("max_bytes", CACHE_BUDGET_BYTES),
+            dry_run=request.get("dry_run", True),
+        )
+        return {"ok": True, "result": report}
     if request.get("action") == "parse_dialogue":
         text = request.get("text")
         title = request.get("title", "Hindi Story")

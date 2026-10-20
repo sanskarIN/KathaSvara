@@ -140,3 +140,28 @@ def test_dialogue_cli_preserves_existing_narrator_voice_profile() -> None:
     assert result["result"]["characters"][0]["voice"]["exaggeration"] == 0.85
     assert result["result"]["characters"][0]["voice"]["pause_ms"] == 250
     assert result["result"]["scenes"][0]["segments"][0]["speaker_id"] == "narrator"
+
+
+def test_cache_protocol_inspection_and_dry_run_without_model(tmp_path) -> None:
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    entry = cache / ("a" * 64 + ".wav")
+    entry.write_bytes(b"mock-cache")
+    response = handle({"action": "cache_stats", "cache": str(cache)})
+    assert response["result"]["files"] == 1
+    assert response["result"]["bytes"] == len(b"mock-cache")
+    plan = handle({"action": "cache_prune", "cache": str(cache), "max_bytes": 0})
+    assert plan["result"]["dry_run"] is True
+    assert entry.exists()
+
+
+@pytest.mark.parametrize("payload", [
+    {"action": "cache_stats", "cache": "relative-folder"},
+    {"action": "cache_stats", "cache": 12},
+    {"action": "cache_prune", "cache": "relative-folder"},
+    {"action": "cache_prune", "cache": "/tmp/segment-cache", "max_bytes": True},
+    {"action": "cache_prune", "cache": "/tmp/segment-cache", "dry_run": "false"},
+])
+def test_cache_protocol_rejects_unsafe_arguments(payload: dict[str, object]) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        handle(payload)
