@@ -9,6 +9,8 @@ export interface StoryProject {
 export interface AudioResult {
   audio_id: string;
   data_url: string;
+  preview_available?: boolean;
+  file_bytes?: number;
   duration_seconds: number;
   sample_rate: number;
   chunks: number;
@@ -16,6 +18,7 @@ export interface AudioResult {
     segment_id: string;
     start_seconds: number;
     end_seconds: number;
+    effective_text?: string;
   }>;
 }
 
