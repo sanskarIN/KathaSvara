@@ -187,7 +187,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const response = await invoke<DialogueParseResponse>("parse_dialogue", {
         title: document.title, text: document.text,
         characters: document.characters,
-        scriptId: document.id,
+        scriptId: document.id || null,
       });
       if (!response.ok) throw new Error("Dialogue parser returned an unsuccessful response.");
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
@@ -209,7 +209,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   async function saveDocument() {
     setBusy(true);
     try {
-      const saved = await invoke<StoryV2>("save_story_v2", { project: document });
+      const saved = await invoke<StoryV2>("save_story_v2", {
+        project: { ...document, id: document.id || crypto.randomUUID() },
+      });
       onChange(saved);
       setDirty(false);
       onMessage("Version 2 story and voice profiles saved atomically in local app data.");
@@ -367,7 +369,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                        onBlur={event => {
                          const next = event.currentTarget.value;
                          if (next === segment.spoken_text) return;
-                         try { edit(doc => reviewSpokenText(doc, segment.id, next)); }
+                         try {
+                           reviewSpokenText(document, segment.id, next);
+                           edit(doc => reviewSpokenText(doc, segment.id, next));
+                         }
                          catch (error) {
                            onMessage(errorString(error));
                            event.currentTarget.value = segment.spoken_text;
