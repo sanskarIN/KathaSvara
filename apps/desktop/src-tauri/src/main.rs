@@ -802,6 +802,9 @@ fn forget_render_journal(
 #[tauri::command]
 fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
     Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
+    if !is_render_job_active(&job_id)? {
+        return Err("The render job is no longer active.".into());
+    }
     let folder = app_dir(&app)?.join("jobs");
     fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let path = folder.join(format!("{job_id}.cancel"));
@@ -844,9 +847,9 @@ async fn render_story_v2(
             return Err("Render job already has a recovery journal.".into());
         }
         let progress_path = jobs.join(format!("{job_id}.progress.json"));
-        // A new UUID is supplied for each request by the UI; old sentinel is
-        // never interpreted as a fresh cancellation.
-        let _ = fs::remove_file(&cancel_path);
+        // Keep cancellation sent between synchronous registration and worker
+        // startup: removing the new UUID's marker here would lose fast cancels.
+        // A previously used job UUID is rejected by the persisted journal.
         let _ = fs::remove_file(&progress_path);
         let response = invoke_python(json!({
             "action": "render_story",
