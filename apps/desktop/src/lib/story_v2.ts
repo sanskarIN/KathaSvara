@@ -205,7 +205,7 @@ export function unresolvedSpeech(project: StoryV2): SegmentV2[] {
 
 /** Changes only the reviewed speech, never the untouched source script. */
 export function reviewSpokenText(project: StoryV2, segmentId: string, spokenText: string): StoryV2 {
-  if (!spokenText.trim() || spokenText.length > 100_000 || spokenText.includes("\\0")) {
+  if (!spokenText.trim() || spokenText.length > 100_000 || spokenText.includes("\u0000")) {
     throw new Error("Reviewed speech must contain 1–100000 valid characters.");
   }
   let found = false;
@@ -232,7 +232,7 @@ export function setGlossary(project: StoryV2, rules: PronunciationRuleV2[]): Sto
     const spoken = rule.spoken.trim().normalize("NFC");
     if (!rule.id || rule.id.length > 80 || !original || original.length > 80 ||
         !spoken || spoken.length > 160 || original === spoken ||
-        /[\\x00-\\x1f\\x7f]/.test(rule.id + original + spoken) ||
+        /[\u0000-\u001f\u007f]/.test(rule.id + original + spoken) ||
         ids.has(rule.id) || sources.has(original.toLocaleLowerCase())) {
       throw new Error("Pronunciation rules need unique, nonempty terms and valid lengths.");
     }
