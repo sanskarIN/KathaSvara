@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.0 — Experimental pre-release candidate
+## [v0.4.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0)
 
 - Protect destructive segment-cache deletion and story rendering across participating Python worker processes with a persistent OS-owned advisory file lock (POSIX flock / Windows byte-range locking); automatically release it when a worker exits, but never unlink its sentinel.
 - Return measured per-dialogue PCM-frame start and end timestamps from multi-scene narration.
@@ -8,6 +8,7 @@
 - Validate SRT cue ordering, duration, text and destination; refuse to overwrite an existing subtitle file.
 - Add model-free cross-process Python lock contention tests, Hindi SRT Vitest coverage, Rust segment-timing/export tests, and Windows Python lock smoke verification in the release workflow.
 - Synchronize version numbers and unsigned Windows candidate naming to v0.4.0. Publish only after exact-commit GitHub Actions verifies Python, React, Windows Rust, Windows Python locks, EXE compilation, release checksums and immutable tag.
+- **Publication:** v0.4.0 is published from the exact tested release SHA following the [successful guarded workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39388218828), with unsigned developer EXE and verified SHA-256 companion. Not a standalone or signed installer.
 - **Still not accepted:** real Hindi audio listening, distinct character voices, clean Windows GUI setup, bundled Python/models or a production-grade installer. See issue #3.
 
 ## [v0.3.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0)
