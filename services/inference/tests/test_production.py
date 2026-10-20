@@ -59,6 +59,11 @@ def test_render_preserves_order_and_measured_duration(tmp_path: Path) -> None:
     assert details.channels == 1 and details.samplerate == 24000
     assert details.frames == 2400 * 2 + int(24000 * .14)
     assert report["duration_seconds"] == round(details.frames / 24000, 3)
+    # Captions follow measured PCM frames and exclude silence between actors.
+    assert report["segments"][0]["start_seconds"] == 0
+    assert report["segments"][0]["end_seconds"] == 0.1
+    assert report["segments"][1]["start_seconds"] == 0.24
+    assert report["segments"][1]["end_seconds"] == 0.34
 
 
 def test_second_render_reuses_cache_without_regenerating(tmp_path: Path) -> None:
