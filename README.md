@@ -2,15 +2,15 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Latest pre-release:** [v0.1.1 — Developer Preview (Source Only)](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) is **published on GitHub**. The previous [v0.1.0 preview](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remains available. Both are source-only developer releases; model weights, Windows installers, audible Hindi voice-quality acceptance, and standalone desktop packaging remain **unverified or unavailable**.
+> **Latest experimental pre-release:** [KathaSvara v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) is **published on GitHub** with source archives and an unsigned Windows `.exe` developer candidate, SHA-256 checksums, and setup instructions. The [v0.1.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) and [v0.1.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) previews remain available. **v0.2.0 is not stable or self-contained**: it needs external Python/model dependencies, and real Hindi audio quality, distinct character voices and clean Windows launch remain unverified.
 
-## v0.2.0 development — characters and scenes
+## v0.2.0 experimental pre-release — characters and scenes
 
-**v0.2.0 experimental developer pre-release candidate:** [development PR #4](https://github.com/sanskarIN/KathaSvara/pull/4) adds versioned scene/character models, a deterministic Hindi dialogue parser, manual speaker correction, supported per-character engine settings, and a multi-segment audio orchestration layer. It extends the existing React/Tauri/Rust/Python app and preserves the v0.1.x narrator project files separately. See [v0.2.0 architecture](docs/architecture/v0.2.0-story-pipeline.md) and [release gates](docs/releases/v0.2.0-development.md).
+**Published experimental developer pre-release:** [merged PR #4](https://github.com/sanskarIN/KathaSvara/pull/4) adds versioned scene/character models, a deterministic Hindi dialogue parser, manual speaker correction, supported per-character engine settings, and a multi-segment audio orchestration layer. It extends the existing React/Tauri/Rust/Python app and preserves the v0.1.x narrator project files separately. See [v0.2.0 architecture](docs/architecture/v0.2.0-story-pipeline.md) and [release gates](docs/releases/v0.2.0-development.md).
 
 **This functionality is still being tested.** Identifying `राजा भोज:` and `मंत्री:` in a written script does not mean the installed Chatterbox model produces two distinctly recognizable voices. The engine currently exposes only documented Hindi expressiveness/guidance controls; real multi-speaker voice consistency and audio quality are not accepted.
 
-A [Windows CI workflow](.github/workflows/windows-portable-candidate.yml) builds an **unsigned unbundled EXE**, and the v0.2.0 release pipeline is configured to attach a freshly compiled copy after CI passes. See [GitHub Releases](https://github.com/sanskarIN/KathaSvara/releases) for whether publication actually succeeded. It requires external Python and model dependencies; do not treat it as a verified standalone installer.
+The [v0.2.0 pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) includes an **unsigned, unbundled Windows EXE** compiled on its release commit, with a `SHA256SUMS.txt` checksum and a dependency-warning `README.txt`. It requires external Python and model dependencies; do not treat it as a verified standalone installer. Automated release CI passed, but interactive launch and real Hindi listening acceptance remain open.
 
 ## What the development source implements
 
@@ -26,7 +26,7 @@ A [Windows CI workflow](.github/workflows/windows-portable-candidate.yml) builds
 - Detect stale audio when the script or voice settings change; bound Python inference runtime and validate WAV chunk integrity.
 - Python, Rust and TypeScript unit-test foundations.
 
-This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.1.1 pre-release notes](docs/releases/v0.1.1-notes.md) for precise limitations and what's changed.
+This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.2.0 experimental pre-release notes](docs/releases/v0.2.0-notes.md) for precise limitations and what's changed.
 
 ## Quick start (development mode only)
 
