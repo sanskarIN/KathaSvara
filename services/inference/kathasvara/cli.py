@@ -11,6 +11,8 @@ from pathlib import Path
 from .diagnostics import diagnose
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
+from .dialogue import parse_dialogue, unresolved_labels
+from .story import Character, VoiceProfile, narrator
 from .synthesis import synthesize
 
 
@@ -19,6 +21,35 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "engine": "chatterbox-multilingual", "language": "hi"}
     if request.get("action") == "diagnose":
         return {"ok": True, "result": diagnose()}
+    if request.get("action") == "parse_dialogue":
+        text = request.get("text")
+        title = request.get("title", "Hindi Story")
+        characters = request.get("characters", [])
+        if not isinstance(text, str) or not isinstance(title, str):
+            raise TypeError("Dialogue parsing requires a story title and text.")
+        if not isinstance(characters, list) or len(characters) > 99:
+            raise ValueError("Expected at most 99 non-narrator character profiles.")
+        configured = [narrator()]
+        for entry in characters:
+            if not isinstance(entry, dict):
+                raise TypeError("Invalid character profile.")
+            voice = entry.get("voice", {})
+            if not isinstance(voice, dict):
+                raise TypeError("Invalid voice profile.")
+            configured.append(Character(
+                id=entry["id"], name=entry["name"],
+                voice=VoiceProfile(**voice),
+                description=entry.get("description", ""),
+            ))
+        script_id = request.get("script_id")
+        if script_id is not None and not isinstance(script_id, str):
+            raise TypeError("Script ID must be a string.")
+        document = parse_dialogue(title, text, configured, script_id=script_id)
+        return {
+            "ok": True, "result": document.to_dict(),
+            "unresolved": unresolved_labels(document),
+            "distinct_voices_verified": False,
+        }
     if request.get("action") == "inspect":
         text = request.get("text")
         if not isinstance(text, str):
@@ -51,7 +82,11 @@ def handle(request: dict[str, object]) -> dict[str, object]:
 
 def main() -> int:
     try:
-        payload = sys.stdin.read(16_384)
+        # Bound input to 250000 Unicode code points; large scripts must not be
+        # silently truncated into a different parse or audio request.
+        payload = sys.stdin.read(250_001)
+        if len(payload) > 250_000:
+            raise ValueError("Inference request exceeds the maximum input size.")
         request = json.loads(payload)
         if not isinstance(request, dict):
             raise TypeError("Request must be a JSON object.")
