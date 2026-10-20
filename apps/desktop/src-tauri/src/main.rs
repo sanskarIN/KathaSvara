@@ -983,26 +983,41 @@ fn discard_audio(app: tauri::AppHandle, audio_id: String) -> Result<(), String> 
     }
 }
 
+fn copy_validated_wav(source: &Path, destination: &Path) -> Result<(), String> {
+    if !destination.is_absolute() ||
+        destination.extension().and_then(|ext| ext.to_str()) != Some("wav") {
+        return Err("Choose a new absolute .wav output path.".into());
+    }
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|_| "Generated audio is missing.".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Generated audio is not a regular WAV file.".into());
+    }
+    let mut input = fs::File::open(source)
+        .map_err(|_| "Generated audio is missing.".to_string())?;
+    let size = inspect_wav_file(&mut input)?;
+    let mut output = fs::OpenOptions::new().write(true).create_new(true)
+        .open(destination).map_err(|e| format!("Cannot create destination file: {e}"))?;
+    let copy = std::io::copy(&mut input, &mut output)
+        .and_then(|copied| {
+            if copied != size {
+                return Err(std::io::Error::other("WAV source changed during export."));
+            }
+            output.sync_all()
+        });
+    if let Err(error) = copy {
+        drop(output);
+        let _ = fs::remove_file(destination);
+        return Err(format!("Unable to export WAV: {error}"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> Result<(), String> {
     Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.")?;
     let source = app_dir(&app)?.join("audio").join(format!("{audio_id}.wav"));
-    let destination = Path::new(&destination);
-    if !destination.is_absolute() || destination.extension().and_then(|e| e.to_str()) != Some("wav") {
-        return Err("Choose an absolute .wav output path.".into());
-    }
-    let mut source = fs::File::open(source).map_err(|_| "Generated audio is missing.".to_string())?;
-    if source.metadata().map_err(|e| e.to_string())?.len() > MAX_GENERATED_WAV {
-        return Err("Audio exceeds the export limit.".into());
-    }
-    let mut bytes = Vec::new();
-    source.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    inspect_wav(&bytes)?;
-    let mut out = fs::OpenOptions::new().write(true).create_new(true)
-        .open(destination).map_err(|e| format!("Cannot create destination file: {e}"))?;
-    out.write_all(&bytes).map_err(|e| e.to_string())?;
-    out.sync_all().map_err(|e| e.to_string())?;
-    Ok(())
+    copy_validated_wav(&source, Path::new(&destination))
 }
 
 fn write_srt(destination: &Path, content: &str) -> Result<(), String> {
