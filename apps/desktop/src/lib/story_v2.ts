@@ -137,6 +137,58 @@ export function renameScene(project: StoryV2, sceneId: string, title: string): S
     scene.id === sceneId ? { ...scene, title: title.trim() } : scene) };
 }
 
+export function addScene(project: StoryV2, title: string, id = crypto.randomUUID()): StoryV2 {
+  if (!title.trim() || title.length > 120) throw new Error("Scene title must contain 1–120 characters.");
+  if (project.scenes.length >= 200) throw new Error("Maximum 200 scenes.");
+  if (project.scenes.some(scene => scene.id === id)) throw new Error("Duplicate scene identifier.");
+  return { ...project, scenes: [...project.scenes, {
+    id, title: title.trim(), notes: "", segments: [],
+  }] };
+}
+
+export function moveSegment(project: StoryV2, segmentId: string, destinationSceneId: string): StoryV2 {
+  if (!project.scenes.some(scene => scene.id === destinationSceneId)) {
+    throw new Error("Destination scene does not exist.");
+  }
+  const matching = project.scenes.flatMap(scene => scene.segments)
+    .filter(segment => segment.id === segmentId);
+  if (matching.length !== 1) throw new Error("Dialogue segment must be unique.");
+  const segment = matching[0];
+  const scenes = project.scenes.map(scene => ({
+    ...scene,
+    segments: scene.id === destinationSceneId
+      ? [...scene.segments.filter(entry => entry.id !== segmentId), segment]
+      : scene.segments.filter(entry => entry.id !== segmentId),
+  }));
+  return { ...project, scenes };
+}
+
+export function duplicateCharacter(project: StoryV2, id: string, newId = crypto.randomUUID()): StoryV2 {
+  const source = project.characters.find(item => item.id === id);
+  if (!source) throw new Error("Original character not found.");
+  let suffix = 2;
+  let name = `${source.name} copy`;
+  while (project.characters.some(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    name = `${source.name} copy ${suffix++}`;
+  }
+  const clone: CharacterV2 = {
+    ...source, id: newId, name, voice: { ...source.voice },
+  };
+  return { ...project, characters: [...project.characters, clone] };
+}
+
+export function renameCharacter(project: StoryV2, id: string, name: string): StoryV2 {
+  if (id === "narrator") throw new Error("The narrator's identity is fixed.");
+  if (!name.trim() || name.length > 120) throw new Error("Character name must contain 1–120 characters.");
+  const clean = name.trim();
+  if (project.characters.some(item => item.id !== id &&
+      item.name.toLocaleLowerCase() === clean.toLocaleLowerCase())) {
+    throw new Error("Character names must be unique.");
+  }
+  return { ...project, characters: project.characters.map(item =>
+    item.id === id ? { ...item, name: clean } : item) };
+}
+
 export function unresolvedSpeech(project: StoryV2): SegmentV2[] {
   return project.scenes.flatMap(scene => scene.segments)
     .filter(seg => seg.kind === "speech" && seg.speaker_id === null);
