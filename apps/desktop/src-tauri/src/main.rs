@@ -763,6 +763,42 @@ fn story_render_history(
     read_render_history(&app_dir(&app)?.join("jobs"), story_id.as_deref())
 }
 
+fn forget_render_journal_file(
+    folder: &Path,
+    job_id: &str,
+    story_id: &str,
+) -> Result<(), String> {
+    Uuid::parse_str(job_id).map_err(|_| "Invalid render job ID.".to_string())?;
+    if story_id.is_empty() || story_id.len() > 80 {
+        return Err("Invalid story ID.".into());
+    }
+    if is_render_job_active(job_id)? {
+        return Err("Cannot forget a render while it is active.".into());
+    }
+    let path = folder.join(format!("{job_id}.manifest.json"));
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|_| "Render history record was not found.".to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() > 65_536 {
+        return Err("Render history record is not a regular bounded JSON file.".into());
+    }
+    let data: Value = serde_json::from_slice(
+        &fs::read(&path).map_err(|_| "Cannot read render history.".to_string())?,
+    ).map_err(|_| "Render history is unreadable.".to_string())?;
+    if data["schema_version"] != 1 || data["story_id"].as_str() != Some(story_id) {
+        return Err("The history record belongs to a different story.".into());
+    }
+    fs::remove_file(path).map_err(|e| format!("Cannot remove render history record: {e}"))
+}
+
+#[tauri::command]
+fn forget_render_journal(
+    app: tauri::AppHandle,
+    job_id: String,
+    story_id: String,
+) -> Result<(), String> {
+    forget_render_journal_file(&app_dir(&app)?.join("jobs"), &job_id, &story_id)
+}
+
 #[tauri::command]
 fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
     Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
@@ -892,7 +928,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, cancel_story_render, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
