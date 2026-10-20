@@ -698,9 +698,15 @@ struct RenderHistoryEntry {
     updated_at: String,
 }
 
-#[tauri::command]
-fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>, String> {
-    let folder = app_dir(&app)?.join("jobs");
+// Keep the history reader independent of Tauri to test filtering and
+// interrupt classification on a temporary folder without model weights.
+fn read_render_history(
+    folder: &Path,
+    story_filter: Option<&str>,
+) -> Result<Vec<RenderHistoryEntry>, String> {
+    if story_filter.is_some_and(|id| id.is_empty() || id.len() > 80) {
+        return Err("Invalid story history filter.".into());
+    }
     if !folder.exists() {
         return Ok(Vec::new());
     }
@@ -717,7 +723,7 @@ fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>
     }
     entries.sort_by_key(|item| std::cmp::Reverse(item.0));
     let mut reports = Vec::new();
-    for (_, job_id, path) in entries.into_iter().take(20) {
+    for (_, job_id, path) in entries {
         let Ok(bytes) = fs::read(path) else { continue; };
         let Ok(data) = serde_json::from_slice::<Value>(&bytes) else { continue; };
         let (Some(story_id), Some(state), Some(done), Some(total), Some(updated_at)) = (
@@ -725,17 +731,36 @@ fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>
             data["done"].as_u64(), data["total"].as_u64(),
             data["updated_at"].as_str(),
         ) else { continue; };
-        if data["schema_version"] != 1 || story_id.len() > 80 ||
-            updated_at.len() > 64 || total > 256 || done > total ||
+        if data["schema_version"] != 1 || story_id.is_empty() || story_id.len() > 80 ||
+            updated_at.len() > 64 || total == 0 || total > 256 || done > total ||
             !matches!(state, "running" | "cancelled" | "failed" | "completed") {
             continue;
         }
+        if story_filter.is_some_and(|filter| filter != story_id) {
+            continue;
+        }
+        let display_state = if state == "running" && !is_render_job_active(&job_id)? {
+            "interrupted"
+        } else {
+            state
+        };
         reports.push(RenderHistoryEntry {
-            job_id, story_id: story_id.to_owned(), state: state.to_owned(),
+            job_id, story_id: story_id.to_owned(), state: display_state.to_owned(),
             done: done as u32, total: total as u32, updated_at: updated_at.to_owned(),
         });
+        if reports.len() == 20 {
+            break;
+        }
     }
     Ok(reports)
+}
+
+#[tauri::command]
+fn story_render_history(
+    app: tauri::AppHandle,
+    story_id: Option<String>,
+) -> Result<Vec<RenderHistoryEntry>, String> {
+    read_render_history(&app_dir(&app)?.join("jobs"), story_id.as_deref())
 }
 
 #[tauri::command]
