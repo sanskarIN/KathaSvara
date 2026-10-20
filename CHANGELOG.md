@@ -8,7 +8,7 @@
 - Validate SRT cue ordering, duration, text and destination; refuse to overwrite an existing subtitle file.
 - Add model-free cross-process Python lock contention tests, Hindi SRT Vitest coverage, Rust segment-timing/export tests, and Windows Python lock smoke verification in the release workflow.
 - Synchronize version numbers and unsigned Windows candidate naming to v0.4.0. Publish only after exact-commit GitHub Actions verifies Python, React, Windows Rust, Windows Python locks, EXE compilation, release checksums and immutable tag.
-- **Publication:** v0.4.0 is published from the exact tested release SHA following the [successful guarded workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39388218828), with unsigned developer EXE and verified SHA-256 companion. Not a standalone or signed installer.
+- **Publication:** v0.4.0 was published from exact tested commit [`6773bf9`](https://github.com/sanskarIN/KathaSvara/commit/6773bf918839a215618ae8500fea1cda1b7a7b29) after the [successful guarded workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39388218828). Attached an unsigned 10,411,008-byte Windows developer EXE (SHA-256: `7ce3d90219580da15342c36967371a91bd75d63bfa02c5bf19fd6caab0465677`), `README.txt` and `SHA256SUMS.txt`. Not a standalone or signed installer.
 - **Still not accepted:** real Hindi audio listening, distinct character voices, clean Windows GUI setup, bundled Python/models or a production-grade installer. See issue #3.
 
 ## [v0.3.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0)
