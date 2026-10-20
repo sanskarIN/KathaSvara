@@ -152,7 +152,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         return;
       }
       setAudio(result);
-      onMessage("A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
+      onMessage(result.preview_available === false
+        ? "Full-length WAV generated on disk. Inline preview is unavailable above 25 MiB; export the WAV to listen and review."
+        : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
     } catch (error) {
       onMessage("Scene render stopped or failed: " + errorString(error));
     } finally {
@@ -412,8 +414,13 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               ))}</ul>}
           </section>}
           {audio && <>
-            <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated dialogue preview" />
-            <small>{audio.duration_seconds.toFixed(1)} seconds · {audio.sample_rate} Hz · {audio.chunks} synthesis chunks</small>
+            {audio.preview_available !== false
+              ? <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated dialogue preview" />
+              : <p role="status">This long narration is saved locally, but exceeds the 25 MiB inline preview limit.
+                Use <strong>Export WAV</strong> to copy the complete audio to a new file and listen in your preferred audio player.</p>}
+            <small>{audio.duration_seconds.toFixed(1)} seconds · {audio.sample_rate} Hz · {audio.chunks} synthesis chunks
+              {audio.file_bytes != null ? ` · ${(audio.file_bytes / (1024 * 1024)).toFixed(1)} MiB WAV` : ""}
+            </small>
             <p className="helper">Subtitles are aligned to measured dialogue segments, not individual words.
               Review Hindi punctuation and timing before adding them to a video.</p>
             <div className="cast-actions">
