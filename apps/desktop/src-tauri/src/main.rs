@@ -83,6 +83,15 @@ struct SceneV2 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PronunciationRuleV2 {
+    id: String,
+    original: String,
+    spoken: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoryV2 {
     schema_version: u32,
     id: String,
@@ -90,6 +99,8 @@ struct StoryV2 {
     text: String,
     characters: Vec<CharacterV2>,
     scenes: Vec<SceneV2>,
+    #[serde(default)]
+    pronunciation_glossary: Vec<PronunciationRuleV2>,
 }
 
 fn validate_story_v2(doc: &StoryV2) -> Result<(), String> {
@@ -102,6 +113,24 @@ fn validate_story_v2(doc: &StoryV2) -> Result<(), String> {
     }
     if doc.characters.is_empty() || doc.characters.len() > 100 || doc.scenes.len() > 200 {
         return Err("Character or scene count exceeds limits.".into());
+    }
+    if doc.pronunciation_glossary.len() > 100 {
+        return Err("Pronunciation glossary exceeds 100 rules.".into());
+    }
+    let mut rule_ids = std::collections::HashSet::new();
+    let mut rule_originals = std::collections::HashSet::new();
+    for rule in &doc.pronunciation_glossary {
+        if rule.id.is_empty() || rule.id.chars().count() > 80 ||
+            rule.id.chars().any(char::is_control) ||
+            rule.original.trim().is_empty() || rule.original.chars().count() > 80 ||
+            rule.spoken.trim().is_empty() || rule.spoken.chars().count() > 160 ||
+            rule.original.chars().any(char::is_control) ||
+            rule.spoken.chars().any(char::is_control) ||
+            rule.original.trim() == rule.spoken.trim() ||
+            !rule_ids.insert(rule.id.as_str()) ||
+            !rule_originals.insert(rule.original.trim().to_lowercase()) {
+            return Err("Pronunciation rule is malformed or duplicated.".into());
+        }
     }
     let mut ids = std::collections::HashSet::new();
     let mut names = std::collections::HashSet::new();
@@ -203,6 +232,24 @@ async fn parse_dialogue(
             .map_err(|_| "Dialogue parser returned an incompatible story.".to_string())?;
         validate_story_v2(&parsed)?;
         Ok(response)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn preview_pronunciation(project: StoryV2, segment_id: String) -> Result<Value, String> {
+    validate_story_v2(&project)?;
+    if !project.scenes.iter().any(|scene| scene.segments.iter().any(|seg|
+        seg.id == segment_id && seg.kind == "speech")) {
+        return Err("Spoken segment is not in this document.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({
+            "action": "preview_pronunciation",
+            "project": project,
+            "segment_id": segment_id,
+        }))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Pronunciation preview response is incomplete.".to_string())
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -643,7 +690,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, inspect_script, check_engine, diagnose_engine, synthesize, render_story_v2, story_render_progress, cancel_story_render, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, synthesize, render_story_v2, story_render_progress, cancel_story_render, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -673,6 +720,7 @@ mod tests {
                     speaker_conditioning: None,
                 },
             }],
+            pronunciation_glossary: vec![],
             scenes: vec![SceneV2 {
                 id: Uuid::new_v4().to_string(),
                 title: "दरबार".to_string(),
@@ -701,6 +749,28 @@ mod tests {
         assert!(validate_story_v2(&recovered).is_ok());
         assert_eq!(story.text, recovered.text);
         assert_eq!(story.scenes[0].segments[0].id, recovered.scenes[0].segments[0].id);
+    }
+
+    #[test]
+    fn v2_legacy_json_without_glossary_is_still_readable() {
+        let doc = sample_v2();
+        let mut payload = serde_json::to_value(&doc).unwrap();
+        payload.as_object_mut().unwrap().remove("pronunciation_glossary");
+        let old: StoryV2 = serde_json::from_value(payload).unwrap();
+        assert!(old.pronunciation_glossary.is_empty());
+        assert!(validate_story_v2(&old).is_ok());
+    }
+
+    #[test]
+    fn v2_rejects_duplicate_glossary_sources() {
+        let mut doc = sample_v2();
+        doc.pronunciation_glossary = vec![
+            PronunciationRuleV2 { id: "a".into(), original: "राजा".into(),
+                spoken: "रा-जा".into(), enabled: true },
+            PronunciationRuleV2 { id: "b".into(), original: "राजा".into(),
+                spoken: "रजा".into(), enabled: false },
+        ];
+        assert!(validate_story_v2(&doc).is_err());
     }
 
     #[test]
