@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  addCharacter, assignSegment, defaultVoice, legacyToStoryV2,
-  makeCharacter, moveScene, reassignAndRemoveCharacter, renameScene, unresolvedSpeech,
+  addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, legacyToStoryV2,
+  makeCharacter, moveScene, moveSegment, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
   type StoryV2,
 } from "./story_v2";
 
@@ -71,5 +71,28 @@ describe("v2 story authoring", () => {
     expect(moved.scenes.map(s => s.id)).toEqual(["s2", "s1"]);
     expect(moved.scenes[1].segments[0].id).toBe("seg1");
     expect(renameScene(moved, "s1", "नया दरबार").scenes[1].title).toBe("नया दरबार");
+  });
+});
+
+describe("extended cast and scene editing", () => {
+  it("duplicates a voice profile without reusing the character identity", () => {
+    const doc = fixture();
+    const result = duplicateCharacter(doc, "raja", "clone-id");
+    expect(result.characters[2].id).toBe("clone-id");
+    expect(result.characters[2].name).toBe("राजा भोज copy");
+    expect(result.characters[2].voice).toEqual(result.characters[1].voice);
+    expect(result.characters[2].voice).not.toBe(result.characters[1].voice);
+  });
+  it("adds a scene and moves a line without dropping original text", () => {
+    const doc = addScene(fixture(), "नया दृश्य", "newscene");
+    const moved = moveSegment(doc, "seg1", "newscene");
+    expect(moved.scenes[0].segments).toHaveLength(0);
+    expect(moved.scenes[2].segments[0].original_text).toBe("नमस्कार");
+    expect(() => moveSegment(doc, "seg1", "not-there")).toThrow("does not exist");
+  });
+  it("rejects duplicate names on renaming", () => {
+    const doc = fixture();
+    expect(() => renameCharacter(doc, "raja", "Narrator")).toThrow("unique");
+    expect(renameCharacter(doc, "raja", "राजा नया").characters[1].name).toBe("राजा नया");
   });
 });
