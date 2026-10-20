@@ -336,15 +336,45 @@ fn python_executable() -> String {
         .unwrap_or_else(|_| if cfg!(windows) { "python" } else { "python3" }.to_string())
 }
 
-fn inference_directory() -> PathBuf {
-    std::env::var_os("KATHASVARA_INFERENCE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../services/inference"))
+fn inference_directory() -> Result<PathBuf, String> {
+    if let Some(configured) = std::env::var_os("KATHASVARA_INFERENCE_DIR") {
+        let path = PathBuf::from(configured);
+        if !path.is_absolute() {
+            return Err("KATHASVARA_INFERENCE_DIR must be an absolute directory.".into());
+        }
+        return Ok(path);
+    }
+    // Discover source checkout at runtime; never embed the Windows CI checkout path.
+    let cwd = std::env::current_dir()
+        .map_err(|_| "Unable to inspect current directory; configure KATHASVARA_INFERENCE_DIR.")?;
+    for ancestor in cwd.ancestors() {
+        let candidate = ancestor.join("services/inference");
+        if candidate.join("kathasvara/cli.py").is_file() {
+            return Ok(candidate);
+        }
+    }
+    Err("Inference sources are not configured. Set KATHASVARA_INFERENCE_DIR to their absolute directory.".into())
+}
+
+const MAX_PYTHON_RESPONSE: usize = 1_048_576;
+
+fn read_bounded_response(mut source: impl Read) -> Result<Vec<u8>, String> {
+    let mut response = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let size = source.read(&mut chunk)
+            .map_err(|_| "Cannot read the local inference response.".to_string())?;
+        if size == 0 { return Ok(response); }
+        if response.len().saturating_add(size) > MAX_PYTHON_RESPONSE {
+            return Err("Inference response exceeds the maximum allowed size.".into());
+        }
+        response.extend_from_slice(&chunk[..size]);
+    }
 }
 
 fn invoke_python(request: Value) -> Result<Value, String> {
-    let directory = inference_directory();
-    if !directory.join("kathasvara").is_dir() {
+    let directory = inference_directory()?;
+    if !directory.join("kathasvara/cli.py").is_file() {
         return Err("Inference sources are missing. Set KATHASVARA_INFERENCE_DIR.".into());
     }
     let mut child = Command::new(python_executable())
@@ -361,6 +391,10 @@ fn invoke_python(request: Value) -> Result<Value, String> {
             .write_all(request.to_string().as_bytes())
             .map_err(|_| "Unable to send synthesis request.".to_string())?;
     }
+    // Drain child stdout concurrently to avoid a full pipe deadlocking JSON IPC.
+    let stdout = child.stdout.take()
+        .ok_or_else(|| "Python stdout was not connected.".to_string())?;
+    let output_reader = thread::spawn(move || read_bounded_response(stdout));
     let max_wait = if matches!(request.get("action").and_then(Value::as_str), Some("synthesize" | "render_story")) {
         Duration::from_secs(600)
     } else {
@@ -384,19 +418,17 @@ fn invoke_python(request: Value) -> Result<Value, String> {
         }
         thread::sleep(Duration::from_millis(100));
     }
-    let response = child.wait_with_output().map_err(|e| e.to_string())?;
-    if response.stdout.len() > 1_048_576 {
-        return Err("Inference response exceeds the maximum allowed size.".into());
-    }
+    let status = child.wait().map_err(|_| "Cannot collect inference process status.".to_string())?;
+    let response = output_reader.join()
+        .map_err(|_| "Inference output reader terminated unexpectedly.".to_string())??;
     // Upstream model libraries may print progress to stdout. The final JSON
     // response is a complete line, not necessarily the entire output stream.
     let data: Value = response
-        .stdout
         .split(|byte| *byte == b'\n')
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
         .next_back()
         .ok_or_else(|| "Inference service did not return valid JSON.".to_string())?;
-    if !response.status.success() || data.get("ok") != Some(&Value::Bool(true)) {
+    if !status.success() || data.get("ok") != Some(&Value::Bool(true)) {
         return Err(
             data.get("message").and_then(Value::as_str)
                 .unwrap_or("Local synthesis failed.")
@@ -794,6 +826,20 @@ mod tests {
         story.characters[0].voice.exaggeration = 0.5;
         story.characters.push(story.characters[0].clone());
         assert!(validate_story_v2(&story).is_err());
+    }
+
+    #[test]
+    fn python_response_reader_accepts_bounded_json() {
+        let bytes = br#"{"ok":true,"result":"Hindi"}"#;
+        let actual = read_bounded_response(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(actual, bytes);
+    }
+
+    #[test]
+    fn python_response_reader_rejects_oversize() {
+        let bytes = vec![b'a'; MAX_PYTHON_RESPONSE + 1];
+        assert!(read_bounded_response(std::io::Cursor::new(bytes))
+            .expect_err("response should be bounded").contains("maximum allowed size"));
     }
 
     #[test]
