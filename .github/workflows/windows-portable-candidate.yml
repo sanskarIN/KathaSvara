@@ -1,0 +1,61 @@
+name: Windows developer executable candidate
+
+# A packaging smoke test, not an installer or public GitHub Release.
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "services/inference/**"
+      - ".github/workflows/windows-portable-candidate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-candidate:
+    name: Build unsigned Windows EXE candidate
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm install --no-audit --no-fund
+      - name: Run JS tests and build assets
+        working-directory: apps/desktop
+        run: |
+          npm run test
+          npm run build
+      - name: Compile desktop EXE without bundling an installer
+        working-directory: apps/desktop
+        run: npm run tauri -- build --no-bundle
+      - name: Confirm EXE is present
+        shell: pwsh
+        run: |
+          $exe = "apps/desktop/src-tauri/target/release/kathasvara.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Tauri build did not emit the expected Windows EXE."
+          }
+          Get-FileHash $exe -Algorithm SHA256 | Format-List
+          Get-Item $exe | Select-Object Name,Length,LastWriteTime | Format-List
+      - name: Package test EXE with dependency disclosure
+        shell: pwsh
+        run: |
+          $folder = "portable-candidate"
+          New-Item -ItemType Directory -Force -Path $folder | Out-Null
+          Copy-Item "apps/desktop/src-tauri/target/release/kathasvara.exe" "$folder/KathaSvara-v0.2.0-dev-win64.exe"
+          Copy-Item "docs/installation/portable-windows-candidate.md" "$folder/README.txt"
+          Get-FileHash "$folder/KathaSvara-v0.2.0-dev-win64.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  KathaSvara-v0.2.0-dev-win64.exe" } |
+            Set-Content "$folder/SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kathasvara-v0.2.0-windows-unsigned-dev-executable
+          path: portable-candidate/
+          if-no-files-found: error
+          retention-days: 14
