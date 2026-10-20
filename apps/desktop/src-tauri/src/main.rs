@@ -927,6 +927,18 @@ fn finalize_rendered_story_wav(
     })
 }
 
+fn finalize_or_remove_rendered_wav(
+    output: &Path,
+    job_id: String,
+    data: &Value,
+) -> Result<AudioResult, String> {
+    let result = finalize_rendered_story_wav(output, job_id, data);
+    if result.is_err() {
+        let _ = fs::remove_file(output);
+    }
+    result
+}
+
 #[tauri::command]
 async fn render_story_v2(
     app: tauri::AppHandle,
@@ -990,11 +1002,7 @@ async fn render_story_v2(
         };
         // Any metadata/preview failure after inference should clean the
         // job-owned WAV. Previously such errors leaked orphan audio into app data.
-        let result = finalize_rendered_story_wav(&output, job_id, &data);
-        if result.is_err() {
-            let _ = fs::remove_file(&output);
-        }
-        result
+        finalize_or_remove_rendered_wav(&output, job_id, &data)
     }).await.map_err(|e| e.to_string())?
 }
 
