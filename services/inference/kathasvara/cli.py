@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 
 from .diagnostics import diagnose
+from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
-from .dialogue import parse_dialogue, unresolved_labels
-from .story import Character, VoiceProfile, from_dict, narrator
 from .production import render_story
+from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
 
 
