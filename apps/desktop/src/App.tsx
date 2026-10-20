@@ -404,7 +404,13 @@ export default function App() {
                       <li key={name}><strong>{name}</strong>: {present ? "Installed" : "Missing"}</li>
                     ))}
                   </ul>
-                  <p><strong>Model weights tested:</strong> No</p>
+                  <p><strong>Python 3.11 runtime:</strong> {diagnostics.python_311 ? "Compatible" : "Verify Python 3.11 separately"}</p>
+                   <p><strong>Portable interpreter path:</strong> {diagnostics.runtime_python_configured
+                     ? (diagnostics.runtime_python_path_exists ? "Configured, file exists" : "Configured path not found") : "Not configured"}</p>
+                   <p><strong>Inference source:</strong> {diagnostics.inference_dir_configured
+                     ? (diagnostics.inference_dir_looks_valid ? "Configured, source found" : "Configured source not found") : "Not configured"}</p>
+                   <p><strong>Temporary-file writes:</strong> {diagnostics.temporary_write_test_passed ? "Working" : "Unavailable or not checked"}</p>
+                   <p><strong>Model weights tested:</strong> No</p>
                   <p><strong>Hindi speech playback tested:</strong> No</p>
                   <p>{diagnostics.help}</p>
                 </section>
