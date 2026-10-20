@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import type { AudioResult } from "./lib/story";
 import {
   addCharacter, assignSegment, moveScene, reassignAndRemoveCharacter,
   renameScene, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
@@ -22,7 +24,25 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [dirty, setDirty] = useState(true);
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
   const [unresolved, setUnresolved] = useState<string[]>([]);
+  const [rendering, setRendering] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [audio, setAudio] = useState<AudioResult | null>(null);
+  const renderRevision = useRef(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    if (!jobId) return;
+    const interval = window.setInterval(() => {
+      void invoke<{ done: number; total: number }>("story_render_progress", { jobId })
+        .then(setProgress).catch(() => {});
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, [jobId]);
   function edit(update: (previous: StoryV2) => StoryV2) {
+    renderRevision.current += 1;
+    if (jobId) void invoke("cancel_story_render", { jobId }).catch(() => {});
+    if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
+    setAudio(null);
     onChange(previous => update(previous));
     setDirty(true);
   }
@@ -40,6 +60,82 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       edit(previous => reassignAndRemoveCharacter(previous, id));
     } catch (error) {
       onMessage(errorString(error));
+    }
+  }
+  async function startRender(sceneId?: string, forceSegmentId?: string) {
+    if (rendering) return;
+    if (!document.scenes.length) {
+      onMessage("Parse labeled dialogue before rendering selected scenes.");
+      return;
+    }
+    const selected = sceneId ? document.scenes.filter(scene => scene.id === sceneId) : document.scenes;
+    if (selected.some(scene => scene.segments.some(seg => seg.kind === "speech" && !seg.speaker_id))) {
+      onMessage("Assign unresolved dialogue speakers before rendering.");
+      return;
+    }
+    const id = crypto.randomUUID();
+    const revision = renderRevision.current;
+    setJobId(id);
+    setProgress({ done: 0, total: 0 });
+    setRendering(true);
+    if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
+    setAudio(null);
+    onMessage("Generating speech locally, with one model voice and per-character supported controls. Cancellation is cooperative.");
+    try {
+      const result = await invoke<AudioResult>("render_story_v2", {
+        project: document,
+        jobId: id,
+        selectedSceneIds: sceneId ? [sceneId] : null,
+        forceSegmentIds: forceSegmentId ? [forceSegmentId] : null,
+      });
+      if (revision !== renderRevision.current) {
+        await invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
+        return;
+      }
+      setAudio(result);
+      onMessage("A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
+    } catch (error) {
+      onMessage("Scene render stopped or failed: " + errorString(error));
+    } finally {
+      setJobId(null);
+      setRendering(false);
+    }
+  }
+  async function cancelRender() {
+    if (jobId) {
+      try {
+        await invoke("cancel_story_render", { jobId });
+        onMessage("Cancellation requested. The current model chunk may need to finish first.");
+      } catch (error) {
+        onMessage("Unable to signal cancellation: " + errorString(error));
+      }
+    }
+  }
+  async function exportAudio() {
+    if (!audio) return;
+    try {
+      const destination = await save({
+        title: "Export scene or story dialogue WAV",
+        defaultPath: "kathasvara-dialogue.wav",
+        filters: [{ name: "Uncompressed WAV", extensions: ["wav"] }],
+      });
+      if (destination) {
+        await invoke("export_wav", { audioId: audio.audio_id, destination });
+        onMessage("Dialogue WAV exported locally.");
+      }
+    } catch (error) {
+      onMessage("Cannot export audio: " + errorString(error));
+    }
+  }
+  async function clearAudio() {
+    if (!audio) return;
+    const id = audio.audio_id;
+    setAudio(null);
+    try {
+      await invoke("discard_audio", { audioId: id });
+      onMessage("Generated dialogue preview removed from local audio cache.");
+    } catch (error) {
+      onMessage("Local cache deletion failed: " + errorString(error));
     }
   }
   async function parse() {
@@ -63,6 +159,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         scriptId: document.id,
       });
       if (!response.ok) throw new Error("Dialogue parser returned an unsuccessful response.");
+      if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
+      setAudio(null);
       onChange(response.result);
       setUnresolved(response.unresolved);
       setSelectedScene(response.result.scenes[0]?.id ?? null);
@@ -154,9 +252,29 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <h2>Script breakdown</h2>
         <p>Use labels like <code>राजा भोज: नमस्कार।</code> and scene headings like <code># दरबार</code>. Unknown speaker names are never guessed.</p>
         <div className="cast-actions">
-          <button className="secondary-button" disabled={busy} onClick={() => void parse()}>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
+          <button className="secondary-button" disabled={busy || rendering} onClick={() => void parse()>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
           <button className="secondary-button" disabled={busy} onClick={() => void saveDocument()}>Save cast and scenes</button>
           <button className="quiet-button" disabled={busy} onClick={() => void loadDocument()}>Load saved v2</button>
+        </div>
+        <div className="render-tools">
+          <button className="primary-button" disabled={busy || rendering || !document.scenes.length}
+            onClick={() => void startRender()}>Generate story dialogue WAV</button>
+          {activeScene && <button className="secondary-button" disabled={busy || rendering}
+            onClick={() => void startRender(activeScene.id)}>Generate selected scene</button>}
+          <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
+          <div className="render-meter" role="status" aria-live="polite">
+            {rendering
+              ? (progress.total ? `Segments ${progress.done} / ${progress.total}` : "Loading local inference model…")
+              : "Not generating"}
+          </div>
+          {audio && <>
+            <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated dialogue preview" />
+            <small>{audio.duration_seconds.toFixed(1)} seconds · {audio.sample_rate} Hz · {audio.chunks} synthesis chunks</small>
+            <div className="cast-actions">
+              <button className="secondary-button" onClick={() => void exportAudio()}>Export WAV</button>
+              <button className="quiet-button" onClick={() => void clearAudio()}>Clear preview</button>
+            </div>
+          </>}
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
         {unresolved.length > 0 && <p role="alert">{unresolved.length} unknown speaker label(s): {unresolved.join(", ")}</p>}
@@ -196,6 +314,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     )}
                   </div>
                   <p lang="hi">{segment.original_text}</p>
+                  {segment.kind === "speech" && segment.speaker_id && (
+                    <button className="quiet-button" disabled={rendering}
+                      onClick={() => void startRender(activeScene.id, segment.id)}>
+                      Regenerate this line within scene
+                    </button>
+                  )}
                   {segment.kind === "speech" && segment.speaker_id === null && <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
                 </li>
               ))}
