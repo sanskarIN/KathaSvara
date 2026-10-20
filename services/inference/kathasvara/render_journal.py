@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Self
 
 
 class RenderJournal:
@@ -33,7 +33,7 @@ class RenderJournal:
         }
 
     def _persist(self) -> None:
-        self.document["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.document["updated_at"] = datetime.now(UTC).isoformat()
         content = json.dumps(self.document, ensure_ascii=False, separators=(",", ":"))
         temp = self.path.with_name(f"{self.path.stem}-{uuid.uuid4().hex}.partial.json")
         try:
@@ -44,7 +44,7 @@ class RenderJournal:
         finally:
             temp.unlink(missing_ok=True)
 
-    def __enter__(self) -> RenderJournal:
+    def __enter__(self) -> Self:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists() or self.path.is_symlink():
             raise ValueError("Render journal already exists.")
