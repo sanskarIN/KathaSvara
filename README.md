@@ -4,6 +4,14 @@
 
 > **Latest pre-release:** [v0.1.1 — Developer Preview (Source Only)](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) is **published on GitHub**. The previous [v0.1.0 preview](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remains available. Both are source-only developer releases; model weights, Windows installers, audible Hindi voice-quality acceptance, and standalone desktop packaging remain **unverified or unavailable**.
 
+## v0.2.0 development — characters and scenes
+
+**Current work in progress:** [draft PR #4](https://github.com/sanskarIN/KathaSvara/pull/4) adds versioned scene/character models, a deterministic Hindi dialogue parser, manual speaker correction, supported per-character engine settings, and a multi-segment audio orchestration layer. It extends the existing React/Tauri/Rust/Python app and preserves the v0.1.x narrator project files separately. See [v0.2.0 architecture](docs/architecture/v0.2.0-story-pipeline.md) and [release gates](docs/releases/v0.2.0-development.md).
+
+**This functionality is still being tested.** Identifying `राजा भोज:` and `मंत्री:` in a written script does not mean the installed Chatterbox model produces two distinctly recognizable voices. The engine currently exposes only documented Hindi expressiveness/guidance controls; real multi-speaker voice consistency and audio quality are not accepted.
+
+A [Windows CI workflow](.github/workflows/windows-portable-candidate.yml) experiments with creating an **unsigned unbundled EXE** as an artifact, but there is no v0.2.0 GitHub pre-release or verified end-user installer. The candidate needs external Python and model dependencies; do not treat it as production-ready.
+
 ## What the development source implements
 
 - Tauri 2 + Rust desktop bridge and React + TypeScript Hindi-first studio.
@@ -53,7 +61,8 @@ Our priority is natural Hindi output, not feature counts. No private text or ref
 
 - **v0.1.0:** source-only developer pre-release published with Python, React and Windows Rust checks passing.
 - **v0.1.1:** source-only pre-release published after passing Python, React and Windows Rust CI; adds model-free Python TTS diagnostics and clearer developer setup.
-- **Next:** real Hindi model smoke test, interactive desktop verification, reliable model worker lifecycle and installation packaging.
+- **v0.2.0 (in development):** scene and character authoring, explicit speaker parsing, multi-segment render orchestration, local cache/cancellation, Windows EXE build experiment. **Not released.**
+- **Next:** real Hindi model smoke test, independent speaker conditioning verification, interactive desktop testing, runtime packaging and long-story production acceptance.
 - **v0.2.0:** speaker/character assignment and persistent voice profiles.
 - **Later:** multi-engine support, timeline, cinematic audio production, packaging and distribution.
 
