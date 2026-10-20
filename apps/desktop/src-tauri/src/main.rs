@@ -21,6 +21,7 @@ use uuid::Uuid;
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
 
+const CACHE_PRUNE_SENTINEL: &str = ":segment-cache-maintenance:";
 static ACTIVE_RENDER_JOBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn active_render_jobs() -> &'static Mutex<HashSet<String>> {
@@ -42,6 +43,9 @@ impl ActiveRenderGuard {
         Uuid::parse_str(job_id).map_err(|_| "Invalid render job ID.".to_string())?;
         let mut active = active_render_jobs().lock()
             .map_err(|_| "Render job registry is unavailable.".to_string())?;
+        if active.contains(CACHE_PRUNE_SENTINEL) {
+            return Err("Wait for local cache cleanup to finish before rendering.".into());
+        }
         if !active.insert(job_id.to_owned()) {
             return Err("Render job is already active.".into());
         }
@@ -53,6 +57,28 @@ impl Drop for ActiveRenderGuard {
     fn drop(&mut self) {
         if let Ok(mut active) = active_render_jobs().lock() {
             active.remove(&self.job_id);
+        }
+    }
+}
+
+struct CachePruneGuard;
+
+impl CachePruneGuard {
+    fn start() -> Result<Self, String> {
+        let mut jobs = active_render_jobs().lock()
+            .map_err(|_| "Render job registry is unavailable.".to_string())?;
+        if !jobs.is_empty() {
+            return Err("Cannot prune the segment cache during active rendering.".into());
+        }
+        jobs.insert(CACHE_PRUNE_SENTINEL.to_string());
+        Ok(Self)
+    }
+}
+
+impl Drop for CachePruneGuard {
+    fn drop(&mut self) {
+        if let Ok(mut jobs) = active_render_jobs().lock() {
+            jobs.remove(CACHE_PRUNE_SENTINEL);
         }
     }
 }
@@ -539,7 +565,9 @@ async fn prune_segment_cache(
 ) -> Result<Value, String> {
     let budget = cache_budget_bytes(max_mib)?;
     let cache = app_dir(&app)?.join("segment-cache");
+    let guard = CachePruneGuard::start()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _cache_guard = guard;
         let response = invoke_python(json!({
             "action": "cache_prune", "cache": cache,
             "max_bytes": budget, "dry_run": dry_run,
@@ -1047,6 +1075,21 @@ mod tests {
         assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
         assert!(path.exists());
         fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn cache_prune_blocks_live_renders_and_render_guard_blocks_pruning() {
+        let active_id = Uuid::new_v4().to_string();
+        {
+            let _render = ActiveRenderGuard::start(&active_id).unwrap();
+            assert!(CachePruneGuard::start().is_err());
+        }
+        {
+            let _prune = CachePruneGuard::start().unwrap();
+            assert!(CachePruneGuard::start().is_err());
+            assert!(ActiveRenderGuard::start(&Uuid::new_v4().to_string()).is_err());
+        }
+        assert!(CachePruneGuard::start().is_ok());
     }
 
     #[test]
