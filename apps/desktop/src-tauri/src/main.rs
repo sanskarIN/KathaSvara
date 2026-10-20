@@ -1312,13 +1312,35 @@ mod tests {
     }
 
     #[test]
-    fn subtitle_export_rejects_overwrite_and_invalid_timing() {
+    fn subtitle_export_accepts_real_line_breaks_and_refuses_overwrite() {
         let dest = std::env::temp_dir().join(format!("kathasvara-{}.srt", Uuid::new_v4()));
-        assert!(write_srt(&dest, "1\\n00:00:00,000 --> 00:00:00,500\\nनमस्कार!\\n").is_ok());
-        assert!(write_srt(&dest, "1\\nreplacement\\n").is_err());
-        assert!(write_srt(Path::new("relative.srt"), "1\\nwrong\\n").is_err());
-        assert!(dest.exists());
+        let valid = "1\n00:00:00,000 --> 00:00:00,500\nनमस्कार!\n\n2\n00:00:00,640 --> 00:00:01,250\nराजा भोज।\n";
+        write_srt(&dest, valid).unwrap();
+        assert_eq!(fs::read_to_string(&dest).unwrap(), valid);
+        assert!(write_srt(&dest, valid).is_err());
+        assert!(write_srt(Path::new("relative.srt"), valid).is_err());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), valid);
         fs::remove_file(dest).unwrap();
+    }
+
+    #[test]
+    fn subtitle_validation_rejects_literal_backslashes_and_corrupt_timestamps() {
+        assert!(validate_srt_content(r"1\n00:00:00,000 --> 00:00:00,500\nनमस्कार!").is_err());
+        let invalid = [
+            "1\nreplacement\n",
+            "1\n00:00:00,000 --> 00:00:00,500\n",
+            "1\n00:00:00,500 --> 00:00:00,000\nनमस्कार\n",
+            "1\n00:00:00,000 --> 00:00:00,500\nनमस्कार\n\n2\n00:00:00,490 --> 00:00:01,000\nधन्यवाद\n",
+            "1\n00:99:00,000 --> 00:99:01,000\nनमस्कार\n",
+            "1\n00:00:00.000 --> 00:00:00.500\nनमस्कार\n",
+            "1\n00:00:00,000 --> 00:20:00,001\nनमस्कार\n",
+            "2\n00:00:00,000 --> 00:00:00,500\nनमस्कार\n",
+            "1\r\n00:00:00,000 --> 00:00:00,500\r\nनमस्कार\r\n",
+            "1\n00:00:00,000 --> 00:00:00,500\nनमस्कार\nऔर\n",
+        ];
+        for text in invalid {
+            assert!(validate_srt_content(text).is_err(), "Invalid SRT unexpectedly passed.");
+        }
     }
 
     #[test]
