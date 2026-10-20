@@ -1,0 +1,105 @@
+"""Audio orchestration contracts are tested with deliberate mock engines only.
+
+These are NOT actual recorded model audio and are never release voice samples.
+SPDX-License-Identifier: MPL-2.0
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+import soundfile as sf
+
+from kathasvara.dialogue import parse_dialogue
+from kathasvara.production import RenderCancelled, render_story
+from kathasvara.story import Character, VoiceProfile, narrator
+
+
+class FakeEngine:
+    sample_rate = 24000
+
+    def __init__(self) -> None:
+        self.loads = 0
+        self.calls: list[tuple[str, float]] = []
+
+    def load(self) -> None:
+        self.loads += 1
+
+    def generate(self, text: str, settings: object) -> np.ndarray:
+        self.calls.append((text, settings.exaggeration))
+        return np.full(2400, 0.12, dtype=np.float32)
+
+
+def sample_doc():
+    raja = Character("raja", "राजा भोज", voice=VoiceProfile(exaggeration=0.8))
+    return parse_dialogue(
+        "दरबार", "Narrator: नमस्कार।\nराजा भोज: प्रजा कैसी है?",
+        [narrator(), raja], script_id="render-test",
+    )
+
+
+def test_render_preserves_order_and_measured_duration(tmp_path: Path) -> None:
+    doc = sample_doc()
+    mock = FakeEngine()
+    events: list[tuple[int, int]] = []
+    out = tmp_path / "composite.wav"
+    report = render_story(
+        doc, out, tmp_path / "cache", mock,
+        on_progress=lambda n, total: events.append((n, total)),
+    )
+    assert out.is_file()
+    assert report["distinct_voices_verified"] is False
+    assert report["sample_rate"] == 24000
+    assert len(report["segments"]) == 2
+    assert [setting for _, setting in mock.calls] == [0.5, 0.8]
+    assert mock.loads == 1
+    assert events == [(1, 2), (2, 2)]
+    details = sf.info(str(out))
+    assert details.channels == 1 and details.samplerate == 24000
+    assert details.frames == 2400 * 2 + int(24000 * .14)
+    assert report["duration_seconds"] == round(details.frames / 24000, 3)
+
+
+def test_second_render_reuses_cache_without_regenerating(tmp_path: Path) -> None:
+    doc = sample_doc()
+    first = FakeEngine()
+    first_report = render_story(doc, tmp_path / "first.wav", tmp_path / "cache", first)
+    second = FakeEngine()
+    second_report = render_story(doc, tmp_path / "second.wav", tmp_path / "cache", second)
+    assert len(first.calls) == 2 and second.calls == []
+    assert all(item["cached"] for item in second_report["segments"])
+    assert first_report["duration_seconds"] == second_report["duration_seconds"]
+
+
+def test_render_rejects_unresolved_speaker_before_loading_model(tmp_path: Path) -> None:
+    doc = parse_dialogue("A", "अज्ञात: नमस्ते।", [narrator()])
+    mock = FakeEngine()
+    with pytest.raises(ValueError, match="Assign every unknown"):
+        render_story(doc, tmp_path / "audio.wav", tmp_path / "cache", mock)
+    assert mock.loads == 0
+
+
+def test_cancel_between_segments_keeps_cache_without_final_wav(tmp_path: Path) -> None:
+    doc = sample_doc()
+    mock = FakeEngine()
+    progress = []
+    out = tmp_path / "cancelled.wav"
+    with pytest.raises(RenderCancelled):
+        render_story(
+            doc, out, tmp_path / "cache", mock,
+            on_progress=lambda done, total: progress.append(done),
+            is_cancelled=lambda: bool(progress),
+        )
+    assert progress == [1]
+    assert not out.exists()
+    assert len(list((tmp_path / "cache").glob("*.wav"))) == 1
+
+
+def test_cached_output_refuses_overwrite(tmp_path: Path) -> None:
+    doc = sample_doc()
+    file = tmp_path / "already.wav"
+    file.write_bytes(b"not a wav")
+    with pytest.raises(ValueError, match="new absolute WAV"):
+        render_story(doc, file, tmp_path / "cache", FakeEngine())
+    assert file.read_bytes() == b"not a wav"
