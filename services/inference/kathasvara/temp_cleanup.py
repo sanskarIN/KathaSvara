@@ -19,8 +19,11 @@ MAX_SCANNED_ENTRIES = 20_000
 MAX_REMOVED_ENTRIES = 1_024
 
 _UUID = r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
-_AUDIO_PARTIAL = re.compile(rf"{_UUID}-{_UUID}\.partial\.wav\Z")
-_CACHE_PARTIAL = re.compile(rf"[0-9a-f]{{64}}-{_UUID}\.partial\.wav\Z")
+# StreamingWav and _atomic_wav create suffixes with uuid4().hex (32
+# lowercase hexadecimal characters), NOT a second hyphenated UUID.
+_TEMP_SUFFIX = r"[0-9a-f]{32}"
+_AUDIO_PARTIAL = re.compile(rf"{_UUID}-{_TEMP_SUFFIX}\.partial\.wav\Z")
+_CACHE_PARTIAL = re.compile(rf"[0-9a-f]{{64}}-{_TEMP_SUFFIX}\.partial\.wav\Z")
 
 
 def cleanup_partial_wavs(
