@@ -7,9 +7,9 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import re
-from contextlib import nullcontext
 import stat
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from .cache_lock import exclusive_cache_access
