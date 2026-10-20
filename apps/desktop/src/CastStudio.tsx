@@ -252,7 +252,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <h2>Script breakdown</h2>
         <p>Use labels like <code>राजा भोज: नमस्कार।</code> and scene headings like <code># दरबार</code>. Unknown speaker names are never guessed.</p>
         <div className="cast-actions">
-          <button className="secondary-button" disabled={busy || rendering} onClick={() => void parse()>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
+          <button className="secondary-button" disabled={busy || rendering} onClick={() => void parse()}>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
           <button className="secondary-button" disabled={busy} onClick={() => void saveDocument()}>Save cast and scenes</button>
           <button className="quiet-button" disabled={busy} onClick={() => void loadDocument()}>Load saved v2</button>
         </div>
