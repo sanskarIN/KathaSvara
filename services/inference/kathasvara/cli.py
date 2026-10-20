@@ -110,6 +110,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         cache = request.get("cache")
         cancel = request.get("cancel_file")
         progress = request.get("progress_file")
+        journal = request.get("journal_file")
         selected = request.get("selected_scene_ids")
         selected_segments = request.get("selected_segment_ids")
         force = request.get("force_segment_ids")
@@ -121,6 +122,8 @@ def handle(request: dict[str, object]) -> dict[str, object]:
             raise TypeError("Cancellation sentinel must be a filename.")
         if progress is not None and not isinstance(progress, str):
             raise TypeError("Progress file must be a filename.")
+        if journal is not None and not isinstance(journal, str):
+            raise TypeError("Journal file must be a filename.")
         if selected is not None and (
             not isinstance(selected, list) or
             not all(isinstance(item, str) for item in selected)
@@ -156,6 +159,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
             selected_scene_ids=set(selected) if selected is not None else None,
             selected_segment_ids=set(selected_segments) if selected_segments is not None else None,
             force_segment_ids=set(force) if force is not None else None,
+            journal_path=Path(journal) if journal is not None else None,
         )
         return {"ok": True, "result": result}
     if request.get("action") != "synthesize":
