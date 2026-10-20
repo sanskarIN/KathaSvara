@@ -16,6 +16,16 @@ describe("Hindi per-dialogue SRT export", () => {
     );
   });
 
+  it("uses actual generated speech over later edits to the source story", () => {
+    const result = buildDialogueSrt(
+      [{ segment_id: "a", start_seconds: 0, end_seconds: 1.25,
+        effective_text: "राजा भोज की जय!" }],
+      [{ segment_id: "a", text: "पुराना पाठ" }],
+    );
+    expect(result).toContain("राजा भोज की जय!");
+    expect(result).not.toContain("पुराना पाठ");
+  });
+
   it("rejects missing or overlapping line timings instead of creating false subtitles", () => {
     expect(() => buildDialogueSrt([], [])).toThrow("requires 1");
     expect(() => buildDialogueSrt(

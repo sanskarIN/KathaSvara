@@ -5,6 +5,8 @@ export interface SegmentTiming {
   segment_id: string;
   start_seconds: number;
   end_seconds: number;
+  /** Exact glossary-adjusted content captured at render time, when available. */
+  effective_text?: string;
 }
 
 export interface SubtitleLine {
@@ -32,7 +34,8 @@ export function buildDialogueSrt(timings: SegmentTiming[], lines: SubtitleLine[]
   let previousEnd = 0;
   for (const timing of timings) {
     const { start_seconds: start, end_seconds: end } = timing;
-    const content = scripts.get(timing.segment_id)?.replace(/\s+/gu, " ").trim();
+    const content = (timing.effective_text ?? scripts.get(timing.segment_id))
+      ?.replace(/\s+/gu, " ").trim();
     if (!content || !Number.isFinite(start) || !Number.isFinite(end) ||
         start < 0 || end <= start || start + 0.002 < previousEnd || end > 1200.1) {
       throw new Error("Missing dialogue or invalid generated subtitle timings.");

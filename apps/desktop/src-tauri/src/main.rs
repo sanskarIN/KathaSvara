@@ -18,6 +18,9 @@ use std::{
 use tauri::Manager;
 use uuid::Uuid;
 
+mod wav_file;
+use wav_file::inspect_wav_file;
+
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
 
@@ -322,6 +325,8 @@ struct SegmentTiming {
     segment_id: String,
     start_seconds: f64,
     end_seconds: f64,
+    // Only returned to the current UI; never stored in a recovery journal.
+    effective_text: String,
 }
 
 fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String> {
@@ -331,10 +336,14 @@ fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String>
     }
     let mut result = Vec::with_capacity(times.len());
     let mut previous_end = 0.0;
+    let mut text_chars = 0_usize;
     for value in times {
         let timing: SegmentTiming = serde_json::from_value(value.clone())
             .map_err(|_| "Malformed measured subtitle cue.".to_string())?;
+        text_chars += timing.effective_text.chars().count();
         if timing.segment_id.is_empty() || timing.segment_id.len() > 80 ||
+            timing.effective_text.trim().is_empty() || text_chars > 100_000 ||
+            timing.effective_text.chars().any(|ch| ch == '\0') ||
             !timing.start_seconds.is_finite() || !timing.end_seconds.is_finite() ||
             timing.start_seconds + 0.002 < previous_end ||
             timing.start_seconds < 0.0 || timing.end_seconds <= timing.start_seconds ||
@@ -355,6 +364,8 @@ struct AudioResult {
     sample_rate: u32,
     chunks: u32,
     segment_timings: Vec<SegmentTiming>,
+    preview_available: bool,
+    file_bytes: u64,
 }
 
 fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -718,6 +729,8 @@ async fn synthesize(
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
             segment_timings: Vec::new(),
+            preview_available: true,
+            file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
 }
@@ -932,25 +945,35 @@ async fn render_story_v2(
                 return Err(message);
             }
         };
-        let size = fs::metadata(&output)
-            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?.len();
-        if size > MAX_GENERATED_WAV {
-            let _ = fs::remove_file(&output);
-            return Err("Rendered WAV exceeds the current 25 MB desktop preview limit.".into());
-        }
-        let bytes = fs::read(&output).map_err(|e| e.to_string())?;
-        if let Err(reason) = inspect_wav(&bytes) {
-            let _ = fs::remove_file(&output);
-            return Err(reason);
-        }
+        // Large 20-minute WAVs stay on disk; do not reject valid narration just
+        // because the browser's 25 MiB inline preview transport is too small.
+        let mut source = fs::File::open(&output)
+            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
+        let size = match inspect_wav_file(&mut source) {
+            Ok(size) => size,
+            Err(reason) => {
+                let _ = fs::remove_file(&output);
+                return Err(reason);
+            }
+        };
         let metadata = data.get("result").ok_or("Missing render metadata.")?;
+        let timings = parse_segment_timings(metadata)?;
+        let preview_available = size <= MAX_GENERATED_WAV;
+        let data_url = if preview_available {
+            let bytes = fs::read(&output).map_err(|e| e.to_string())?;
+            format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
+        } else {
+            String::new()
+        };
         Ok(AudioResult {
             audio_id: job_id,
-            data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+            data_url,
             duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
-            segment_timings: parse_segment_timings(metadata)?,
+            segment_timings: timings,
+            preview_available,
+            file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
 }
@@ -966,26 +989,41 @@ fn discard_audio(app: tauri::AppHandle, audio_id: String) -> Result<(), String> 
     }
 }
 
+fn copy_validated_wav(source: &Path, destination: &Path) -> Result<(), String> {
+    if !destination.is_absolute() ||
+        destination.extension().and_then(|ext| ext.to_str()) != Some("wav") {
+        return Err("Choose a new absolute .wav output path.".into());
+    }
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|_| "Generated audio is missing.".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Generated audio is not a regular WAV file.".into());
+    }
+    let mut input = fs::File::open(source)
+        .map_err(|_| "Generated audio is missing.".to_string())?;
+    let size = inspect_wav_file(&mut input)?;
+    let mut output = fs::OpenOptions::new().write(true).create_new(true)
+        .open(destination).map_err(|e| format!("Cannot create destination file: {e}"))?;
+    let copy = std::io::copy(&mut input, &mut output)
+        .and_then(|copied| {
+            if copied != size {
+                return Err(std::io::Error::other("WAV source changed during export."));
+            }
+            output.sync_all()
+        });
+    if let Err(error) = copy {
+        drop(output);
+        let _ = fs::remove_file(destination);
+        return Err(format!("Unable to export WAV: {error}"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> Result<(), String> {
     Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.")?;
     let source = app_dir(&app)?.join("audio").join(format!("{audio_id}.wav"));
-    let destination = Path::new(&destination);
-    if !destination.is_absolute() || destination.extension().and_then(|e| e.to_str()) != Some("wav") {
-        return Err("Choose an absolute .wav output path.".into());
-    }
-    let mut source = fs::File::open(source).map_err(|_| "Generated audio is missing.".to_string())?;
-    if source.metadata().map_err(|e| e.to_string())?.len() > MAX_GENERATED_WAV {
-        return Err("Audio exceeds the export limit.".into());
-    }
-    let mut bytes = Vec::new();
-    source.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    inspect_wav(&bytes)?;
-    let mut out = fs::OpenOptions::new().write(true).create_new(true)
-        .open(destination).map_err(|e| format!("Cannot create destination file: {e}"))?;
-    out.write_all(&bytes).map_err(|e| e.to_string())?;
-    out.sync_all().map_err(|e| e.to_string())?;
-    Ok(())
+    copy_validated_wav(&source, Path::new(&destination))
 }
 
 fn write_srt(destination: &Path, content: &str) -> Result<(), String> {
@@ -1231,15 +1269,45 @@ mod tests {
     }
 
     #[test]
+    fn large_pcm_wav_can_be_streamed_to_export_without_overwriting() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-long-wav-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("source.wav");
+        let exported = folder.join("export.wav");
+        let sample_bytes: u32 = 26 * 1024 * 1024; // Over the 25 MiB inline preview cap.
+        let mut writer = fs::File::create(&source).unwrap();
+        writer.write_all(b"RIFF").unwrap();
+        writer.write_all(&(sample_bytes + 36).to_le_bytes()).unwrap();
+        writer.write_all(b"WAVEfmt ").unwrap();
+        writer.write_all(&16_u32.to_le_bytes()).unwrap();
+        writer.write_all(&1_u16.to_le_bytes()).unwrap();
+        writer.write_all(&1_u16.to_le_bytes()).unwrap();
+        writer.write_all(&24_000_u32.to_le_bytes()).unwrap();
+        writer.write_all(&48_000_u32.to_le_bytes()).unwrap();
+        writer.write_all(&2_u16.to_le_bytes()).unwrap();
+        writer.write_all(&16_u16.to_le_bytes()).unwrap();
+        writer.write_all(b"data").unwrap();
+        writer.write_all(&sample_bytes.to_le_bytes()).unwrap();
+        writer.set_len(44 + u64::from(sample_bytes)).unwrap();
+        drop(writer);
+        assert!(fs::metadata(&source).unwrap().len() > MAX_GENERATED_WAV);
+        copy_validated_wav(&source, &exported).unwrap();
+        assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        assert!(copy_validated_wav(&source, &exported).is_err());
+        assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn measured_segment_timeline_enforces_bounds_and_order() {
         let good = json!({"segments": [
-            {"segment_id":"one","start_seconds":0.0,"end_seconds":1.0},
-            {"segment_id":"two","start_seconds":1.14,"end_seconds":2.4}
+            {"segment_id":"one","start_seconds":0.0,"end_seconds":1.0,"effective_text":"नमस्कार"},
+            {"segment_id":"two","start_seconds":1.14,"end_seconds":2.4,"effective_text":"हिंदी"}
         ]});
         assert_eq!(parse_segment_timings(&good).unwrap().len(), 2);
         let bad = json!({"segments": [
-            {"segment_id":"one","start_seconds":0.0,"end_seconds":2.0},
-            {"segment_id":"two","start_seconds":1.0,"end_seconds":2.4}
+            {"segment_id":"one","start_seconds":0.0,"end_seconds":2.0,"effective_text":"नमस्कार"},
+            {"segment_id":"two","start_seconds":1.0,"end_seconds":2.4,"effective_text":"हिंदी"}
         ]});
         assert!(parse_segment_timings(&bad).is_err());
         assert!(parse_segment_timings(&json!({"segments":[]})).is_err());

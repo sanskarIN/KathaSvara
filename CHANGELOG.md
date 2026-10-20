@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.1 — Unreleased development
+
+- Keep verified long-story WAV outputs on disk when they exceed the 25 MiB inline webview preview threshold, exposing an **export-only** UI state instead of deleting valid audio.
+- Stream native WAV export to a new destination without buffering the entire recording; reject malformed RIFF/PCM16 headers, invalid durations, oversized files and existing export paths.
+- Carry ephemeral, pronunciation-glossary-adjusted spoken text alongside measured dialogue timings so Hindi SRT export matches the generated narration rather than a potentially changed source document.
+- Confirm through Python/Rust/React tests that persistent render journals do not record the story text and that large local WAV exports are bounded and safe.
+- **Not yet published:** [v0.4.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0) remains the latest experimental developer pre-release. Real Hindi speech/model quality and Windows clean-install acceptance remain open.
+
 ## [v0.4.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0)
 
 - Protect destructive segment-cache deletion and story rendering across participating Python worker processes with a persistent OS-owned advisory file lock (POSIX flock / Windows byte-range locking); automatically release it when a worker exits, but never unlink its sentinel.

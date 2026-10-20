@@ -209,6 +209,10 @@ def render_story(
                         "cached": was_cached, "duration_seconds": round(measured, 4),
                         "start_seconds": round(start_frame / rate, 4),
                         "end_seconds": round(samples_total / rate, 4),
+                        # IPC-only subtitle snapshot of exactly the reviewed and
+                        # glossary-adjusted text sent to the speech engine.
+                        # RenderJournal.record deliberately does not persist it.
+                        "effective_text": normalized,
                     })
                     if index != len(speech) - 1:
                         pause = min(profile.pause_ms, 2000)

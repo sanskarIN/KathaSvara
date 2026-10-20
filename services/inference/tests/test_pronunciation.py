@@ -107,6 +107,11 @@ def test_only_changed_effective_text_invalidates_segment_cache(tmp_path: Path) -
     report = render_story(doc, tmp_path / "second.wav", tmp_path / "cache", next_engine)
     assert next_engine.calls == ["रजा भोज।"]
     assert [item["cached"] for item in report["segments"]] == [False, True]
+    # This is the exact audio input after project-local pronunciation rules,
+    # not stale reviewed dialogue, and is returned only for subtitle export.
+    assert [item["effective_text"] for item in report["segments"]] == [
+        "रजा भोज।", "मंत्री जी।",
+    ]
     doc.pronunciation_glossary[0].enabled = False
     restored = SimulatedEngine()
     report = render_story(doc, tmp_path / "third.wav", tmp_path / "cache", restored)
