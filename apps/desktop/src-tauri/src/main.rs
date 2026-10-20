@@ -314,7 +314,7 @@ fn invoke_python(request: Value) -> Result<Value, String> {
             .write_all(request.to_string().as_bytes())
             .map_err(|_| "Unable to send synthesis request.".to_string())?;
     }
-    let max_wait = if request.get("action").and_then(Value::as_str) == Some("synthesize") {
+    let max_wait = if matches!(request.get("action").and_then(Value::as_str), Some("synthesize" | "render_story")) {
         Duration::from_secs(600)
     } else {
         Duration::from_secs(15)
@@ -500,6 +500,112 @@ async fn synthesize(
     }).await.map_err(|e| e.to_string())?
 }
 
+#[derive(Debug, Serialize)]
+struct RenderProgress {
+    done: u32,
+    total: u32,
+}
+
+#[tauri::command]
+fn story_render_progress(app: tauri::AppHandle, job_id: String) -> Result<RenderProgress, String> {
+    Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
+    let path = app_dir(&app)?.join("jobs").join(format!("{job_id}.progress.json"));
+    match fs::read(&path) {
+        Ok(bytes) => {
+            if bytes.len() > 1024 { return Err("Invalid render progress.".into()); }
+            let data: Value = serde_json::from_slice(&bytes)
+                .map_err(|_| "Render progress is unreadable.".to_string())?;
+            let done = data["done"].as_u64().ok_or("Missing completed counter.")?;
+            let total = data["total"].as_u64().ok_or("Missing total counter.")?;
+            if total > 256 || done > total { return Err("Render counters are invalid.".into()); }
+            Ok(RenderProgress { done: done as u32, total: total as u32 })
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+            Ok(RenderProgress { done: 0, total: 0 }),
+        Err(error) => Err(format!("Progress unavailable: {error}")),
+    }
+}
+
+#[tauri::command]
+fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
+    Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
+    let folder = app_dir(&app)?.join("jobs");
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let path = folder.join(format!("{job_id}.cancel"));
+    fs::write(path, b"cancel").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn render_story_v2(
+    app: tauri::AppHandle,
+    project: StoryV2,
+    job_id: String,
+    selected_scene_ids: Option<Vec<String>>,
+    force_segment_ids: Option<Vec<String>>,
+) -> Result<AudioResult, String> {
+    validate_story_v2(&project)?;
+    Uuid::parse_str(&job_id).map_err(|_| "Invalid render job ID.")?;
+    if selected_scene_ids.as_ref().is_some_and(|items| items.len() > 200) ||
+       force_segment_ids.as_ref().is_some_and(|items| items.len() > 256) {
+        return Err("Too many selected scenes or dialogue lines.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = app_dir(&app)?;
+        let folder = root.join("audio");
+        let jobs = root.join("jobs");
+        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&jobs).map_err(|e| e.to_string())?;
+        let output = folder.join(format!("{job_id}.wav"));
+        if output.exists() {
+            return Err("This audio job identifier has already been used.".into());
+        }
+        let cancel_path = jobs.join(format!("{job_id}.cancel"));
+        let progress_path = jobs.join(format!("{job_id}.progress.json"));
+        // A new UUID is supplied for each request by the UI; old sentinel is
+        // never interpreted as a fresh cancellation.
+        let _ = fs::remove_file(&cancel_path);
+        let _ = fs::remove_file(&progress_path);
+        let response = invoke_python(json!({
+            "action": "render_story",
+            "project": project,
+            "output": output,
+            "cache": root.join("segment-cache"),
+            "cancel_file": cancel_path,
+            "progress_file": progress_path,
+            "selected_scene_ids": selected_scene_ids,
+            "force_segment_ids": force_segment_ids,
+        }));
+        let _ = fs::remove_file(&cancel_path);
+        let _ = fs::remove_file(&progress_path);
+        let data = match response {
+            Ok(data) => data,
+            Err(message) => {
+                let _ = fs::remove_file(&output);
+                return Err(message);
+            }
+        };
+        let size = fs::metadata(&output)
+            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?.len();
+        if size > MAX_GENERATED_WAV {
+            let _ = fs::remove_file(&output);
+            return Err("Rendered WAV exceeds the current 25 MB desktop preview limit.".into());
+        }
+        let bytes = fs::read(&output).map_err(|e| e.to_string())?;
+        if let Err(reason) = inspect_wav(&bytes) {
+            let _ = fs::remove_file(&output);
+            return Err(reason);
+        }
+        let metadata = data.get("result").ok_or("Missing render metadata.")?;
+        Ok(AudioResult {
+            audio_id: job_id,
+            data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+            duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
+            sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
+            chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
+        })
+    }).await.map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn discard_audio(app: tauri::AppHandle, audio_id: String) -> Result<(), String> {
     Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.")?;
@@ -537,7 +643,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, inspect_script, check_engine, diagnose_engine, synthesize, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, inspect_script, check_engine, diagnose_engine, synthesize, render_story_v2, story_render_progress, cancel_story_render, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
