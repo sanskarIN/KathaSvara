@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .audio_stream import StreamingWav
 from .engine import ChatterboxHindi, VoiceSettings
 from .hindi import split_for_engine
 from .pronunciation import apply_glossary
@@ -116,99 +117,99 @@ def render_story(
     if not 8_000 <= rate <= 192_000:
         raise RuntimeError("Unsupported sample rate.")
     cache_dir.mkdir(parents=True, exist_ok=True)
-    combined_parts: list[Any] = []
     completed: list[dict[str, Any]] = []
     chunk_count = 0
     samples_total = 0
-    for index, (seg, character) in enumerate(speech):
+    # The composer holds only the current dialogue segment; no full-story array.
+    with StreamingWav(output, rate, sf, rate * MAX_OUTPUT_SECONDS) as output_stream:
+        for index, (seg, character) in enumerate(speech):
+            if is_cancelled is not None and is_cancelled():
+                raise RenderCancelled("Render cancelled between dialogue segments.")
+            profile = character.voice
+            profile.validate()
+            # Effective text is reviewed separately; source and spoken_text are immutable here.
+            # Unrelated rules do not affect content-based cache fingerprints.
+            normalized = apply_glossary(seg.spoken_text, doc.pronunciation_glossary)["text"]
+            if not normalized:
+                raise ValueError("Spoken dialogue cannot be empty.")
+            chunks = split_for_engine(normalized)
+            if not chunks or len(chunks) > 40:
+                raise ValueError("Segment requires too many speech chunks.")
+            chunk_count += len(chunks)
+            if chunk_count > MAX_CHUNKS:
+                raise ValueError("Too many speech chunks in one render.")
+            # Cache key represents model ID and all *supported* settings only.
+            # The model ID should incorporate the exact revision when known.
+            fingerprint = json.dumps({
+                "v": 2, "model": profile.model_id, "engine": profile.engine_id,
+                "text": normalized, "exaggeration": profile.exaggeration,
+                "cfg_weight": profile.cfg_weight, "rate": rate,
+            }, sort_keys=True, ensure_ascii=False)
+            key = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+            cached = cache_dir / f"{key}.wav"
+            segment_samples = None
+            was_cached = False
+            if use_cache and cached.exists() and seg.id not in (force_segment_ids or set()):
+                try:
+                    info = sf.info(str(cached))
+                    if (not cached.is_symlink() and info.format == "WAV" and
+                        info.subtype == "PCM_16" and info.channels == 1 and
+                        info.samplerate == rate and 0 < info.frames <= rate * MAX_OUTPUT_SECONDS):
+                        candidate, _ = sf.read(str(cached), dtype="float32", always_2d=False)
+                        segment_samples = _samples(candidate, np)
+                        was_cached = True
+                except (OSError, RuntimeError, ValueError):
+                    # A corrupt cache is never used as valid speech.
+                    segment_samples = None
+            if segment_samples is None:
+                parts = []
+                for part_index, chunk in enumerate(chunks):
+                    if is_cancelled is not None and is_cancelled():
+                        raise RenderCancelled("Render cancelled between speech chunks.")
+                    generated = _samples(
+                        adapter.generate(chunk, VoiceSettings(
+                            exaggeration=profile.exaggeration, cfg_weight=profile.cfg_weight,
+                        )),
+                        np,
+                    ).copy()
+                    # Fade to zero at edit boundaries to avoid hard-edge clicks
+                    # when appending neighboring chunk waveforms or silence.
+                    fade = min(int(rate * 0.008), generated.size // 4)
+                    if fade > 1:
+                        generated[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
+                        generated[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
+                    if part_index:
+                        parts.append(np.zeros(int(rate * 0.12), dtype=np.float32))
+                    parts.append(generated)
+                segment_samples = np.concatenate(parts)
+                if use_cache:
+                    _atomic_wav(cached, segment_samples, rate, sf)
+            # Measured duration is derived from generated PCM samples, never estimated from words.
+            measured = float(segment_samples.size) / float(rate)
+            samples_total += segment_samples.size
+            if samples_total / rate > MAX_OUTPUT_SECONDS:
+                raise ValueError("Render exceeds the 20-minute audio limit.")
+            output_stream.write(segment_samples)
+            completed.append({
+                "segment_id": seg.id, "speaker_id": seg.speaker_id,
+                "cache_key": key if use_cache else None,
+                "cached": was_cached, "duration_seconds": round(measured, 4),
+            })
+            if index != len(speech) - 1:
+                pause = min(profile.pause_ms, 2000)
+                silence = np.zeros(int(rate * pause / 1000), dtype=np.float32)
+                output_stream.write(silence)
+                samples_total += silence.size
+            if on_progress is not None:
+                on_progress(index + 1, len(speech))
         if is_cancelled is not None and is_cancelled():
-            raise RenderCancelled("Render cancelled between dialogue segments.")
-        profile = character.voice
-        profile.validate()
-        # Effective text is reviewed separately; source and spoken_text are immutable here.
-        # Unrelated rules do not affect content-based cache fingerprints.
-        normalized = apply_glossary(seg.spoken_text, doc.pronunciation_glossary)["text"]
-        if not normalized:
-            raise ValueError("Spoken dialogue cannot be empty.")
-        chunks = split_for_engine(normalized)
-        if not chunks or len(chunks) > 40:
-            raise ValueError("Segment requires too many speech chunks.")
-        chunk_count += len(chunks)
-        if chunk_count > MAX_CHUNKS:
-            raise ValueError("Too many speech chunks in one render.")
-        # Cache key represents model ID and all *supported* settings only.
-        # The model ID should incorporate the exact revision when known.
-        fingerprint = json.dumps({
-            "v": 2, "model": profile.model_id, "engine": profile.engine_id,
-            "text": normalized, "exaggeration": profile.exaggeration,
-            "cfg_weight": profile.cfg_weight, "rate": rate,
-        }, sort_keys=True, ensure_ascii=False)
-        key = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
-        cached = cache_dir / f"{key}.wav"
-        segment_samples = None
-        was_cached = False
-        if use_cache and cached.exists() and seg.id not in (force_segment_ids or set()):
-            try:
-                info = sf.info(str(cached))
-                if (not cached.is_symlink() and info.format == "WAV" and
-                    info.subtype == "PCM_16" and info.channels == 1 and
-                    info.samplerate == rate and 0 < info.frames <= rate * MAX_OUTPUT_SECONDS):
-                    candidate, _ = sf.read(str(cached), dtype="float32", always_2d=False)
-                    segment_samples = _samples(candidate, np)
-                    was_cached = True
-            except (OSError, RuntimeError, ValueError):
-                # A corrupt cache is never used as valid speech.
-                segment_samples = None
-        if segment_samples is None:
-            parts = []
-            for part_index, chunk in enumerate(chunks):
-                if is_cancelled is not None and is_cancelled():
-                    raise RenderCancelled("Render cancelled between speech chunks.")
-                generated = _samples(
-                    adapter.generate(chunk, VoiceSettings(
-                        exaggeration=profile.exaggeration, cfg_weight=profile.cfg_weight,
-                    )),
-                    np,
-                ).copy()
-                # Fade to zero at edit boundaries to avoid hard-edge clicks
-                # when appending neighboring chunk waveforms or silence.
-                fade = min(int(rate * 0.008), generated.size // 4)
-                if fade > 1:
-                    generated[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
-                    generated[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
-                if part_index:
-                    parts.append(np.zeros(int(rate * 0.12), dtype=np.float32))
-                parts.append(generated)
-            segment_samples = np.concatenate(parts)
-            if use_cache:
-                _atomic_wav(cached, segment_samples, rate, sf)
-        # Measured duration is derived from generated PCM samples, never estimated from words.
-        measured = float(segment_samples.size) / float(rate)
-        samples_total += segment_samples.size
-        if samples_total / rate > MAX_OUTPUT_SECONDS:
-            raise ValueError("Render exceeds the 20-minute audio limit.")
-        combined_parts.append(segment_samples)
-        completed.append({
-            "segment_id": seg.id, "speaker_id": seg.speaker_id,
-            "cache_key": key if use_cache else None,
-            "cached": was_cached, "duration_seconds": round(measured, 4),
-        })
-        if index != len(speech) - 1:
-            pause = min(profile.pause_ms, 2000)
-            silence = np.zeros(int(rate * pause / 1000), dtype=np.float32)
-            combined_parts.append(silence)
-            samples_total += silence.size
-        if on_progress is not None:
-            on_progress(index + 1, len(speech))
-    if is_cancelled is not None and is_cancelled():
-        raise RenderCancelled("Render cancelled before WAV finalization.")
-    combined = np.concatenate(combined_parts)
-    if combined.size == 0:
-        raise RuntimeError("No speech generated.")
-    _atomic_wav(output, combined, rate, sf)
+            raise RenderCancelled("Render cancelled before WAV finalization.")
+        if samples_total == 0:
+            raise RuntimeError("No speech generated.")
+        output_stream.finish()
     return {
         "file": str(output), "sample_rate": rate,
-        "duration_seconds": round(float(combined.size) / rate, 3),
+        "duration_seconds": round(float(samples_total) / rate, 3),
         "segments": completed, "chunks": chunk_count,
         "distinct_voices_verified": False,
     }
