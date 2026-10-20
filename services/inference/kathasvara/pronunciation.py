@@ -29,9 +29,9 @@ class PronunciationRule:
         if not isinstance(self.id, str) or not 1 <= len(self.id) <= 80 or _DISALLOWED.search(self.id):
             raise ValueError("Pronunciation rule ID must have 1–80 printable characters.")
         if not isinstance(self.original, str) or not isinstance(self.spoken, str):
-            raise ValueError("Pronunciation terms must be text.")
+            raise TypeError("Pronunciation terms must be text.")
         if not isinstance(self.enabled, bool):
-            raise ValueError("Pronunciation rule enabled must be boolean.")
+            raise TypeError("Pronunciation rule enabled must be boolean.")
         for value, limit in ((self.original, 80), (self.spoken, 160)):
             if not value.strip() or len(value) > limit or _DISALLOWED.search(value):
                 raise ValueError("Pronunciation terms must be nonempty single-line text within limits.")
@@ -46,7 +46,7 @@ def validate_glossary(rules: list[PronunciationRule]) -> None:
     originals: set[str] = set()
     for rule in rules:
         if not isinstance(rule, PronunciationRule):
-            raise ValueError("Invalid pronunciation rule.")
+            raise TypeError("Invalid pronunciation rule.")
         rule.validate()
         source = normalize_hindi(rule.original).casefold()
         if rule.id in ids or source in originals:
