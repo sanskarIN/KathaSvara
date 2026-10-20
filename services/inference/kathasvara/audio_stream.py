@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 
 class StreamingWav:
@@ -27,7 +27,7 @@ class StreamingWav:
             f"{destination.stem}-{uuid.uuid4().hex}.partial.wav"
         )
 
-    def __enter__(self) -> StreamingWav:
+    def __enter__(self) -> Self:
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         if self.destination.exists() or self.destination.is_symlink():
             raise ValueError("Choose a new absolute WAV destination.")
@@ -61,7 +61,7 @@ class StreamingWav:
         os.link(self._partial, self.destination)
         self._published = True
 
-    def __exit__(self, *_exc: Any) -> None:
+    def __exit__(self, *_exc: object) -> None:
         if self._file is not None:
             self._file.close()
             self._file = None
