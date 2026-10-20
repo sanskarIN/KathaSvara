@@ -36,6 +36,14 @@ export function readSavedNumber(
 }
 
 export interface EngineDiagnostics {
+  python_311?: boolean;
+  runtime_python_configured?: boolean;
+  runtime_python_path_exists?: boolean;
+  inference_dir_configured?: boolean;
+  inference_dir_looks_valid?: boolean;
+  temporary_write_test_passed?: boolean;
+  tested_on_this_machine?: false;
+  real_speech_verified?: false;
   python_version: string;
   platform: string;
   dependencies: {
