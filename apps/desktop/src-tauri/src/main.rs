@@ -1414,6 +1414,16 @@ mod tests {
         assert!(metadata.data_url.is_empty());
         assert_eq!(metadata.file_bytes, 44 + u64::from(sample_bytes));
         assert!(source.exists());
+        // A WAV with missing/invalid worker metadata must not accumulate in
+        // app data even when its audio samples pass structural validation.
+        let orphan = folder.join("orphan.wav");
+        fs::copy(&source, &orphan).unwrap();
+        assert!(finalize_or_remove_rendered_wav(
+            &orphan, Uuid::new_v4().to_string(),
+            &json!({"result": {"segments": [], "duration_seconds": 568.0}}),
+        ).is_err());
+        assert!(!orphan.exists());
+        assert!(source.exists());
         fs::remove_dir_all(folder).unwrap();
     }
 
