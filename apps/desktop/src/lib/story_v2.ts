@@ -63,14 +63,14 @@ export function defaultVoice(): VoiceProfileV2 {
   };
 }
 
-export function makeCharacter(name: string, id = crypto.randomUUID()): CharacterV2 {
+export function makeCharacter(name: string, id: string = crypto.randomUUID()): CharacterV2 {
   if (!name.trim() || name.trim().length > 120) {
     throw new Error("Character name must be 1–120 characters.");
   }
   return { id, name: name.trim(), voice: defaultVoice(), description: "" };
 }
 
-export function legacyToStoryV2(project: StoryProject, id = crypto.randomUUID()): StoryV2 {
+export function legacyToStoryV2(project: StoryProject, id: string = crypto.randomUUID()): StoryV2 {
   return {
     schema_version: 2,
     id: project.id || id,
@@ -137,7 +137,7 @@ export function renameScene(project: StoryV2, sceneId: string, title: string): S
     scene.id === sceneId ? { ...scene, title: title.trim() } : scene) };
 }
 
-export function addScene(project: StoryV2, title: string, id = crypto.randomUUID()): StoryV2 {
+export function addScene(project: StoryV2, title: string, id: string = crypto.randomUUID()): StoryV2 {
   if (!title.trim() || title.length > 120) throw new Error("Scene title must contain 1–120 characters.");
   if (project.scenes.length >= 200) throw new Error("Maximum 200 scenes.");
   if (project.scenes.some(scene => scene.id === id)) throw new Error("Duplicate scene identifier.");
@@ -163,7 +163,7 @@ export function moveSegment(project: StoryV2, segmentId: string, destinationScen
   return { ...project, scenes };
 }
 
-export function duplicateCharacter(project: StoryV2, id: string, newId = crypto.randomUUID()): StoryV2 {
+export function duplicateCharacter(project: StoryV2, id: string, newId: string = crypto.randomUUID()): StoryV2 {
   const source = project.characters.find(item => item.id === id);
   if (!source) throw new Error("Original character not found.");
   let suffix = 2;
