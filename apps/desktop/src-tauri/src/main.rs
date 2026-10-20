@@ -652,6 +652,77 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn sample_v2() -> StoryV2 {
+        StoryV2 {
+            schema_version: 2,
+            id: Uuid::new_v4().to_string(),
+            title: "राजा भोज".to_string(),
+            text: "Narrator: नमस्कार।".to_string(),
+            characters: vec![CharacterV2 {
+                id: "narrator".to_string(),
+                name: "Narrator".to_string(),
+                description: String::new(),
+                voice: VoiceProfileV2 {
+                    engine_id: "chatterbox-multilingual".to_string(),
+                    model_id: "chatterbox-multilingual".to_string(),
+                    language: "hi".to_string(),
+                    exaggeration: 0.5,
+                    cfg_weight: 0.5,
+                    pause_ms: 140,
+                    profile_version: 1,
+                    speaker_conditioning: None,
+                },
+            }],
+            scenes: vec![SceneV2 {
+                id: Uuid::new_v4().to_string(),
+                title: "दरबार".to_string(),
+                notes: String::new(),
+                segments: vec![SegmentV2 {
+                    id: Uuid::new_v4().to_string(),
+                    original_text: "नमस्कार।".to_string(),
+                    spoken_text: "नमस्कार।".to_string(),
+                    speaker_id: Some("narrator".to_string()),
+                    kind: "speech".to_string(),
+                    status: "pending".to_string(),
+                    audio_ref: None,
+                    duration_seconds: None,
+                    source_label: None,
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn v2_scene_json_roundtrip_is_lossless() {
+        let story = sample_v2();
+        assert!(validate_story_v2(&story).is_ok());
+        let json = serde_json::to_vec(&story).expect("serializable v2 document");
+        let recovered: StoryV2 = serde_json::from_slice(&json).expect("readable v2 document");
+        assert!(validate_story_v2(&recovered).is_ok());
+        assert_eq!(story.text, recovered.text);
+        assert_eq!(story.scenes[0].segments[0].id, recovered.scenes[0].segments[0].id);
+    }
+
+    #[test]
+    fn v2_rejects_unknown_speakers_and_unsupported_voice_conditioning() {
+        let mut story = sample_v2();
+        story.scenes[0].segments[0].speaker_id = Some("stranger".to_string());
+        assert!(validate_story_v2(&story).is_err());
+        story.scenes[0].segments[0].speaker_id = Some("narrator".to_string());
+        story.characters[0].voice.speaker_conditioning = Some("unverified".to_string());
+        assert!(validate_story_v2(&story).is_err());
+    }
+
+    #[test]
+    fn v2_rejects_nonfinite_voice_controls_and_duplicate_ids() {
+        let mut story = sample_v2();
+        story.characters[0].voice.exaggeration = f32::NAN;
+        assert!(validate_story_v2(&story).is_err());
+        story.characters[0].voice.exaggeration = 0.5;
+        story.characters.push(story.characters[0].clone());
+        assert!(validate_story_v2(&story).is_err());
+    }
+
     #[test]
     fn project_validates_title() {
         let project = StoryProject { id: String::new(), title: String::new(), text: String::new() };
