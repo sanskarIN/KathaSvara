@@ -122,3 +122,19 @@ def test_corrupt_and_wrong_format_cached_wav_is_not_reused(tmp_path: Path) -> No
     recovered = SimulatedEngine()
     render_story(doc, tmp_path / "b.wav", tmp_path / "cache", recovered)
     assert recovered.calls == ["नमस्ते।"]
+
+
+def test_real_selected_segment_job_does_not_render_neighbors(tmp_path: Path) -> None:
+    doc = parse_dialogue("कथा", "Narrator: पहला।\nNarrator: दूसरा।", [narrator()])
+    ids = [seg.id for seg in doc.scenes[0].segments]
+    engine = SimulatedEngine()
+    report = render_story(
+        doc, tmp_path / "single.wav", tmp_path / "cache", engine,
+        selected_scene_ids={doc.scenes[0].id}, selected_segment_ids={ids[1]},
+        force_segment_ids={ids[1]},
+    )
+    assert engine.calls == ["दूसरा।"]
+    assert [entry["segment_id"] for entry in report["segments"]] == [ids[1]]
+    with pytest.raises(ValueError, match="does not belong"):
+        render_story(doc, tmp_path / "bad.wav", tmp_path / "cache", SimulatedEngine(),
+                     selected_segment_ids={"unknown"})
