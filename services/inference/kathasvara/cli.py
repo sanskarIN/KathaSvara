@@ -12,7 +12,8 @@ from .diagnostics import diagnose
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
 from .dialogue import parse_dialogue, unresolved_labels
-from .story import Character, VoiceProfile, narrator
+from .story import Character, VoiceProfile, from_dict, narrator
+from .production import render_story
 from .synthesis import synthesize
 
 
@@ -66,6 +67,52 @@ def handle(request: dict[str, object]) -> dict[str, object]:
                 "changed": normalized != text,
             },
         }
+    if request.get("action") == "render_story":
+        project = request.get("project")
+        output = request.get("output")
+        cache = request.get("cache")
+        cancel = request.get("cancel_file")
+        progress = request.get("progress_file")
+        selected = request.get("selected_scene_ids")
+        force = request.get("force_segment_ids")
+        if not isinstance(project, dict):
+            raise TypeError("Expected a version 2 story document.")
+        if not isinstance(output, str) or not isinstance(cache, str):
+            raise TypeError("Render requires output and cache filenames.")
+        if cancel is not None and not isinstance(cancel, str):
+            raise TypeError("Cancellation sentinel must be a filename.")
+        if progress is not None and not isinstance(progress, str):
+            raise TypeError("Progress file must be a filename.")
+        if selected is not None and (
+            not isinstance(selected, list) or
+            not all(isinstance(item, str) for item in selected)
+        ):
+            raise TypeError("Selected scenes must be an ID array.")
+        if force is not None and (
+            not isinstance(force, list) or
+            not all(isinstance(item, str) for item in force)
+        ):
+            raise TypeError("Forced segments must be an ID array.")
+        doc = from_dict(project)
+        cancel_path = Path(cancel) if cancel else None
+        progress_path = Path(progress) if progress else None
+
+        def cancelled() -> bool:
+            return cancel_path is not None and cancel_path.exists()
+
+        def report(done: int, total: int) -> None:
+            if progress_path is not None:
+                progress_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = progress_path.with_name(progress_path.name + ".partial")
+                tmp.write_text(json.dumps({"done": done, "total": total}), encoding="utf-8")
+                tmp.replace(progress_path)
+
+        result = render_story(
+            doc, Path(output), Path(cache), on_progress=report, is_cancelled=cancelled,
+            selected_scene_ids=set(selected) if selected is not None else None,
+            force_segment_ids=set(force) if force is not None else None,
+        )
+        return {"ok": True, "result": result}
     if request.get("action") != "synthesize":
         raise ValueError("Unsupported action.")
     text = request.get("text")
