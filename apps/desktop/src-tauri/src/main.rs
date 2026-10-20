@@ -317,6 +317,36 @@ async fn preview_pronunciation(project: StoryV2, segment_id: String) -> Result<V
     }).await.map_err(|e| e.to_string())?
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct SegmentTiming {
+    segment_id: String,
+    start_seconds: f64,
+    end_seconds: f64,
+}
+
+fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String> {
+    let times = metadata["segments"].as_array().ok_or("Missing rendered segment timings.")?;
+    if times.is_empty() || times.len() > 256 {
+        return Err("Invalid number of generated subtitle cues.".into());
+    }
+    let mut result = Vec::with_capacity(times.len());
+    let mut previous_end = 0.0;
+    for value in times {
+        let timing: SegmentTiming = serde_json::from_value(value.clone())
+            .map_err(|_| "Malformed measured subtitle cue.".to_string())?;
+        if timing.segment_id.is_empty() || timing.segment_id.len() > 80 ||
+            !timing.start_seconds.is_finite() || !timing.end_seconds.is_finite() ||
+            timing.start_seconds + 0.002 < previous_end ||
+            timing.start_seconds < 0.0 || timing.end_seconds <= timing.start_seconds ||
+            timing.end_seconds > 1200.1 {
+            return Err("Invalid generated segment timeline.".into());
+        }
+        previous_end = timing.end_seconds;
+        result.push(timing);
+    }
+    Ok(result)
+}
+
 #[derive(Debug, Serialize)]
 struct AudioResult {
     audio_id: String,
@@ -324,6 +354,7 @@ struct AudioResult {
     duration_seconds: f64,
     sample_rate: u32,
     chunks: u32,
+    segment_timings: Vec<SegmentTiming>,
 }
 
 fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -686,6 +717,7 @@ async fn synthesize(
             duration_seconds: result["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
+            segment_timings: Vec::new(),
         })
     }).await.map_err(|e| e.to_string())?
 }
@@ -918,6 +950,7 @@ async fn render_story_v2(
             duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
+            segment_timings: parse_segment_timings(metadata)?,
         })
     }).await.map_err(|e| e.to_string())?
 }
@@ -955,11 +988,34 @@ fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> R
     Ok(())
 }
 
+fn write_srt(destination: &Path, content: &str) -> Result<(), String> {
+    if !destination.is_absolute() ||
+        destination.extension().and_then(|ext| ext.to_str()) != Some("srt") {
+        return Err("Choose a new absolute .srt subtitle destination.".into());
+    }
+    if content.is_empty() || content.len() > 250_000 || !content.starts_with("1\\n") {
+        return Err("Invalid or oversized SRT subtitle content.".into());
+    }
+    let mut file = fs::OpenOptions::new().write(true).create_new(true)
+        .open(destination).map_err(|e| format!("Cannot create subtitle destination: {e}"))?;
+    if let Err(error) = file.write_all(content.as_bytes()).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(destination);
+        return Err(format!("Unable to write subtitles: {error}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn export_subtitles(destination: String, content: String) -> Result<(), String> {
+    write_srt(Path::new(&destination), &content)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -1162,6 +1218,31 @@ mod tests {
         let bytes = vec![b'a'; MAX_PYTHON_RESPONSE + 1];
         assert!(read_bounded_response(std::io::Cursor::new(bytes))
             .expect_err("response should be bounded").contains("maximum allowed size"));
+    }
+
+    #[test]
+    fn subtitle_export_rejects_overwrite_and_invalid_timing() {
+        let dest = std::env::temp_dir().join(format!("kathasvara-{}.srt", Uuid::new_v4()));
+        assert!(write_srt(&dest, "1\\n00:00:00,000 --> 00:00:00,500\\nनमस्कार!\\n").is_ok());
+        assert!(write_srt(&dest, "1\\nreplacement\\n").is_err());
+        assert!(write_srt(Path::new("relative.srt"), "1\\nwrong\\n").is_err());
+        assert!(dest.exists());
+        fs::remove_file(dest).unwrap();
+    }
+
+    #[test]
+    fn measured_segment_timeline_enforces_bounds_and_order() {
+        let good = json!({"segments": [
+            {"segment_id":"one","start_seconds":0.0,"end_seconds":1.0},
+            {"segment_id":"two","start_seconds":1.14,"end_seconds":2.4}
+        ]});
+        assert_eq!(parse_segment_timings(&good).unwrap().len(), 2);
+        let bad = json!({"segments": [
+            {"segment_id":"one","start_seconds":0.0,"end_seconds":2.0},
+            {"segment_id":"two","start_seconds":1.0,"end_seconds":2.4}
+        ]});
+        assert!(parse_segment_timings(&bad).is_err());
+        assert!(parse_segment_timings(&json!({"segments":[]})).is_err());
     }
 
     #[test]

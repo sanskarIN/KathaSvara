@@ -1,4 +1,4 @@
-KathaSvara v0.3.0 — Unsigned Windows x64 experimental developer executable
+KathaSvara v0.4.0 — Unsigned Windows x64 experimental developer executable
 ==================================================================
 
 THIS IS NOT A COMPLETE INSTALLER OR A RELEASE-READY APPLICATION.
@@ -40,12 +40,14 @@ Security and trust:
 - Do not bypass security protections to run unverified binaries.
 - Compatible WebView2 and the Tauri Windows prerequisites may be necessary.
 - Real Hindi speech and multiple distinct character voices are unverified.
+- SRT subtitle timestamps use measured speech-segment frame durations; these
+  are not per-word alignments or independently verified subtitle timings.
 
 No voice model, generated sample, or commercial voice-clone asset is bundled.
 KathaSvara app sources are MPL-2.0; third-party dependencies/checkpoints have
 separate license terms.
 
-The guarded v0.3.0 release workflow can publish an experimental developer pre-release
+The guarded v0.4.0 release workflow can publish an experimental developer pre-release
 only after tests, executable compilation and SHA-256 verification succeed.
 This does NOT verify interactive launch or real Hindi narration on a clean machine.
 Manual playback, project persistence, save/export, source compatibility and audio

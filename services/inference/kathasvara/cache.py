@@ -9,7 +9,10 @@ from __future__ import annotations
 import re
 import stat
 import time
+from contextlib import nullcontext
 from pathlib import Path
+
+from .cache_lock import exclusive_cache_access
 
 CACHE_BUDGET_BYTES = 512 * 1024 * 1024
 MAX_CACHE_BUDGET_BYTES = 50 * 1024 * 1024 * 1024
@@ -65,39 +68,42 @@ def prune_cache(
         raise ValueError("Cache budget must be between 0 and 50 GiB.")
     if type(dry_run) is not bool:
         raise ValueError("dry_run must be a boolean.")
-    current = time.time() if now is None else now
-    entries, ignored = _cache_entries(cache_dir)
-    total = sum(item[1] for item in entries)
-    # Prefer newest files; all files in the grace window must remain untouched.
-    entries.sort(key=lambda item: (-item[2], item[0].name))
-    kept = 0
-    reclaimed = 0
-    selected = 0
-    for path, size, modified, device, inode, modified_ns in entries:
-        if current - modified < CACHE_GRACE_SECONDS or kept + size <= max_bytes:
-            kept += size
-            continue
-        selected += 1
-        if dry_run:
-            reclaimed += size
-            continue
-        try:
-            current_info = path.lstat()
-            if (not stat.S_ISREG(current_info.st_mode) or
-                (current_info.st_dev, current_info.st_ino, current_info.st_size,
-                 current_info.st_mtime_ns) !=
-                (device, inode, size, modified_ns)):
-                ignored += 1
+    # A real delete must exclude other render/prune workers across app processes.
+    # Dry-run only observes cached entries, so it does not require the lock.
+    with exclusive_cache_access(cache_dir) if not dry_run else nullcontext():
+        current = time.time() if now is None else now
+        entries, ignored = _cache_entries(cache_dir)
+        total = sum(item[1] for item in entries)
+        # Prefer newest files; all files in the grace window must remain untouched.
+        entries.sort(key=lambda item: (-item[2], item[0].name))
+        kept = 0
+        reclaimed = 0
+        selected = 0
+        for path, size, modified, device, inode, modified_ns in entries:
+            if current - modified < CACHE_GRACE_SECONDS or kept + size <= max_bytes:
+                kept += size
                 continue
-            path.unlink()
-            reclaimed += size
-        except FileNotFoundError:
-            continue
-    return {
-        "files_before": len(entries),
-        "bytes_before": total,
-        "candidates": selected,
-        "bytes_reclaimable": reclaimed,
-        "dry_run": dry_run,
-        "ignored_entries": ignored,
-    }
+            selected += 1
+            if dry_run:
+                reclaimed += size
+                continue
+            try:
+                current_info = path.lstat()
+                if (not stat.S_ISREG(current_info.st_mode) or
+                    (current_info.st_dev, current_info.st_ino, current_info.st_size,
+                     current_info.st_mtime_ns) !=
+                    (device, inode, size, modified_ns)):
+                    ignored += 1
+                    continue
+                path.unlink()
+                reclaimed += size
+            except FileNotFoundError:
+                continue
+        return {
+            "files_before": len(entries),
+            "bytes_before": total,
+            "candidates": selected,
+            "bytes_reclaimable": reclaimed,
+            "dry_run": dry_run,
+            "ignored_entries": ignored,
+        }
