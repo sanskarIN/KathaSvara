@@ -3,9 +3,10 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
+import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
-  renameScene, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
+  renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
 interface Props {
@@ -31,6 +32,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const renderRevision = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const currentJob = useRef<string | null>(null);
+  const currentAudio = useRef<string | null>(null);
+  currentJob.current = jobId;
+  currentAudio.current = audio?.audio_id ?? null;
+  useEffect(() => () => {
+    renderRevision.current += 1;
+    if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+    if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    // Parent script/story switches are edits too; reject late renders of older documents.
+    renderRevision.current += 1;
+    if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+  }, [document]);
   useEffect(() => {
     if (!jobId) return;
     const interval = window.setInterval(() => {
@@ -163,8 +178,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       onMessage("The character and scene editor has a 100,000-character limit.");
       return;
     }
-    if (document.scenes.some(scene => scene.segments.some(segment => segment.audio_ref)) &&
-        !window.confirm("Reparsing changes dialogue IDs or text. Previously generated segment previews may become stale. Continue?")) {
+    if (document.scenes.length > 0 &&
+        !window.confirm("Reparsing replaces reviewed spoken text and speaker corrections. Original script and pronunciation glossary stay intact. Continue?")) {
       return;
     }
     setBusy(true);
@@ -177,7 +192,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       if (!response.ok) throw new Error("Dialogue parser returned an unsuccessful response.");
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
       setAudio(null);
-      onChange(response.result);
+      renderRevision.current += 1;
+      onChange({ ...response.result, pronunciation_glossary: document.pronunciation_glossary ?? [] });
       setUnresolved(response.unresolved);
       setSelectedScene(response.result.scenes[0]?.id ?? null);
       setDirty(true);
@@ -208,6 +224,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setBusy(true);
     try {
       const loaded = await invoke<StoryV2>("load_story_v2", { id: document.id });
+      renderRevision.current += 1;
+      if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
+      setAudio(null);
       onChange(loaded);
       setSelectedScene(loaded.scenes[0]?.id ?? null);
       setDirty(false);
@@ -268,13 +287,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         </ul>
       </div>
       <div className="panel scene-panel">
+        <PronunciationStudio document={document} edit={edit} onMessage={onMessage} />
         <div className="section-label">SCENES & DIALOGUE / दृश्य</div>
         <h2>Script breakdown</h2>
         <p>Use labels like <code>राजा भोज: नमस्कार।</code> and scene headings like <code># दरबार</code>. Unknown speaker names are never guessed.</p>
         <div className="cast-actions">
           <button className="secondary-button" disabled={busy || rendering} onClick={() => void parse()}>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
           <button className="secondary-button" disabled={busy} onClick={() => void saveDocument()}>Save cast and scenes</button>
-          <button className="quiet-button" disabled={busy} onClick={() => void loadDocument()}>Load saved v2</button>
+          <button className="quiet-button" disabled={busy || rendering} onClick={() => void loadDocument()}>Load saved v2</button>
         </div>
         <div className="render-tools">
           <button className="primary-button" disabled={busy || rendering || !document.scenes.length}
@@ -339,6 +359,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     )}
                   </div>
                   <p lang="hi">{segment.original_text}</p>
+                   {segment.kind === "speech" && <label className="reviewed-dialogue-label">
+                     Reviewed spoken text (not the original script)
+                     <textarea key={segment.id + segment.spoken_text} lang="hi"
+                       aria-label={"Reviewed speech for " + segment.id}
+                       defaultValue={segment.spoken_text} rows={2} maxLength={100_000}
+                       onBlur={event => {
+                         const next = event.currentTarget.value;
+                         if (next === segment.spoken_text) return;
+                         try { edit(doc => reviewSpokenText(doc, segment.id, next)); }
+                         catch (error) {
+                           onMessage(errorString(error));
+                           event.currentTarget.value = segment.spoken_text;
+                         }
+                       }} />
+                   </label>}
                   <label className="move-segment-label">Move line to scene
                     <select aria-label={"Move line " + segment.id} value={activeScene.id}
                       onChange={event => {
@@ -351,7 +386,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                   {segment.kind === "speech" && segment.speaker_id && (
                     <button className="quiet-button" disabled={rendering}
                       onClick={() => void startRender(activeScene.id, segment.id)}>
-                      Regenerate this line within scene
+                      Force refresh this line (renders scene)
                     </button>
                   )}
                   {segment.kind === "speech" && segment.speaker_id === null && <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
