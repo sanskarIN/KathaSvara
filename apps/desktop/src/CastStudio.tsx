@@ -45,6 +45,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     // Parent script/story switches are edits too; reject late renders of older documents.
     renderRevision.current += 1;
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+    if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
+    setAudio(null);
   }, [document]);
   useEffect(() => {
     if (!jobId) return;
@@ -100,8 +102,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       return;
     }
     const selected = sceneId ? document.scenes.filter(scene => scene.id === sceneId) : document.scenes;
-    if (selected.some(scene => scene.segments.some(seg => seg.kind === "speech" && !seg.speaker_id))) {
-      onMessage("Assign unresolved dialogue speakers before rendering.");
+    const speech = selected.flatMap(scene => scene.segments)
+      .filter(seg => seg.kind === "speech" && (!forceSegmentId || seg.id === forceSegmentId));
+    if (!speech.length) {
+      onMessage("Select a scene with spoken dialogue before rendering.");
+      return;
+    }
+    if (speech.some(seg => !seg.speaker_id)) {
+      onMessage("Assign the selected dialogue speaker before rendering.");
+      return;
+    }
+    if (speech.length > 256 || speech.reduce((length, seg) => length + seg.spoken_text.length, 0) > 100_000) {
+      onMessage("Render limit: 256 spoken segments and 100,000 characters. Choose a scene or split the story.");
       return;
     }
     const id = crypto.randomUUID();
