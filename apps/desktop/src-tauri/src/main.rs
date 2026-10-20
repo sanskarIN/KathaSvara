@@ -881,6 +881,26 @@ fn forget_render_journal_file(
     if data["schema_version"] != 1 || data["story_id"].as_str() != Some(story_id) {
         return Err("The history record belongs to a different story.".into());
     }
+    // A user-confirmed forget also removes its small cancellation/progress
+    // bookkeeping files. Validate BOTH optional files before deleting anything
+    // to avoid partial cleanup when an unexpected symlink is encountered.
+    let mut sidecars = Vec::new();
+    for (suffix, bound) in [(".progress.json", 1024), (".cancel", 8)] {
+        let sidecar = folder.join(format!("{job_id}{suffix}"));
+        let metadata = match fs::symlink_metadata(&sidecar) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Cannot inspect render sidecar: {error}")),
+        };
+        if !metadata.file_type().is_file() || metadata.len() > bound {
+            return Err("Render bookkeeping sidecar is not a bounded regular file.".into());
+        }
+        sidecars.push(sidecar);
+    }
+    for sidecar in sidecars {
+        fs::remove_file(sidecar)
+            .map_err(|e| format!("Cannot remove render bookkeeping file: {e}"))?;
+    }
     fs::remove_file(path).map_err(|e| format!("Cannot remove render history record: {e}"))
 }
 
