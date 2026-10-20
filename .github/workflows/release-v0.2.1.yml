@@ -1,0 +1,194 @@
+name: Publish KathaSvara v0.2.1 experimental prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: "Exact 40-character commit SHA at the tip of main"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kathasvara-v0.2.1-publication
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.verify.outputs.sha }}
+    steps:
+      - name: Confirm protected release intent and unique version
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::A full lowercase SHA is required"; exit 1; }
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test "$main_sha" = "$RELEASE_SHA" || { echo "::error::Release SHA must match current main"; exit 1; }
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.2.1" > /dev/null 2>&1; then
+            echo "::error::Tag already exists; never overwrite v0.2.1"
+            exit 1
+          fi
+          if gh release view v0.2.1 --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::Release already exists; refusing duplicate"
+            exit 1
+          fi
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
+  python:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Offline Python lint and tests
+        working-directory: services/inference
+        run: |
+          python -m pip install -e ".[test]"
+          python -m ruff check .
+          python -m pytest -q
+
+  frontend:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: React tests and production build
+        working-directory: apps/desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run test
+          npm run build
+
+  rust-windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Native format, tests and Clippy
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo fmt
+          cargo fmt -- --check
+          cargo test
+          cargo clippy --all-targets -- -D warnings
+
+  windows-exe:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build real unsigned EXE, no installer and no model
+        working-directory: apps/desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run test
+          npm run build
+          npm run tauri -- build --no-bundle
+      - name: Verify artifact and create SHA256 companion
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = "apps/desktop/src-tauri/target/release/kathasvara.exe"
+          if (-not (Test-Path $source)) { throw "Missing Windows desktop executable" }
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          $name = "KathaSvara-v0.2.1-dev-win64.exe"
+          Copy-Item $source "release-assets/$name"
+          Copy-Item docs/installation/portable-windows-candidate.md release-assets/README.txt
+          $file = Get-Item "release-assets/$name"
+          if ($file.Length -lt 100000) { throw "Unexpectedly small or empty EXE" }
+          $hash = (Get-FileHash "release-assets/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText("release-assets/SHA256SUMS.txt", "$hash  $name" + [Environment]::NewLine)
+          $note = Get-Content release-assets/README.txt -Raw
+          if (-not $note.Contains("NOT A COMPLETE INSTALLER") -or -not $note.Contains("Python 3.11")) { throw "Missing runtime warnings" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kathasvara-v0.2.1-release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: [prepare, python, frontend, rust-windows, windows-exe]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: kathasvara-v0.2.1-release-assets
+          path: release-assets
+      - name: Revalidate all release companions and immutability
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" != "" 
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -s release-assets/KathaSvara-v0.2.1-dev-win64.exe
+          test -s release-assets/README.txt
+          test -s release-assets/SHA256SUMS.txt
+          (cd release-assets && sha256sum -c SHA256SUMS.txt)
+          grep -q "NOT A COMPLETE INSTALLER" release-assets/README.txt
+          grep -q "Python 3.11" release-assets/README.txt
+          test -s docs/releases/v0.2.1-notes.md
+          if gh release view v0.2.1 --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then exit 1; fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.2.1" > /dev/null 2>&1; then exit 1; fi
+      - name: Publish experimental release from tested SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          gh release create v0.2.1             release-assets/KathaSvara-v0.2.1-dev-win64.exe             release-assets/README.txt             release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA"             --title "KathaSvara v0.2.1 — Experimental Developer Preview"             --notes-file docs/releases/v0.2.1-notes.md --prerelease
+      - name: Verify tag, SHA, prerelease and three uploaded assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.2.1" --jq '.object.sha')" = "$RELEASE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.1" --jq '.prerelease')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.1" --jq '.draft')" = false
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.1" --jq '.assets | length')" = 3
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.2.1" --jq '.assets[] | [.name, (.size | tostring)] | @tsv'
+          mkdir verified
+          gh release download v0.2.1 -D verified --repo "$GITHUB_REPOSITORY"
+          (cd verified && sha256sum -c SHA256SUMS.txt)
