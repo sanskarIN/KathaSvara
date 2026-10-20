@@ -9,6 +9,15 @@ import {
   renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
+type RenderHistory = {
+  job_id: string;
+  story_id: string;
+  state: "running" | "cancelled" | "failed" | "completed";
+  done: number;
+  total: number;
+  updated_at: string;
+};
+
 interface Props {
   document: StoryV2;
   onChange: Dispatch<SetStateAction<StoryV2>>;
@@ -29,6 +38,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [rendering, setRendering] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [history, setHistory] = useState<RenderHistory[] | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const renderRevision = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -147,6 +158,19 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       setRendering(false);
     }
   }
+  async function showRenderHistory() {
+    setLoadingHistory(true);
+    try {
+      const records = await invoke<RenderHistory[]>("story_render_history");
+      setHistory(records.filter(record => record.story_id === document.id).slice(0, 10));
+      onMessage("Recent local render history loaded. Unfinished jobs can be retried using cached speech.");
+    } catch (error) {
+      onMessage("Could not read local render history: " + errorString(error));
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
   async function cancelRender() {
     if (jobId) {
       try {
@@ -321,11 +345,30 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           {activeScene && <button className="secondary-button" disabled={busy || rendering}
             onClick={() => void startRender(activeScene.id)}>Generate selected scene</button>}
           <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
+          <button className="secondary-button" disabled={loadingHistory}
+            onClick={() => void showRenderHistory()}>
+            {loadingHistory ? "Reading history…" : "Recent render history"}
+          </button>
           <div className="render-meter" role="status" aria-live="polite">
             {rendering
               ? (progress.total ? `Segments ${progress.done} / ${progress.total}` : "Loading local inference model…")
               : "Not generating"}
           </div>
+          {history && <section className="inspection-panel" aria-label="Recent local render jobs">
+            <strong>Recent render attempts for this story</strong>
+            <p>Records store segment IDs and outcomes, not script text. Retry the story or
+              selected scene to reuse unchanged cached audio. Jobs marked running may
+              have been interrupted by a previous application exit.</p>
+            {history.length === 0
+              ? <p>No recorded renders for this story yet.</p>
+              : <ul>{history.map(item => (
+                <li key={item.job_id}>
+                  {item.state === "running" ? "Running or interrupted" : item.state}
+                  {" · "}{item.done}/{item.total} segments
+                  {" · "}{item.updated_at}
+                </li>
+              ))}</ul>}
+          </section>}
           {audio && <>
             <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated dialogue preview" />
             <small>{audio.duration_seconds.toFixed(1)} seconds · {audio.sample_rate} Hz · {audio.chunks} synthesis chunks</small>
