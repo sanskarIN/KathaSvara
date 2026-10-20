@@ -71,15 +71,15 @@ def render_story(
         raise ValueError("Choose a new absolute WAV destination.")
     if not cache_dir.is_absolute() or cache_dir.resolve() == output.resolve().parent:
         raise ValueError("Use a dedicated absolute cache directory.")
+    if any(seg.speaker_id is None for scene in doc.scenes for seg in scene.segments
+           if seg.kind == "speech"):
+        raise ValueError("Assign every unknown speaker manually before rendering.")
     speech = [
         (seg, next(char for char in doc.characters if char.id == seg.speaker_id))
         for scene in doc.scenes for seg in scene.segments if seg.kind == "speech"
     ]
     if not speech or len(speech) > MAX_RENDER_SEGMENTS:
         raise ValueError("A render needs 1–256 spoken segments.")
-    if any(seg.speaker_id is None for scene in doc.scenes for seg in scene.segments
-           if seg.kind == "speech"):
-        raise ValueError("Assign every unknown speaker manually before rendering.")
     if sum(len(seg.spoken_text) for seg, _ in speech) > MAX_RENDER_CHARACTERS:
         raise ValueError("A render exceeds the 100000-character limit.")
     try:
