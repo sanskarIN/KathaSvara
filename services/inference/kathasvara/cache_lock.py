@@ -44,7 +44,7 @@ def exclusive_cache_access(cache_dir: Path) -> Iterator[None]:
             # Ensure the lock range contains a byte on Windows. Two processes
             # may initialize concurrently but never remove/recreate the inode.
             if metadata.st_size == 0:
-                os.write(fd, b"\\0")
+                os.write(fd, b"\0")
             # Lock one fixed byte of the same persistent file for every worker.
             os.lseek(fd, 0, os.SEEK_SET)
             try:
