@@ -10,6 +10,9 @@
 - Validate rounded millisecond cue times consistently between React and Rust; reject zero-length/overlapping captions before writing.
 - Reject incomplete or inconsistent synthesis metadata and delete only the failed job's WAV rather than allowing silent orphan files after a completed Python subprocess.
 - Add Hindi SRT, malformed/escaped caption, native large-WAV recovery and rounded-timing regression cases.
+- Add explicit Settings preview and confirmed cleanup for **abandoned generated `.partial.wav` files older than 24 hours** in the dedicated audio and segment-cache folders; never remove final WAVs, story files, audio exports, recovery journals, recent files, symlinks or unrelated filenames.
+- Use the cross-process speech-cache lock for both inspection and destructive cleanup; block active in-app renders and cap scans to 20,000 entries and deletions to 1,024 files per confirmation.
+- Add no-model tests for dry-run reporting, permission-free simulated stale entries, preservation of valid assets, symlink refusal and active-worker contention.
 - **Not yet published:** [v0.4.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0) remains the latest experimental developer pre-release. Real Hindi speech/model quality and Windows clean-install acceptance remain open.
 
 ## [v0.4.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0)

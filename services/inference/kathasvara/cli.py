@@ -17,6 +17,7 @@ from .production import render_story
 from .pronunciation import apply_glossary
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
+from .temp_cleanup import cleanup_partial_wavs
 
 
 def handle(request: dict[str, object]) -> dict[str, object]:
@@ -24,6 +25,14 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "engine": "chatterbox-multilingual", "language": "hi"}
     if request.get("action") == "diagnose":
         return {"ok": True, "result": diagnose()}
+    if request.get("action") == "abandoned_wav_cleanup":
+        root = request.get("root")
+        dry_run = request.get("dry_run", True)
+        if not isinstance(root, str):
+            raise TypeError("Recovery cleanup needs an absolute app-data root.")
+        return {"ok": True, "result": cleanup_partial_wavs(
+            Path(root), dry_run=dry_run,
+        )}
     if request.get("action") in ("cache_stats", "cache_prune"):
         cache_path = request.get("cache")
         if not isinstance(cache_path, str):
