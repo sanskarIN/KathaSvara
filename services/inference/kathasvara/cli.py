@@ -98,6 +98,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         cancel = request.get("cancel_file")
         progress = request.get("progress_file")
         selected = request.get("selected_scene_ids")
+        selected_segments = request.get("selected_segment_ids")
         force = request.get("force_segment_ids")
         if not isinstance(project, dict):
             raise TypeError("Expected a version 2 story document.")
@@ -112,6 +113,12 @@ def handle(request: dict[str, object]) -> dict[str, object]:
             not all(isinstance(item, str) for item in selected)
         ):
             raise TypeError("Selected scenes must be an ID array.")
+        if selected_segments is not None and (
+            not isinstance(selected_segments, list) or
+            not all(isinstance(item, str) for item in selected_segments) or
+            len(selected_segments) > 256
+        ):
+            raise TypeError("Selected dialogue lines must be a bounded ID array.")
         if force is not None and (
             not isinstance(force, list) or
             not all(isinstance(item, str) for item in force)
@@ -134,6 +141,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         result = render_story(
             doc, Path(output), Path(cache), on_progress=report, is_cancelled=cancelled,
             selected_scene_ids=set(selected) if selected is not None else None,
+            selected_segment_ids=set(selected_segments) if selected_segments is not None else None,
             force_segment_ids=set(force) if force is not None else None,
         )
         return {"ok": True, "result": result}
