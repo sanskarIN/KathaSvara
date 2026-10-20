@@ -14,7 +14,10 @@ from kathasvara.cli import handle
 from kathasvara.dialogue import parse_dialogue
 from kathasvara.production import render_story
 from kathasvara.pronunciation import (
-    PronunciationRule, apply_glossary, glossary_from_dict, validate_glossary,
+    PronunciationRule,
+    apply_glossary,
+    glossary_from_dict,
+    validate_glossary,
 )
 from kathasvara.story import from_dict, narrator
 
