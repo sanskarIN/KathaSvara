@@ -1269,6 +1269,36 @@ mod tests {
     }
 
     #[test]
+    fn large_pcm_wav_can_be_streamed_to_export_without_overwriting() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-long-wav-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("source.wav");
+        let exported = folder.join("export.wav");
+        let sample_bytes: u32 = 26 * 1024 * 1024; // Over the 25 MiB inline preview cap.
+        let mut writer = fs::File::create(&source).unwrap();
+        writer.write_all(b"RIFF").unwrap();
+        writer.write_all(&(sample_bytes + 36).to_le_bytes()).unwrap();
+        writer.write_all(b"WAVEfmt ").unwrap();
+        writer.write_all(&16_u32.to_le_bytes()).unwrap();
+        writer.write_all(&1_u16.to_le_bytes()).unwrap();
+        writer.write_all(&1_u16.to_le_bytes()).unwrap();
+        writer.write_all(&24_000_u32.to_le_bytes()).unwrap();
+        writer.write_all(&48_000_u32.to_le_bytes()).unwrap();
+        writer.write_all(&2_u16.to_le_bytes()).unwrap();
+        writer.write_all(&16_u16.to_le_bytes()).unwrap();
+        writer.write_all(b"data").unwrap();
+        writer.write_all(&sample_bytes.to_le_bytes()).unwrap();
+        writer.set_len(44 + u64::from(sample_bytes)).unwrap();
+        drop(writer);
+        assert!(fs::metadata(&source).unwrap().len() > MAX_GENERATED_WAV);
+        copy_validated_wav(&source, &exported).unwrap();
+        assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        assert!(copy_validated_wav(&source, &exported).is_err());
+        assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn measured_segment_timeline_enforces_bounds_and_order() {
         let good = json!({"segments": [
             {"segment_id":"one","start_seconds":0.0,"end_seconds":1.0,"effective_text":"नमस्कार"},
