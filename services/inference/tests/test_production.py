@@ -103,3 +103,45 @@ def test_cached_output_refuses_overwrite(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="new absolute WAV"):
         render_story(doc, file, tmp_path / "cache", FakeEngine())
     assert file.read_bytes() == b"not a wav"
+
+
+def test_cancel_does_not_leave_composition_partials(tmp_path: Path) -> None:
+    doc = sample_doc()
+    progress: list[int] = []
+    out = tmp_path / "cancelled.wav"
+    with pytest.raises(RenderCancelled):
+        render_story(
+            doc, out, tmp_path / "cache", FakeEngine(),
+            on_progress=lambda done, total: progress.append(done),
+            is_cancelled=lambda: len(progress) > 0,
+        )
+    assert not out.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+    assert len(list((tmp_path / "cache").glob("*.wav"))) == 1
+
+
+def test_streaming_output_refuses_racing_destination_and_preserves_it(tmp_path: Path) -> None:
+    """Finalization cannot replace a destination created after the initial check."""
+    from kathasvara.audio_stream import StreamingWav
+
+    out = tmp_path / "raced.wav"
+    with StreamingWav(out, 24_000, sf, 24_000) as writer:
+        writer.write(np.full(200, 0.1, dtype=np.float32))
+        out.write_bytes(b"keep me")
+        with pytest.raises(FileExistsError):
+            writer.finish()
+    assert out.read_bytes() == b"keep me"
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_stream_writer_enforces_frame_limit_without_publishing(tmp_path: Path) -> None:
+    from kathasvara.audio_stream import StreamingWav
+
+    out = tmp_path / "oversize.wav"
+    with pytest.raises(ValueError, match="20-minute"):
+        with StreamingWav(out, 24_000, sf, max_frames=10) as writer:
+            writer.write(np.full(8, 0.1, dtype=np.float32))
+            writer.write(np.full(3, 0.1, dtype=np.float32))
+            writer.finish()
+    assert not out.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
