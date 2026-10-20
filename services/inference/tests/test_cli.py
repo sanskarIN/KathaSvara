@@ -95,3 +95,32 @@ def test_diagnostic_never_claims_model_or_audio_validated() -> None:
     assert report["model_weights_verified"] is False
     assert report["audio_synthesis_verified"] is False
     assert report["dependencies_present"] is all(report["dependencies"].values())
+
+
+def test_dialogue_cli_reports_unmapped_speakers_without_voice_fakes() -> None:
+    result = handle({
+        "action": "parse_dialogue",
+        "title": "राजा भोज",
+        "script_id": "test-story",
+        "text": "राजा भोज: प्रजा कैसी है?\\nअनजान: क्या हुआ?",
+        "characters": [{"id": "raja", "name": "राजा भोज"}],
+    })
+    assert result["ok"] is True
+    assert result["distinct_voices_verified"] is False
+    assert result["unresolved"] == ["अनजान"]
+    scene = result["result"]["scenes"][0]
+    assert scene["segments"][0]["speaker_id"] == "raja"
+    assert scene["segments"][1]["speaker_id"] is None
+
+
+def test_dialogue_cli_validates_character_voice_capabilities() -> None:
+    with pytest.raises(ValueError, match="Speaker conditioning"):
+        handle({
+            "action": "parse_dialogue",
+            "title": "Example",
+            "text": "Narrator: नमस्कार।",
+            "characters": [{
+                "id": "other", "name": "Other",
+                "voice": {"speaker_conditioning": "borrowed-voice"},
+            }],
+        })
