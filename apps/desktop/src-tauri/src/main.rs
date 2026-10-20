@@ -588,11 +588,13 @@ async fn render_story_v2(
     project: StoryV2,
     job_id: String,
     selected_scene_ids: Option<Vec<String>>,
+    selected_segment_ids: Option<Vec<String>>,
     force_segment_ids: Option<Vec<String>>,
 ) -> Result<AudioResult, String> {
     validate_story_v2(&project)?;
     Uuid::parse_str(&job_id).map_err(|_| "Invalid render job ID.")?;
     if selected_scene_ids.as_ref().is_some_and(|items| items.len() > 200) ||
+       selected_segment_ids.as_ref().is_some_and(|items| items.len() > 256) ||
        force_segment_ids.as_ref().is_some_and(|items| items.len() > 256) {
         return Err("Too many selected scenes or dialogue lines.".into());
     }
@@ -620,6 +622,7 @@ async fn render_story_v2(
             "cancel_file": cancel_path,
             "progress_file": progress_path,
             "selected_scene_ids": selected_scene_ids,
+            "selected_segment_ids": selected_segment_ids,
             "force_segment_ids": force_segment_ids,
         }));
         let _ = fs::remove_file(&cancel_path);
