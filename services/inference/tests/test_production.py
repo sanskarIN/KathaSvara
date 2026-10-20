@@ -173,6 +173,8 @@ def test_journal_survives_failure_and_retry_reuses_valid_audio(tmp_path: Path) -
     history = json.loads(journal.read_text(encoding="utf-8"))
     assert history["state"] == "failed"
     assert history["done"] == 1 and history["total"] == 2
+    # Recovery files must not persist a copy of the script/subtitles.
+    assert "effective_text" not in journal.read_text(encoding="utf-8")
     assert len(history["segments"]) == 1
     assert "नमस्कार" not in journal.read_text(encoding="utf-8")
     assert not output.exists()
