@@ -5,7 +5,9 @@
 - Add model-free inspection of the local SHA-256 speech-segment cache and opt-in bounded oldest-entry cleanup.
 - Provide a dry-run plan before asking for explicit confirmation in the desktop Settings page; preserve recent cache entries and ignore symlinks, projects, and unrelated output files.
 - Protect the Rust/Python bridge against oversized worker output deadlocks by continuing to drain stdout without exceeding the response memory cap.
-- Extend regression coverage and document remaining recovery, streaming-audio and manual real-model acceptance tasks.
+- Stream composed story WAV output to a temporary file instead of retaining the full story waveform in memory; finalize the WAV and refuse to overwrite a new destination.
+- Keep privacy-minimal, atomic per-job render journals with completed segment IDs, cached fingerprints and terminal states; show recent attempts per story with explicit retry guidance.
+- Extend regression coverage for cache-assisted retries, cancellation and partial-file cleanup while maintaining the requirement for manual real-model acceptance.
 - **Not yet published:** this development work does not change the verified v0.2.1 GitHub pre-release.
 
 ## [v0.2.1 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1)

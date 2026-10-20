@@ -650,6 +650,56 @@ fn story_render_progress(app: tauri::AppHandle, job_id: String) -> Result<Render
     }
 }
 
+#[derive(Debug, Serialize)]
+struct RenderHistoryEntry {
+    job_id: String,
+    story_id: String,
+    state: String,
+    done: u32,
+    total: u32,
+    updated_at: String,
+}
+
+#[tauri::command]
+fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>, String> {
+    let folder = app_dir(&app)?.join("jobs");
+    if !folder.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    for result in fs::read_dir(&folder).map_err(|e| e.to_string())? {
+        let entry = result.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
+        if Uuid::parse_str(id).is_err() { continue; }
+        let metadata = fs::symlink_metadata(entry.path()).map_err(|e| e.to_string())?;
+        if !metadata.file_type().is_file() || metadata.len() > 65_536 { continue; }
+        let updated = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        entries.push((updated, id.to_owned(), entry.path()));
+    }
+    entries.sort_by_key(|item| std::cmp::Reverse(item.0));
+    let mut reports = Vec::new();
+    for (_, job_id, path) in entries.into_iter().take(20) {
+        let Ok(bytes) = fs::read(path) else { continue; };
+        let Ok(data) = serde_json::from_slice::<Value>(&bytes) else { continue; };
+        let (Some(story_id), Some(state), Some(done), Some(total), Some(updated_at)) = (
+            data["story_id"].as_str(), data["state"].as_str(),
+            data["done"].as_u64(), data["total"].as_u64(),
+            data["updated_at"].as_str(),
+        ) else { continue; };
+        if data["schema_version"] != 1 || story_id.len() > 80 ||
+            updated_at.len() > 64 || total > 256 || done > total ||
+            !matches!(state, "running" | "cancelled" | "failed" | "completed") {
+            continue;
+        }
+        reports.push(RenderHistoryEntry {
+            job_id, story_id: story_id.to_owned(), state: state.to_owned(),
+            done: done as u32, total: total as u32, updated_at: updated_at.to_owned(),
+        });
+    }
+    Ok(reports)
+}
+
 #[tauri::command]
 fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
     Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
@@ -686,6 +736,10 @@ async fn render_story_v2(
             return Err("This audio job identifier has already been used.".into());
         }
         let cancel_path = jobs.join(format!("{job_id}.cancel"));
+        let journal_path = jobs.join(format!("{job_id}.manifest.json"));
+        if journal_path.exists() || journal_path.is_symlink() {
+            return Err("Render job already has a recovery journal.".into());
+        }
         let progress_path = jobs.join(format!("{job_id}.progress.json"));
         // A new UUID is supplied for each request by the UI; old sentinel is
         // never interpreted as a fresh cancellation.
@@ -698,6 +752,7 @@ async fn render_story_v2(
             "cache": root.join("segment-cache"),
             "cancel_file": cancel_path,
             "progress_file": progress_path,
+            "journal_file": journal_path,
             "selected_scene_ids": selected_scene_ids,
             "selected_segment_ids": selected_segment_ids,
             "force_segment_ids": force_segment_ids,
@@ -770,7 +825,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, cancel_story_render, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, cancel_story_render, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
