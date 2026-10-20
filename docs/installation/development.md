@@ -1,6 +1,6 @@
 # Development environment (source only)
 
-The latest [v0.3.0 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0) includes an unsigned Windows x64 **developer executable**, but it is **not a self-contained installer**. The app still requires separately installed compatible Python 3.11, Chatterbox, supported model weights and Tauri/WebView2 prerequisites. The Chatterbox and PyTorch stack can require substantial disk and GPU memory; actual Hindi speech and an interactive clean-machine Windows launch are unverified.
+The latest [v0.4.0 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0) includes an unsigned Windows x64 **developer executable**, but it is **not a self-contained installer**. The app still requires separately installed compatible Python 3.11, Chatterbox, supported model weights and Tauri/WebView2 prerequisites. The Chatterbox and PyTorch stack can require substantial disk and GPU memory; actual Hindi speech and an interactive clean-machine Windows launch are unverified.
 
 ## Windows 11 (first target)
 
@@ -61,7 +61,7 @@ Provide a JSON request through stdin:
 
 A successful response must include output WAV metadata. Listen to the file and independently check Hindi pronunciation, pauses and artifacts. A passing Python unit test or JSON health check alone does **not** establish model readiness.
 
-## Story import and Hindi inspection
+## Dialogue-timed subtitles and safe shared cache\n\nAfter a successful Characters & Scenes render, the studio can export a UTF-8 `.srt` file with each dialogue segment's measured audio-frame start/end positions. Review the timing and readable Hindi text; this is not word-by-word forced alignment. Subtitles are saved to a **new** filename only.\n\nCache pruning is explicit and defaults to dry-run. v0.4.0 Python workers sharing an app-data directory use a persistent OS advisory lock so rendering and destructive pruning fail closed when another participating worker is active. Never remove the `.kathasvara-cache-operation.lock` sentinel: the OS releases locks automatically when workers exit. Legacy or unrelated programs do not participate in this lock.\n\n## Story import and Hindi inspection
 
 The Story editor can import a UTF-8 `.txt` or `.md` file using the operating system's file chooser. Only files up to 250 KB are accepted. Import starts a new unsaved project and asks before replacing the current editor. Larger stories can be preserved as text but must be split into smaller generation jobs (3000 Unicode code points per request).
 
