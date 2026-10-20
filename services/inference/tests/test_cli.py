@@ -124,3 +124,19 @@ def test_dialogue_cli_validates_character_voice_capabilities() -> None:
                 "voice": {"speaker_conditioning": "borrowed-voice"},
             }],
         })
+
+
+def test_dialogue_cli_preserves_existing_narrator_voice_profile() -> None:
+    result = handle({
+        "action": "parse_dialogue",
+        "title": "वाचक",
+        "script_id": "narrator-settings",
+        "text": "Narrator: नमस्कार!",
+        "characters": [{
+            "id": "narrator", "name": "Narrator",
+            "voice": {"exaggeration": 0.85, "cfg_weight": 0.4, "pause_ms": 250},
+        }],
+    })
+    assert result["result"]["characters"][0]["voice"]["exaggeration"] == 0.85
+    assert result["result"]["characters"][0]["voice"]["pause_ms"] == 250
+    assert result["result"]["scenes"][0]["segments"][0]["speaker_id"] == "narrator"
