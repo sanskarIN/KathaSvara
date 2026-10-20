@@ -82,3 +82,16 @@ def test_cli_fails_closed_on_unsupported_action() -> None:
     response = json.loads(completed.stdout)
     assert response["ok"] is False
     assert "Unsupported action" in response["message"]
+
+
+def test_diagnostic_never_claims_model_or_audio_validated() -> None:
+    result = handle({"action": "diagnose"})
+    report = result["result"]
+    assert result["ok"] is True
+    assert report["python_version"]
+    assert report["platform"]
+    assert set(report["dependencies"]) == {"numpy", "soundfile", "torch", "chatterbox"}
+    assert all(isinstance(value, bool) for value in report["dependencies"].values())
+    assert report["model_weights_verified"] is False
+    assert report["audio_synthesis_verified"] is False
+    assert report["dependencies_present"] is all(report["dependencies"].values())

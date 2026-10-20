@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   AudioResult,
+  EngineDiagnostics,
   countText,
   importedStoryTitle,
   GenerationStatus,
@@ -38,6 +39,8 @@ export default function App() {
     readSavedNumber(localStorage.getItem("kathasvara-guidance"), 0, 1, 0.5),
   );
   const [inspection, setInspection] = useState<TextInspection | null>(null);
+  const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
+  const [checkingSetup, setCheckingSetup] = useState(false);
   const [status, setStatus] = useState<GenerationStatus>("waiting");
   const [message, setMessage] = useState("अभी तक कोई ऑडियो तैयार नहीं हुआ है।");
   const [audio, setAudio] = useState<AudioResult | null>(null);
@@ -236,6 +239,22 @@ export default function App() {
     }
   }
 
+  async function diagnoseRuntime() {
+    setCheckingSetup(true);
+    try {
+      const details = await invoke<EngineDiagnostics>("diagnose_engine");
+      setDiagnostics(details);
+      setMessage(details.dependencies_present
+        ? "Python dependencies appear installed. Model weights and real Hindi audio are NOT validated."
+        : "Local speech dependencies are incomplete. See the diagnostics below.");
+    } catch (error) {
+      setDiagnostics(null);
+      setMessage("Local diagnostic unavailable: " + errorMessage(error));
+    } finally {
+      setCheckingSetup(false);
+    }
+  }
+
   async function checkRuntime() {
     try {
       const result = await invoke<string>("check_engine");
@@ -268,7 +287,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <span className="side-tag">LOCAL FIRST</span>
           <p>Your scripts stay on your machine. No account required.</p>
-          <small>v0.1.0 · Development preview</small>
+          <small>v0.1.1 · Developer preview</small>
         </div>
       </aside>
 
@@ -353,7 +372,24 @@ export default function App() {
               <label className="field-label" htmlFor="theme-select">COLOR THEME</label>
               <select id="theme-select" value={theme} onChange={(e) => setTheme(e.target.value as Theme)}><option value="dark">Dark</option><option value="light">Light</option></select>
               <button className="secondary-button" onClick={() => void checkRuntime()}>Check Python bridge</button>
-              <p className="helper">A successful bridge check does not confirm the model is installed or able to synthesize.</p>
+              <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
+                {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
+              </button>
+              <p className="helper">A successful bridge or dependency check does not confirm model weights or a real Hindi voice test.</p>
+              {diagnostics && (
+                <section aria-label="Local speech setup diagnostic" className="diagnostic-report">
+                  <h3>Speech environment — {diagnostics.platform}</h3>
+                  <p>Python {diagnostics.python_version}</p>
+                  <ul>
+                    {Object.entries(diagnostics.dependencies).map(([name, present]) => (
+                      <li key={name}><strong>{name}</strong>: {present ? "Installed" : "Missing"}</li>
+                    ))}
+                  </ul>
+                  <p><strong>Model weights tested:</strong> No</p>
+                  <p><strong>Hindi speech playback tested:</strong> No</p>
+                  <p>{diagnostics.help}</p>
+                </section>
+              )}
             </section>
           )}
 

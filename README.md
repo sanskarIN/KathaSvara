@@ -2,7 +2,7 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Latest release:** [v0.1.0 — Developer Preview (Source Only)](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) is **published as a GitHub pre-release**, not a standalone or stable application. Python, React and Windows Rust CI passed; real Hindi model generation, audible quality, the launched Windows desktop and installer packaging remain **unverified**. No desktop binaries, model weights or generated voice samples are included.
+> **Current releases:** [v0.1.0 developer preview](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) is published. **v0.1.1 is the next source-only pre-release candidate**; see [GitHub Releases](https://github.com/sanskarIN/KathaSvara/releases) to verify publication. Neither version includes verified Hindi-model audio, a packaged Windows application, model weights, binaries, or sample voices.
 
 ## What the development source implements
 
@@ -12,12 +12,13 @@
 - Configurable model-supported expressiveness and guidance.
 - Actual synthesis-to-WAV pipeline, format verification, desktop playback and user-requested WAV export.
 - Dark/light appearance, saved story list, helpful errors, About and support links.
+- v0.1.1: no-download TTS dependency diagnosis through the Python bridge and desktop Settings, with clear unverified model/audio flags.
 - Review normalized Hindi and speech segments **before** synthesis without loading a model; changes require explicit approval.
 - Import locally selected UTF-8 `.txt` / `.md` stories (250 KB maximum); voice settings persist in local UI preferences.
 - Detect stale audio when the script or voice settings change; bound Python inference runtime and validate WAV chunk integrity.
 - Python, Rust and TypeScript unit-test foundations.
 
-This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.1.0 pre-release notes](docs/releases/v0.1.0-notes.md) for precise limitations.
+This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.1.1 pre-release notes](docs/releases/v0.1.1-notes.md) for precise limitations and what's changed.
 
 ## Quick start (development mode only)
 
@@ -41,7 +42,7 @@ Detailed Windows, Linux and macOS instructions: [development setup](docs/install
 | Chatterbox Hindi adapter | Implemented in source; **real synthesis unverified** |
 | WAV writing, preview and export | Implemented in source; end-to-end unverified |
 | Inspect Hindi text and import TXT / Markdown | Implemented in source; desktop interaction unverified |
-| Python tests | Test suite committed; CI execution pending |
+| Python tests | v0.1.0 passed on its release commit; v0.1.1 requires fresh CI checks |
 | Multi-character voices | Future milestone |
 | Full audio timeline and music mixing | Future milestone |
 | Managed Python runtime / signed Windows installer | Future milestone |
@@ -50,8 +51,9 @@ Our priority is natural Hindi output, not feature counts. No private text or ref
 
 ## Next milestones
 
-- **v0.1.0 pre-release:** successful real Hindi audio smoke test; working desktop launch; test and export validation; verified installation instructions.
-- **v0.1.1:** reliability, missing dependencies, error reporting and developer packaging.
+- **v0.1.0:** source-only developer pre-release published with Python, React and Windows Rust checks passing.
+- **v0.1.1:** model-free Python TTS environment diagnostics and clearer developer setup; source-only preview gated on CI.
+- **Next:** real Hindi model smoke test, interactive desktop verification, reliable model worker lifecycle and installation packaging.
 - **v0.2.0:** speaker/character assignment and persistent voice profiles.
 - **Later:** multi-engine support, timeline, cinematic audio production, packaging and distribution.
 

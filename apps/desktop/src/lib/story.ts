@@ -35,6 +35,21 @@ export function readSavedNumber(
     : fallback;
 }
 
+export interface EngineDiagnostics {
+  python_version: string;
+  platform: string;
+  dependencies: {
+    numpy: boolean;
+    soundfile: boolean;
+    torch: boolean;
+    chatterbox: boolean;
+  };
+  dependencies_present: boolean;
+  model_weights_verified: boolean;
+  audio_synthesis_verified: boolean;
+  help: string;
+}
+
 export type GenerationStatus = "waiting" | "loading" | "completed" | "failed";
 
 export const STARTER_STORY =

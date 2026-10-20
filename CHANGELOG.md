@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1 — Source-only developer pre-release candidate
+
+- Add a no-download diagnostics action that reports whether optional Python TTS dependencies are discoverable.
+- Expose dependency findings in desktop Settings, while clearly marking model weights and Hindi audio playback **unverified**.
+- Add deterministic diagnostic tests for missing and installed dependencies; no actual model downloads required.
+
+
 ## v0.1.0 — Source-only developer preview (pre-release candidate)
 
 ### Added
