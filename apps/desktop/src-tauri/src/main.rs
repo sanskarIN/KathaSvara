@@ -343,7 +343,7 @@ fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String>
         text_chars += timing.effective_text.chars().count();
         if timing.segment_id.is_empty() || timing.segment_id.len() > 80 ||
             timing.effective_text.trim().is_empty() || text_chars > 100_000 ||
-            timing.effective_text.chars().any(|ch| ch == '\\0') ||
+            timing.effective_text.chars().any(|ch| ch == '\0') ||
             !timing.start_seconds.is_finite() || !timing.end_seconds.is_finite() ||
             timing.start_seconds + 0.002 < previous_end ||
             timing.start_seconds < 0.0 || timing.end_seconds <= timing.start_seconds ||
