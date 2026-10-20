@@ -102,7 +102,7 @@ def test_dialogue_cli_reports_unmapped_speakers_without_voice_fakes() -> None:
         "action": "parse_dialogue",
         "title": "राजा भोज",
         "script_id": "test-story",
-        "text": "राजा भोज: प्रजा कैसी है?\\nअनजान: क्या हुआ?",
+        "text": "राजा भोज: प्रजा कैसी है?\nअनजान: क्या हुआ?",
         "characters": [{"id": "raja", "name": "राजा भोज"}],
     })
     assert result["ok"] is True
