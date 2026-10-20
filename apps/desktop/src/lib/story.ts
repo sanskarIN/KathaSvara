@@ -12,6 +12,11 @@ export interface AudioResult {
   duration_seconds: number;
   sample_rate: number;
   chunks: number;
+  segment_timings?: Array<{
+    segment_id: string;
+    start_seconds: number;
+    end_seconds: number;
+  }>;
 }
 
 export interface TextInspection {
