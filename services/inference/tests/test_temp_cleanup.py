@@ -166,7 +166,9 @@ def test_second_directory_symlink_refuses_before_deleting_first_directory(
         cache_link.symlink_to(external, target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("Symlinks unavailable.")
-    with pytest.raises(ValueError, match="symlinked"):
+    # The shared cache lock refuses a symlink before directory preflight,
+    # both paths correctly fail closed without touching the older audio file.
+    with pytest.raises(ValueError, match="non-symlink|symlinked"):
         cleanup_partial_wavs(tmp_path, dry_run=False)
     assert stale.read_bytes() == b"KEEP"
 
