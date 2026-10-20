@@ -299,7 +299,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <span className="side-tag">LOCAL FIRST</span>
           <p>Your scripts stay on your machine. No account required.</p>
-          <small>v0.2.0 · In development</small>
+          <small>v0.2.0 · Development / Not released</small>
         </div>
       </aside>
 
