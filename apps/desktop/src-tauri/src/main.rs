@@ -317,6 +317,36 @@ async fn preview_pronunciation(project: StoryV2, segment_id: String) -> Result<V
     }).await.map_err(|e| e.to_string())?
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct SegmentTiming {
+    segment_id: String,
+    start_seconds: f64,
+    end_seconds: f64,
+}
+
+fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String> {
+    let times = metadata["segments"].as_array().ok_or("Missing rendered segment timings.")?;
+    if times.is_empty() || times.len() > 256 {
+        return Err("Invalid number of generated subtitle cues.".into());
+    }
+    let mut result = Vec::with_capacity(times.len());
+    let mut previous_end = 0.0;
+    for value in times {
+        let timing: SegmentTiming = serde_json::from_value(value.clone())
+            .map_err(|_| "Malformed measured subtitle cue.".to_string())?;
+        if timing.segment_id.is_empty() || timing.segment_id.len() > 80 ||
+            !timing.start_seconds.is_finite() || !timing.end_seconds.is_finite() ||
+            timing.start_seconds + 0.002 < previous_end ||
+            timing.start_seconds < 0.0 || timing.end_seconds <= timing.start_seconds ||
+            timing.end_seconds > 1200.1 {
+            return Err("Invalid generated segment timeline.".into());
+        }
+        previous_end = timing.end_seconds;
+        result.push(timing);
+    }
+    Ok(result)
+}
+
 #[derive(Debug, Serialize)]
 struct AudioResult {
     audio_id: String,
@@ -324,6 +354,7 @@ struct AudioResult {
     duration_seconds: f64,
     sample_rate: u32,
     chunks: u32,
+    segment_timings: Vec<SegmentTiming>,
 }
 
 fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -686,6 +717,7 @@ async fn synthesize(
             duration_seconds: result["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
+            segment_timings: Vec::new(),
         })
     }).await.map_err(|e| e.to_string())?
 }
@@ -918,6 +950,7 @@ async fn render_story_v2(
             duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
+            segment_timings: parse_segment_timings(metadata)?,
         })
     }).await.map_err(|e| e.to_string())?
 }
