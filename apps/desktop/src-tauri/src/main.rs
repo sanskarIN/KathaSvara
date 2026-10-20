@@ -1278,7 +1278,16 @@ mod tests {
         }
         assert!(forget_render_journal_file(&folder, &original_job, &story_b).is_err());
         assert!(folder.join(format!("{original_job}.manifest.json")).exists());
+        let progress = folder.join(format!("{original_job}.progress.json"));
+        let cancel = folder.join(format!("{original_job}.cancel"));
+        let other = folder.join(format!("{}.progress.json", Uuid::new_v4()));
+        fs::write(&progress, br#"{"done":1,"total":2}"#).unwrap();
+        fs::write(&cancel, b"cancel").unwrap();
+        fs::write(&other, b"keep").unwrap();
         forget_render_journal_file(&folder, &original_job, &story_a).unwrap();
+        assert!(!progress.exists());
+        assert!(!cancel.exists());
+        assert!(other.exists());
         assert!(!folder.join(format!("{original_job}.manifest.json")).exists());
         assert_eq!(read_render_history(&folder, Some(&story_a)).unwrap().len(), 0);
         fs::remove_dir_all(folder).unwrap();
@@ -1294,6 +1303,22 @@ mod tests {
         let story_id = Uuid::new_v4().to_string();
         assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
         assert!(path.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn unsafe_progress_sidecar_refuses_to_forget_manifest() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-sidecar-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let job_id = Uuid::new_v4().to_string();
+        let story_id = Uuid::new_v4().to_string();
+        let manifest = folder.join(format!("{job_id}.manifest.json"));
+        fs::write(&manifest, json!({"schema_version":1, "story_id":story_id}).to_string()).unwrap();
+        let progress = folder.join(format!("{job_id}.progress.json"));
+        fs::create_dir_all(&progress).unwrap();
+        assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
+        assert!(manifest.exists());
+        assert!(progress.is_dir());
         fs::remove_dir_all(folder).unwrap();
     }
 
