@@ -1398,6 +1398,22 @@ mod tests {
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
         assert!(copy_validated_wav(&source, &exported).is_err());
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        let response = json!({"result": {
+            "duration_seconds": 568.0,
+            "sample_rate": 24000,
+            "chunks": 1,
+            "segments": [{
+                "segment_id": "test", "start_seconds": 0.0,
+                "end_seconds": 1.0, "effective_text": "नमस्कार"
+            }]
+        }});
+        let metadata = finalize_rendered_story_wav(
+            &source, Uuid::new_v4().to_string(), &response,
+        ).unwrap();
+        assert!(!metadata.preview_available);
+        assert!(metadata.data_url.is_empty());
+        assert_eq!(metadata.file_bytes, 44 + u64::from(sample_bytes));
+        assert!(source.exists());
         fs::remove_dir_all(folder).unwrap();
     }
 
