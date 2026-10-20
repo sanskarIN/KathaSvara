@@ -1026,14 +1026,67 @@ fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> R
     copy_validated_wav(&source, Path::new(&destination))
 }
 
+fn parse_srt_milliseconds(value: &str) -> Result<u64, String> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 12 || bytes[2] != b':' || bytes[5] != b':' || bytes[8] != b',' ||
+        bytes.iter().enumerate().any(|(index, byte)|
+            !matches!(index, 2 | 5 | 8) && !byte.is_ascii_digit())
+    {
+        return Err("Subtitle timestamp must use HH:MM:SS,mmm.".into());
+    }
+    let hours = value[0..2].parse::<u64>().map_err(|e| e.to_string())?;
+    let minutes = value[3..5].parse::<u64>().map_err(|e| e.to_string())?;
+    let seconds = value[6..8].parse::<u64>().map_err(|e| e.to_string())?;
+    let millis = value[9..12].parse::<u64>().map_err(|e| e.to_string())?;
+    if minutes >= 60 || seconds >= 60 {
+        return Err("Subtitle timestamp has invalid minutes or seconds.".into());
+    }
+    Ok(((hours * 60 + minutes) * 60 + seconds) * 1000 + millis)
+}
+
+fn validate_srt_content(content: &str) -> Result<(), String> {
+    if content.is_empty() || content.len() > 250_000 || content.contains('\r') {
+        return Err("Invalid or oversized UTF-8 SubRip content.".into());
+    }
+    let body = content.strip_suffix('\n').unwrap_or(content);
+    let mut previous_end = 0_u64;
+    let mut count = 0_usize;
+    for block in body.split("\n\n") {
+        count += 1;
+        if count > 256 {
+            return Err("A subtitle export supports at most 256 dialogue cues.".into());
+        }
+        let mut lines = block.split('\n');
+        let number = lines.next().unwrap_or("");
+        let timings = lines.next().unwrap_or("");
+        let subtitle = lines.next().unwrap_or("");
+        if number != count.to_string() || lines.next().is_some() ||
+            subtitle.trim().is_empty() || subtitle.chars().count() > 3000 ||
+            subtitle.chars().any(char::is_control)
+        {
+            return Err("Invalid SubRip cue index or dialogue text.".into());
+        }
+        let (start, end) = timings.split_once(" --> ")
+            .ok_or("Subtitle cue is missing the timing separator.")?;
+        let start_ms = parse_srt_milliseconds(start)?;
+        let end_ms = parse_srt_milliseconds(end)?;
+        if end_ms <= start_ms || start_ms < previous_end || end_ms > 1_200_000 {
+            return Err("Subtitle cues must be ordered and within 20 minutes.".into());
+        }
+        previous_end = end_ms;
+    }
+    if count == 0 {
+        return Err("Subtitle export needs a dialogue cue.".into());
+    }
+    Ok(())
+}
+
 fn write_srt(destination: &Path, content: &str) -> Result<(), String> {
     if !destination.is_absolute() ||
         destination.extension().and_then(|ext| ext.to_str()) != Some("srt") {
         return Err("Choose a new absolute .srt subtitle destination.".into());
     }
-    if content.is_empty() || content.len() > 250_000 || !content.starts_with("1\n") {
-        return Err("Invalid or oversized SRT subtitle content.".into());
-    }
+    validate_srt_content(content)?;
     let mut file = fs::OpenOptions::new().write(true).create_new(true)
         .open(destination).map_err(|e| format!("Cannot create subtitle destination: {e}"))?;
     if let Err(error) = file.write_all(content.as_bytes()).and_then(|_| file.sync_all()) {
