@@ -884,6 +884,49 @@ fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), Stri
     fs::write(path, b"cancel").map_err(|e| e.to_string())
 }
 
+fn finalize_rendered_story_wav(
+    output: &Path,
+    job_id: String,
+    data: &Value,
+) -> Result<AudioResult, String> {
+    // A valid long narration must remain exportable even when the webview
+    // cannot carry its full 25 MiB+ content in a base64 data URL.
+    let mut source = fs::File::open(output)
+        .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
+    let size = inspect_wav_file(&mut source)?;
+    let metadata = data.get("result").ok_or("Missing render metadata.")?;
+    let timings = parse_segment_timings(metadata)?;
+    let duration = metadata["duration_seconds"].as_f64()
+        .ok_or("Missing reported WAV duration.")?;
+    let rate = metadata["sample_rate"].as_u64()
+        .ok_or("Missing reported sample rate.")?;
+    let chunks = metadata["chunks"].as_u64()
+        .ok_or("Missing synthesis chunk count.")?;
+    if !duration.is_finite() || duration <= 0.0 || duration > 1200.0 ||
+        !(8_000..=192_000).contains(&rate) || !(1..=500).contains(&chunks) ||
+        timings.last().is_some_and(|cue| cue.end_seconds > duration + 0.005)
+    {
+        return Err("Render metadata has inconsistent audio duration or chunk counts.".into());
+    }
+    let preview_available = size <= MAX_GENERATED_WAV;
+    let data_url = if preview_available {
+        let bytes = fs::read(output).map_err(|e| e.to_string())?;
+        format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
+    } else {
+        String::new()
+    };
+    Ok(AudioResult {
+        audio_id: job_id,
+        data_url,
+        duration_seconds: duration,
+        sample_rate: rate as u32,
+        chunks: chunks as u32,
+        segment_timings: timings,
+        preview_available,
+        file_bytes: size,
+    })
+}
+
 #[tauri::command]
 async fn render_story_v2(
     app: tauri::AppHandle,
@@ -945,36 +988,13 @@ async fn render_story_v2(
                 return Err(message);
             }
         };
-        // Large 20-minute WAVs stay on disk; do not reject valid narration just
-        // because the browser's 25 MiB inline preview transport is too small.
-        let mut source = fs::File::open(&output)
-            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
-        let size = match inspect_wav_file(&mut source) {
-            Ok(size) => size,
-            Err(reason) => {
-                let _ = fs::remove_file(&output);
-                return Err(reason);
-            }
-        };
-        let metadata = data.get("result").ok_or("Missing render metadata.")?;
-        let timings = parse_segment_timings(metadata)?;
-        let preview_available = size <= MAX_GENERATED_WAV;
-        let data_url = if preview_available {
-            let bytes = fs::read(&output).map_err(|e| e.to_string())?;
-            format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
-        } else {
-            String::new()
-        };
-        Ok(AudioResult {
-            audio_id: job_id,
-            data_url,
-            duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
-            sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
-            chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
-            segment_timings: timings,
-            preview_available,
-            file_bytes: size,
-        })
+        // Any metadata/preview failure after inference should clean the
+        // job-owned WAV. Previously such errors leaked orphan audio into app data.
+        let result = finalize_rendered_story_wav(&output, job_id, &data);
+        if result.is_err() {
+            let _ = fs::remove_file(&output);
+        }
+        result
     }).await.map_err(|e| e.to_string())?
 }
 
