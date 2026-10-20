@@ -6,10 +6,12 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -18,6 +20,42 @@ use uuid::Uuid;
 
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
+
+static ACTIVE_RENDER_JOBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn active_render_jobs() -> &'static Mutex<HashSet<String>> {
+    ACTIVE_RENDER_JOBS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn is_render_job_active(job_id: &str) -> Result<bool, String> {
+    let active = active_render_jobs().lock()
+        .map_err(|_| "Render job registry is unavailable.".to_string())?;
+    Ok(active.contains(job_id))
+}
+
+struct ActiveRenderGuard {
+    job_id: String,
+}
+
+impl ActiveRenderGuard {
+    fn start(job_id: &str) -> Result<Self, String> {
+        Uuid::parse_str(job_id).map_err(|_| "Invalid render job ID.".to_string())?;
+        let mut active = active_render_jobs().lock()
+            .map_err(|_| "Render job registry is unavailable.".to_string())?;
+        if !active.insert(job_id.to_owned()) {
+            return Err("Render job is already active.".into());
+        }
+        Ok(Self { job_id: job_id.to_owned() })
+    }
+}
+
+impl Drop for ActiveRenderGuard {
+    fn drop(&mut self) {
+        if let Ok(mut active) = active_render_jobs().lock() {
+            active.remove(&self.job_id);
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -725,7 +763,11 @@ async fn render_story_v2(
        force_segment_ids.as_ref().is_some_and(|items| items.len() > 256) {
         return Err("Too many selected scenes or dialogue lines.".into());
     }
+    // Register synchronously, before the worker starts: fast cancel/history
+    // requests should observe the job even while the runtime queues work.
+    let guard = ActiveRenderGuard::start(&job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _active_job = guard;
         let root = app_dir(&app)?;
         let folder = root.join("audio");
         let jobs = root.join("jobs");
@@ -873,6 +915,19 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    #[test]
+    fn active_render_guard_rejects_duplicate_and_resets_on_drop() {
+        let id = Uuid::new_v4().to_string();
+        assert!(!is_render_job_active(&id).unwrap());
+        {
+            let _guard = ActiveRenderGuard::start(&id).unwrap();
+            assert!(is_render_job_active(&id).unwrap());
+            assert!(ActiveRenderGuard::start(&id).is_err());
+        }
+        assert!(!is_render_job_active(&id).unwrap());
+        assert!(ActiveRenderGuard::start(&id).is_ok());
     }
 
     #[test]
