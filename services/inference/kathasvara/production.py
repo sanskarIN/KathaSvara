@@ -73,8 +73,11 @@ def render_story(
         raise ValueError("Choose a new absolute WAV destination.")
     if not cache_dir.is_absolute() or cache_dir.resolve() == output.resolve().parent:
         raise ValueError("Use a dedicated absolute cache directory.")
-    if any(seg.speaker_id is None for scene in doc.scenes for seg in scene.segments
-           if seg.kind == "speech"):
+    if any(
+        seg.speaker_id is None for scene in doc.scenes
+        if selected_scene_ids is None or scene.id in selected_scene_ids
+        for seg in scene.segments if seg.kind == "speech"
+    ):
         raise ValueError("Assign every unknown speaker manually before rendering.")
     available_scenes = {scene.id for scene in doc.scenes}
     if selected_scene_ids is not None and not selected_scene_ids.issubset(available_scenes):
