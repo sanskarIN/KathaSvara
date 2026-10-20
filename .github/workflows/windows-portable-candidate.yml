@@ -52,14 +52,14 @@ jobs:
         run: |
           $folder = "portable-candidate"
           New-Item -ItemType Directory -Force -Path $folder | Out-Null
-          Copy-Item "apps/desktop/src-tauri/target/release/kathasvara.exe" "$folder/KathaSvara-v0.2.1-dev-win64.exe"
+          Copy-Item "apps/desktop/src-tauri/target/release/kathasvara.exe" "$folder/KathaSvara-v0.3.0-dev-win64.exe"
           Copy-Item "docs/installation/portable-windows-candidate.md" "$folder/README.txt"
-          Get-FileHash "$folder/KathaSvara-v0.2.1-dev-win64.exe" -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash)  KathaSvara-v0.2.1-dev-win64.exe" } |
+          Get-FileHash "$folder/KathaSvara-v0.3.0-dev-win64.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  KathaSvara-v0.3.0-dev-win64.exe" } |
             Set-Content "$folder/SHA256SUMS.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: kathasvara-v0.2.1-windows-unsigned-dev-executable
+          name: kathasvara-v0.3.0-windows-unsigned-dev-executable
           path: portable-candidate/
           if-no-files-found: error
           retention-days: 14

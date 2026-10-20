@@ -1,4 +1,4 @@
-KathaSvara v0.2.1 — Unsigned Windows x64 experimental developer executable
+KathaSvara v0.3.0 — Unsigned Windows x64 experimental developer executable
 ==================================================================
 
 THIS IS NOT A COMPLETE INSTALLER OR A RELEASE-READY APPLICATION.
@@ -18,8 +18,8 @@ Important environment variables:
   KATHASVARA_INFERENCE_DIR
                           Absolute path to services/inference source folder.
                           This is required outside the source checkout because
-                          the development default is a path relative to the
-                          compilation directory.
+                          the developer build locates the source checkout only
+                          when launched from an appropriate working directory.
 
 Installation guidance: docs/installation/development.md in the GitHub repo.
 Repository: https://github.com/sanskarIN/KathaSvara
@@ -33,7 +33,7 @@ Environment Doctor (no downloads, no model loading):
 - Review model license and approved weights separately before any synthesis.
 
 Security and trust:
-- Only download the executable from a verified KathaSvara GitHub Actions run.
+- Only download the executable from the verified KathaSvara GitHub prerelease or an authenticated project GitHub Actions build.
 - Validate its SHA256SUMS.txt, and consider it untrusted until tested locally.
 - The file is not code-signed and is not an MSI/NSIS installer.
 - Windows SmartScreen warnings may apply to unsigned builds.
@@ -45,7 +45,7 @@ No voice model, generated sample, or commercial voice-clone asset is bundled.
 KathaSvara app sources are MPL-2.0; third-party dependencies/checkpoints have
 separate license terms.
 
-The v0.2.1 release workflow can publish an experimental developer pre-release
+The guarded v0.3.0 release workflow can publish an experimental developer pre-release
 only after tests, executable compilation and SHA-256 verification succeed.
 This does NOT verify interactive launch or real Hindi narration on a clean machine.
 Manual playback, project persistence, save/export, source compatibility and audio

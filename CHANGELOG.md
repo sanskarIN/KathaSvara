@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.2 — Unreleased development
+## v0.3.0 — Experimental pre-release candidate (v0.2.2 development accumulated; publication pending)
 
 - Add model-free inspection of the local SHA-256 speech-segment cache and opt-in bounded oldest-entry cleanup.
 - Provide a dry-run plan before asking for explicit confirmation in the desktop Settings page; preserve recent cache entries and ignore symlinks, projects, and unrelated output files.
@@ -11,7 +11,8 @@
 - Classify recorded running jobs as potentially interrupted after app restart while leaving active in-process jobs marked live; limit recent history to the selected story.
 - Add user-confirmed, ownership-checked removal of an individual obsolete render journal without deleting projects, audio, or speech caches.
 - Preserve early cancellation requests and prevent new cache pruning during live rendering in the same app process, with Rust regression tests.
-- **Not yet published:** this development work does not change the verified v0.2.1 GitHub pre-release.
+- **Release packaging:** synchronize desktop/Rust/Tauri/Python versions to v0.3.0, update the Windows developer-EXE disclaimer, add SHA-256 companions and version-locked CI publication safeguards.
+- **Release status:** v0.3.0 publishes only after GitHub's protected prerelease workflow succeeds; the latest previously verified published preview is v0.2.1. There was no standalone v0.2.2 publication.
 
 ## [v0.2.1 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1)
 

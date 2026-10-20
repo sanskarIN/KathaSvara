@@ -4,6 +4,18 @@
 
 > **Latest published experimental pre-release:** [KathaSvara v0.2.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1) includes pronunciation review, single-segment retry, more reliable offline inference diagnostics, and an **unsigned, unbundled Windows x64 developer EXE** with checksum and setup notice. [v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0), [v0.1.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) and [v0.1.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remain available. **Not stable or self-contained**: a separate compatible Python 3.11/model environment is required; real Hindi audio quality, distinct-character voices and clean Windows GUI launch remain unverified.
 
+## v0.3.0 experimental release candidate — recoverable production workflow
+
+**Preparing a GitHub experimental pre-release, not a stable release.** The v0.3.0 source gathers the v0.2.2 development work from [PR #7](https://github.com/sanskarIN/KathaSvara/pull/7), [PR #8](https://github.com/sanskarIN/KathaSvara/pull/8), and [PR #9](https://github.com/sanskarIN/KathaSvara/pull/9). The release is published **only if** the version-specific workflow finishes its exact-commit Python, React and Windows Rust verification and Windows unsigned EXE checksums. See [v0.3.0 release notes](docs/releases/v0.3.0-notes.md).
+
+- Keep local speech caches bounded and inspectable, with explicit dry-run and confirmation before deleting old entries.
+- Stream composed PCM16 story audio to a temporary file rather than hold the full mixed waveform in memory.
+- Record text-free, per-job render journals, distinguish interrupted attempts, and manually retry to reuse unchanged cached speech.
+- Show project-specific history with a confirmed delete for one inactive journal, without touching story scripts or audio.
+- Avoid cache pruning and rendering at the same time **in one KathaSvara process**. This is not a cross-process filesystem lock.
+
+**Experimental limits remain:** no confirmed distinct character voices; no model weights, signed installer or packaged Python; real Hindi audio listening and clean Windows launch are unverified. Final desktop base64 previews remain capped at 25 MiB.
+
 ## v0.2.0 experimental pre-release — characters and scenes
 
 **Published experimental developer pre-release:** [merged PR #4](https://github.com/sanskarIN/KathaSvara/pull/4) adds versioned scene/character models, a deterministic Hindi dialogue parser, manual speaker correction, supported per-character engine settings, and a multi-segment audio orchestration layer. It extends the existing React/Tauri/Rust/Python app and preserves the v0.1.x narrator project files separately. See [v0.2.0 architecture](docs/architecture/v0.2.0-story-pipeline.md) and [release gates](docs/releases/v0.2.0-development.md).
@@ -30,7 +42,7 @@ The [v0.2.1 experimental pre-release](https://github.com/sanskarIN/KathaSvara/re
 - Detect stale audio when the script or voice settings change; bound Python inference runtime and validate WAV chunk integrity.
 - Python, Rust and TypeScript unit-test foundations.
 
-This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.2.1 experimental pre-release notes](docs/releases/v0.2.1-notes.md) for precise limitations and what's changed.
+This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.3.0 experimental release notes](docs/releases/v0.3.0-notes.md) for new source features and unreconciled manual acceptance checks.
 
 ## Quick start (development mode only)
 
