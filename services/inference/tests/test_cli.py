@@ -58,8 +58,7 @@ def test_actual_cli_inspection_process() -> None:
         [sys.executable, "-m", "kathasvara.cli"],
         input=json.dumps(request, ensure_ascii=False),
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         timeout=15,
         check=False,
     )
@@ -75,8 +74,7 @@ def test_cli_fails_closed_on_unsupported_action() -> None:
         [sys.executable, "-m", "kathasvara.cli"],
         input=json.dumps({"action": "surprise"}),
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         timeout=15,
         check=False,
     )
