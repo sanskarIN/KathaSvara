@@ -15,9 +15,8 @@ def test_lock_is_reentrant_only_after_release(tmp_path: Path) -> None:
     with exclusive_cache_access(cache):
         lock_file = tmp_path / ".kathasvara-cache-operation.lock"
         assert lock_file.is_file()
-        with pytest.raises(RuntimeError, match="different KathaSvara worker"):
-            with exclusive_cache_access(cache):
-                pass
+        with pytest.raises(RuntimeError, match="different KathaSvara worker"), exclusive_cache_access(cache):
+            pass
     with exclusive_cache_access(cache):
         pass
     assert lock_file.is_file(), "Never unlink the shared lock inode after releasing it."
@@ -25,9 +24,8 @@ def test_lock_is_reentrant_only_after_release(tmp_path: Path) -> None:
 
 def test_lock_is_released_if_job_raises(tmp_path: Path) -> None:
     cache = tmp_path / "segment-cache"
-    with pytest.raises(ValueError, match="simulated"):
-        with exclusive_cache_access(cache):
-            raise ValueError("simulated synthesis error")
+    with pytest.raises(ValueError, match="simulated"), exclusive_cache_access(cache):
+        raise ValueError("simulated synthesis error")
     with exclusive_cache_access(cache):
         pass
 
@@ -54,12 +52,12 @@ def test_second_python_process_cannot_enter_during_active_lock(tmp_path: Path) -
 
 
 def test_invalid_roots_are_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="absolute"):
-        with exclusive_cache_access(Path("relative-cache")):
-            pass
-    with pytest.raises(ValueError, match="existing"):
-        with exclusive_cache_access(tmp_path / "missing" / "segment-cache"):
-            pass
+    with pytest.raises(ValueError, match="absolute"), exclusive_cache_access(Path("relative-cache")):
+        pass
+    with pytest.raises(ValueError, match="existing"), exclusive_cache_access(
+        tmp_path / "missing" / "segment-cache"
+    ):
+        pass
 
 
 def test_cache_root_symlink_does_not_acquire_lock(tmp_path: Path) -> None:
@@ -70,6 +68,5 @@ def test_cache_root_symlink_does_not_acquire_lock(tmp_path: Path) -> None:
         link.symlink_to(real, target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("Creating symlinks unavailable on this operating system.")
-    with pytest.raises(ValueError, match="non-symlink"):
-        with exclusive_cache_access(link):
-            pass
+    with pytest.raises(ValueError, match="non-symlink"), exclusive_cache_access(link):
+        pass
