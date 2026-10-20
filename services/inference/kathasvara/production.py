@@ -198,6 +198,7 @@ def render_story(
                             _atomic_wav(cached, segment_samples, rate, sf)
                     # Measured duration is derived from generated PCM samples, never estimated from words.
                     measured = float(segment_samples.size) / float(rate)
+                    start_frame = samples_total
                     samples_total += segment_samples.size
                     if samples_total / rate > MAX_OUTPUT_SECONDS:
                         raise ValueError("Render exceeds the 20-minute audio limit.")
@@ -206,6 +207,8 @@ def render_story(
                         "segment_id": seg.id, "speaker_id": seg.speaker_id,
                         "cache_key": key if use_cache else None,
                         "cached": was_cached, "duration_seconds": round(measured, 4),
+                        "start_seconds": round(start_frame / rate, 4),
+                        "end_seconds": round(samples_total / rate, 4),
                     })
                     if index != len(speech) - 1:
                         pause = min(profile.pause_ms, 2000)
