@@ -18,6 +18,9 @@ use std::{
 use tauri::Manager;
 use uuid::Uuid;
 
+mod wav_file;
+use wav_file::inspect_wav_file;
+
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
 
@@ -355,6 +358,8 @@ struct AudioResult {
     sample_rate: u32,
     chunks: u32,
     segment_timings: Vec<SegmentTiming>,
+    preview_available: bool,
+    file_bytes: u64,
 }
 
 fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -718,6 +723,8 @@ async fn synthesize(
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
             segment_timings: Vec::new(),
+            preview_available: true,
+            file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
 }
@@ -932,25 +939,35 @@ async fn render_story_v2(
                 return Err(message);
             }
         };
-        let size = fs::metadata(&output)
-            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?.len();
-        if size > MAX_GENERATED_WAV {
-            let _ = fs::remove_file(&output);
-            return Err("Rendered WAV exceeds the current 25 MB desktop preview limit.".into());
-        }
-        let bytes = fs::read(&output).map_err(|e| e.to_string())?;
-        if let Err(reason) = inspect_wav(&bytes) {
-            let _ = fs::remove_file(&output);
-            return Err(reason);
-        }
+        // Large 20-minute WAVs stay on disk; do not reject valid narration just
+        // because the browser's 25 MiB inline preview transport is too small.
+        let mut source = fs::File::open(&output)
+            .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
+        let size = match inspect_wav_file(&mut source) {
+            Ok(size) => size,
+            Err(reason) => {
+                let _ = fs::remove_file(&output);
+                return Err(reason);
+            }
+        };
         let metadata = data.get("result").ok_or("Missing render metadata.")?;
+        let timings = parse_segment_timings(metadata)?;
+        let preview_available = size <= MAX_GENERATED_WAV;
+        let data_url = if preview_available {
+            let bytes = fs::read(&output).map_err(|e| e.to_string())?;
+            format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
+        } else {
+            String::new()
+        };
         Ok(AudioResult {
             audio_id: job_id,
-            data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+            data_url,
             duration_seconds: metadata["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: metadata["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: metadata["chunks"].as_u64().unwrap_or(0) as u32,
-            segment_timings: parse_segment_timings(metadata)?,
+            segment_timings: timings,
+            preview_available,
+            file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
 }
