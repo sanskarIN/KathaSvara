@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   portable-candidate:
     name: Build unsigned Windows EXE candidate
