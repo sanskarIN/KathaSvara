@@ -155,13 +155,13 @@ def test_cache_protocol_inspection_and_dry_run_without_model(tmp_path) -> None:
     assert entry.exists()
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("payload", [
     {"action": "cache_stats", "cache": "relative-folder"},
     {"action": "cache_stats", "cache": 12},
     {"action": "cache_prune", "cache": "relative-folder"},
     {"action": "cache_prune", "cache": "/tmp/segment-cache", "max_bytes": True},
     {"action": "cache_prune", "cache": "/tmp/segment-cache", "dry_run": "false"},
 ])
-def test_cache_protocol_rejects_unsafe_arguments(request: dict[str, object]) -> None:
+def test_cache_protocol_rejects_unsafe_arguments(payload: dict[str, object]) -> None:
     with pytest.raises((TypeError, ValueError)):
-        handle(request)
+        handle(payload)
