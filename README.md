@@ -2,11 +2,11 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Latest published experimental pre-release:** [KathaSvara v0.2.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1) includes pronunciation review, single-segment retry, more reliable offline inference diagnostics, and an **unsigned, unbundled Windows x64 developer EXE** with checksum and setup notice. [v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0), [v0.1.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) and [v0.1.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remain available. **Not stable or self-contained**: a separate compatible Python 3.11/model environment is required; real Hindi audio quality, distinct-character voices and clean Windows GUI launch remain unverified.
+> **Latest published experimental pre-release:** [KathaSvara v0.3.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0) ships an **unsigned, unbundled Windows x64 developer EXE** with [setup notice](https://github.com/sanskarIN/KathaSvara/releases/download/v0.3.0/README.txt) and [SHA-256 checksum](https://github.com/sanskarIN/KathaSvara/releases/download/v0.3.0/SHA256SUMS.txt). [The exact-commit publication workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39380201497) passed. Earlier [v0.2.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1), [v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0), [v0.1.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) and [v0.1.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remain available. **Not stable or self-contained:** compatible Python 3.11, model dependencies/weights and WebView2 prerequisites remain external; clean Windows GUI launch, real Hindi speech quality and distinct-character voices are unverified.
 
-## v0.3.0 experimental release candidate — recoverable production workflow
+## v0.3.0 published experimental pre-release — recoverable production workflow
 
-**Preparing a GitHub experimental pre-release, not a stable release.** The v0.3.0 source gathers the v0.2.2 development work from [PR #7](https://github.com/sanskarIN/KathaSvara/pull/7), [PR #8](https://github.com/sanskarIN/KathaSvara/pull/8), and [PR #9](https://github.com/sanskarIN/KathaSvara/pull/9). The release is published **only if** the version-specific workflow finishes its exact-commit Python, React and Windows Rust verification and Windows unsigned EXE checksums. See [v0.3.0 release notes](docs/releases/v0.3.0-notes.md).
+**[Published on GitHub](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0) as an experimental pre-release, not a stable product.** The v0.3.0 source gathers the v0.2.2 development work from [PR #7](https://github.com/sanskarIN/KathaSvara/pull/7), [PR #8](https://github.com/sanskarIN/KathaSvara/pull/8), and [PR #9](https://github.com/sanskarIN/KathaSvara/pull/9). The version-specific workflow verified the exact merge commit `3b5c810c3f535c86cc522e1879d600f231641fd6`, passed Python, React, Windows Rust and Windows EXE compilation checks, and verified the uploaded checksum assets. See [v0.3.0 release notes](docs/releases/v0.3.0-notes.md).
 
 - Keep local speech caches bounded and inspectable, with explicit dry-run and confirmation before deleting old entries.
 - Stream composed PCM16 story audio to a temporary file rather than hold the full mixed waveform in memory.
@@ -66,7 +66,7 @@ Detailed Windows, Linux and macOS instructions: [development setup](docs/install
 | Chatterbox Hindi adapter | Implemented in source; **real synthesis unverified** |
 | WAV writing, preview and export | Implemented in source; end-to-end unverified |
 | Inspect Hindi text and import TXT / Markdown | Implemented in source; desktop interaction unverified |
-| Python tests | Passing on both v0.1.0 and v0.1.1 release commits |
+| Python tests | Passing in the [v0.3.0 release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39380201497); fake-model tests do not verify real model weights or Hindi audio |
 | Multi-character voices | Future milestone |
 | Full audio timeline and music mixing | Future milestone |
 | Managed Python runtime / signed Windows installer | Future milestone |
@@ -75,6 +75,8 @@ Our priority is natural Hindi output, not feature counts. No private text or ref
 
 ## Release history and next work
 
+- **v0.3.0:** [published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0) on tested commit [`3b5c810`](https://github.com/sanskarIN/KathaSvara/commit/3b5c810c3f535c86cc522e1879d600f231641fd6) with 10,412,032-byte unsigned Windows developer EXE, published SHA-256 companion, streaming combined WAV, cache controls, manual retry and interruption-aware journals. [Gated publication checks](https://github.com/sanskarIN/KathaSvara/actions/runs/39380201497) passed; real model listening and a clean-machine installer remain open.
+- **v0.2.2:** development-only steps (PRs #7–#9) incorporated into v0.3.0, never published as a separate GitHub tag.
 - **v0.1.0:** published source-only experimental developer preview after automated checks.
 - **v0.1.1:** published source-only experimental developer pre-release with model-free setup diagnostics.
 - **v0.2.0:** [published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) with scene/character authoring, deterministic dialogue parsing, bounded multi-segment rendering, cache and cooperative cancellation. Unsigned unbundled Windows EXE compiled by GitHub Actions; no real-model listening or clean-machine launch is claimed.

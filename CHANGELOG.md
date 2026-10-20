@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 — Experimental pre-release candidate (v0.2.2 development accumulated; publication pending)
+## [v0.3.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0)
 
 - Add model-free inspection of the local SHA-256 speech-segment cache and opt-in bounded oldest-entry cleanup.
 - Provide a dry-run plan before asking for explicit confirmation in the desktop Settings page; preserve recent cache entries and ignore symlinks, projects, and unrelated output files.
@@ -12,7 +12,7 @@
 - Add user-confirmed, ownership-checked removal of an individual obsolete render journal without deleting projects, audio, or speech caches.
 - Preserve early cancellation requests and prevent new cache pruning during live rendering in the same app process, with Rust regression tests.
 - **Release packaging:** synchronize desktop/Rust/Tauri/Python versions to v0.3.0, update the Windows developer-EXE disclaimer, add SHA-256 companions and version-locked CI publication safeguards.
-- **Release status:** v0.3.0 publishes only after GitHub's protected prerelease workflow succeeds; the latest previously verified published preview is v0.2.1. There was no standalone v0.2.2 publication.
+- **Release status:** GitHub [published v0.3.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0) after [all exact-commit release checks passed](https://github.com/sanskarIN/KathaSvara/actions/runs/39380201497), including SHA-256 verification of the 10,412,032-byte unsigned Windows developer executable. Release commit: `3b5c810c3f535c86cc522e1879d600f231641fd6`. v0.2.2 development was incorporated into this prerelease and was never separately published. Real Hindi audio/Windows GUI acceptance remains open.
 
 ## [v0.2.1 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1)
 

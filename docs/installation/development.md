@@ -1,6 +1,6 @@
 # Development environment (source only)
 
-The v0.1.0 desktop is currently a developer-source preview. It is **not** yet distributed as a self-contained installer. The Chatterbox model and PyTorch stack are downloaded and installed separately; this can require substantial disk and GPU memory.
+The latest [v0.3.0 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0) includes an unsigned Windows x64 **developer executable**, but it is **not a self-contained installer**. The app still requires separately installed compatible Python 3.11, Chatterbox, supported model weights and Tauri/WebView2 prerequisites. The Chatterbox and PyTorch stack can require substantial disk and GPU memory; actual Hindi speech and an interactive clean-machine Windows launch are unverified.
 
 ## Windows 11 (first target)
 
@@ -67,7 +67,7 @@ The Story editor can import a UTF-8 `.txt` or `.md` file using the operating sys
 
 Use **Inspect Hindi pronunciation text** to see the exact normalized text and speech chunks. This offline inspection requires the Python bridge but does not load or download a speech model. It does not change the story unless **Apply normalized text** is selected. Edits to text or voice controls invalidate the audio preview so stale audio cannot be accidentally exported. The current worker has a 10-minute speech-generation timeout; this is a safety limit rather than a performance guarantee.
 
-## Inspect which local speech dependencies are available (v0.1.1 development)
+## Inspect which local speech dependencies are available
 
 The **Settings → Inspect local TTS setup** control asks the Python subprocess for a lightweight `diagnose` report. You can also call the same protocol manually from `services/inference`:
 
@@ -75,4 +75,4 @@ The **Settings → Inspect local TTS setup** control asks the Python subprocess 
 echo '{"action":"diagnose"}' | python -m kathasvara.cli
 ```
 
-The response reports the detected Python version, host platform, and whether the `numpy`, `soundfile`, `torch`, and `chatterbox` packages are import-discoverable. It never downloads model weights, imports the heavy synthesis model, or suggests that real Hindi speech quality has been validated. Installed packages are **necessary but not sufficient** for functioning synthesis: CUDA, compatible model revisions, GPU memory, sample quality, and playback must be checked separately. This feature is currently being developed on the `dev/v0.1.1-inference-reliability` branch, not included in the v0.1.0 release tag.
+The response reports the detected Python version, host platform, and whether the `numpy`, `soundfile`, `torch`, and `chatterbox` packages are import-discoverable. It never downloads model weights, imports the heavy synthesis model, or suggests that real Hindi speech quality has been validated. Installed packages are **necessary but not sufficient** for functioning synthesis: CUDA, compatible model revisions, GPU memory, sample quality, and playback must be checked separately. This model-free diagnostic is included in published developer preview releases through v0.3.0; the presence of dependencies is not evidence of successful model inference.
