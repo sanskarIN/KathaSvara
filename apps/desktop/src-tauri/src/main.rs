@@ -995,6 +995,61 @@ mod tests {
     }
 
     #[test]
+    fn history_filter_finds_older_matching_story_and_classifies_interruption() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-history-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story_a = Uuid::new_v4().to_string();
+        let story_b = Uuid::new_v4().to_string();
+        let original_job = Uuid::new_v4().to_string();
+        let manifest = json!({
+            "schema_version": 1, "story_id": story_a,
+            "state": "running", "done": 1, "total": 2,
+            "updated_at": "2026-10-20T10:00:00+00:00",
+        });
+        fs::write(folder.join(format!("{original_job}.manifest.json")),
+            manifest.to_string()).unwrap();
+        for _ in 0..24 {
+            let other = Uuid::new_v4();
+            let data = json!({
+                "schema_version": 1, "story_id": story_b,
+                "state": "completed", "done": 2, "total": 2,
+                "updated_at": "2026-10-20T10:01:00+00:00",
+            });
+            fs::write(folder.join(format!("{other}.manifest.json")),
+                data.to_string()).unwrap();
+        }
+        let matches = read_render_history(&folder, Some(&story_a)).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].job_id, original_job);
+        assert_eq!(matches[0].state, "interrupted");
+        {
+            let _guard = ActiveRenderGuard::start(&original_job).unwrap();
+            let active = read_render_history(&folder, Some(&story_a)).unwrap();
+            assert_eq!(active[0].state, "running");
+            assert!(forget_render_journal_file(&folder, &original_job, &story_a).is_err());
+        }
+        assert!(forget_render_journal_file(&folder, &original_job, &story_b).is_err());
+        assert!(folder.join(format!("{original_job}.manifest.json")).exists());
+        forget_render_journal_file(&folder, &original_job, &story_a).unwrap();
+        assert!(!folder.join(format!("{original_job}.manifest.json")).exists());
+        assert_eq!(read_render_history(&folder, Some(&story_a)).unwrap().len(), 0);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn journal_forget_rejects_malformed_json_without_deleting() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-bad-journal-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let job_id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{job_id}.manifest.json"));
+        fs::write(&path, b"not JSON").unwrap();
+        let story_id = Uuid::new_v4().to_string();
+        assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
+        assert!(path.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn v2_scene_json_roundtrip_is_lossless() {
         let story = sample_v2();
         assert!(validate_story_v2(&story).is_ok());
