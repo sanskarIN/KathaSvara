@@ -105,7 +105,7 @@ def test_unknown_speaker_or_duplicate_character_names_are_rejected() -> None:
     doc.characters = bad
     with pytest.raises(ValueError, match="unambiguous"):
         doc.validate()
-    with pytest.raises(ValueError, match="Unsupported story schema"):
+    with pytest.raises(ValueError, match="Unknown schema version"):
         from_dict({**asdict(new_story("Another")), "schema_version": 500})
 
 
