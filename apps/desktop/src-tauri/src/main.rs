@@ -6,10 +6,12 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -18,6 +20,68 @@ use uuid::Uuid;
 
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
+
+const CACHE_PRUNE_SENTINEL: &str = ":segment-cache-maintenance:";
+static ACTIVE_RENDER_JOBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn active_render_jobs() -> &'static Mutex<HashSet<String>> {
+    ACTIVE_RENDER_JOBS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn is_render_job_active(job_id: &str) -> Result<bool, String> {
+    let active = active_render_jobs().lock()
+        .map_err(|_| "Render job registry is unavailable.".to_string())?;
+    Ok(active.contains(job_id))
+}
+
+struct ActiveRenderGuard {
+    job_id: String,
+}
+
+impl ActiveRenderGuard {
+    fn start(job_id: &str) -> Result<Self, String> {
+        Uuid::parse_str(job_id).map_err(|_| "Invalid render job ID.".to_string())?;
+        let mut active = active_render_jobs().lock()
+            .map_err(|_| "Render job registry is unavailable.".to_string())?;
+        if active.contains(CACHE_PRUNE_SENTINEL) {
+            return Err("Wait for local cache cleanup to finish before rendering.".into());
+        }
+        if !active.insert(job_id.to_owned()) {
+            return Err("Render job is already active.".into());
+        }
+        Ok(Self { job_id: job_id.to_owned() })
+    }
+}
+
+impl Drop for ActiveRenderGuard {
+    fn drop(&mut self) {
+        if let Ok(mut active) = active_render_jobs().lock() {
+            active.remove(&self.job_id);
+        }
+    }
+}
+
+struct CachePruneGuard;
+
+impl CachePruneGuard {
+    fn start() -> Result<Self, String> {
+        let mut jobs = active_render_jobs().lock()
+            .map_err(|_| "Render job registry is unavailable.".to_string())?;
+        if !jobs.is_empty() {
+            return Err("Cannot prune the segment cache during active rendering.".into());
+        }
+        jobs.insert(CACHE_PRUNE_SENTINEL.to_string());
+        Ok(Self)
+    }
+}
+
+impl Drop for CachePruneGuard {
+    fn drop(&mut self) {
+        if let Ok(mut jobs) = active_render_jobs().lock() {
+            jobs.remove(CACHE_PRUNE_SENTINEL);
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -501,7 +565,9 @@ async fn prune_segment_cache(
 ) -> Result<Value, String> {
     let budget = cache_budget_bytes(max_mib)?;
     let cache = app_dir(&app)?.join("segment-cache");
+    let guard = CachePruneGuard::start()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _cache_guard = guard;
         let response = invoke_python(json!({
             "action": "cache_prune", "cache": cache,
             "max_bytes": budget, "dry_run": dry_run,
@@ -660,14 +726,20 @@ struct RenderHistoryEntry {
     updated_at: String,
 }
 
-#[tauri::command]
-fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>, String> {
-    let folder = app_dir(&app)?.join("jobs");
+// Keep the history reader independent of Tauri to test filtering and
+// interrupt classification on a temporary folder without model weights.
+fn read_render_history(
+    folder: &Path,
+    story_filter: Option<&str>,
+) -> Result<Vec<RenderHistoryEntry>, String> {
+    if story_filter.is_some_and(|id| id.is_empty() || id.len() > 80) {
+        return Err("Invalid story history filter.".into());
+    }
     if !folder.exists() {
         return Ok(Vec::new());
     }
     let mut entries = Vec::new();
-    for result in fs::read_dir(&folder).map_err(|e| e.to_string())? {
+    for result in fs::read_dir(folder).map_err(|e| e.to_string())? {
         let entry = result.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
@@ -679,7 +751,7 @@ fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>
     }
     entries.sort_by_key(|item| std::cmp::Reverse(item.0));
     let mut reports = Vec::new();
-    for (_, job_id, path) in entries.into_iter().take(20) {
+    for (_, job_id, path) in entries {
         let Ok(bytes) = fs::read(path) else { continue; };
         let Ok(data) = serde_json::from_slice::<Value>(&bytes) else { continue; };
         let (Some(story_id), Some(state), Some(done), Some(total), Some(updated_at)) = (
@@ -687,22 +759,80 @@ fn story_render_history(app: tauri::AppHandle) -> Result<Vec<RenderHistoryEntry>
             data["done"].as_u64(), data["total"].as_u64(),
             data["updated_at"].as_str(),
         ) else { continue; };
-        if data["schema_version"] != 1 || story_id.len() > 80 ||
-            updated_at.len() > 64 || total > 256 || done > total ||
+        if data["schema_version"] != 1 || story_id.is_empty() || story_id.len() > 80 ||
+            updated_at.len() > 64 || total == 0 || total > 256 || done > total ||
             !matches!(state, "running" | "cancelled" | "failed" | "completed") {
             continue;
         }
+        if story_filter.is_some_and(|filter| filter != story_id) {
+            continue;
+        }
+        let display_state = if state == "running" && !is_render_job_active(&job_id)? {
+            "interrupted"
+        } else {
+            state
+        };
         reports.push(RenderHistoryEntry {
-            job_id, story_id: story_id.to_owned(), state: state.to_owned(),
+            job_id, story_id: story_id.to_owned(), state: display_state.to_owned(),
             done: done as u32, total: total as u32, updated_at: updated_at.to_owned(),
         });
+        if reports.len() == 20 {
+            break;
+        }
     }
     Ok(reports)
 }
 
 #[tauri::command]
+fn story_render_history(
+    app: tauri::AppHandle,
+    story_id: Option<String>,
+) -> Result<Vec<RenderHistoryEntry>, String> {
+    read_render_history(&app_dir(&app)?.join("jobs"), story_id.as_deref())
+}
+
+fn forget_render_journal_file(
+    folder: &Path,
+    job_id: &str,
+    story_id: &str,
+) -> Result<(), String> {
+    Uuid::parse_str(job_id).map_err(|_| "Invalid render job ID.".to_string())?;
+    if story_id.is_empty() || story_id.len() > 80 {
+        return Err("Invalid story ID.".into());
+    }
+    if is_render_job_active(job_id)? {
+        return Err("Cannot forget a render while it is active.".into());
+    }
+    let path = folder.join(format!("{job_id}.manifest.json"));
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|_| "Render history record was not found.".to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() > 65_536 {
+        return Err("Render history record is not a regular bounded JSON file.".into());
+    }
+    let data: Value = serde_json::from_slice(
+        &fs::read(&path).map_err(|_| "Cannot read render history.".to_string())?,
+    ).map_err(|_| "Render history is unreadable.".to_string())?;
+    if data["schema_version"] != 1 || data["story_id"].as_str() != Some(story_id) {
+        return Err("The history record belongs to a different story.".into());
+    }
+    fs::remove_file(path).map_err(|e| format!("Cannot remove render history record: {e}"))
+}
+
+#[tauri::command]
+fn forget_render_journal(
+    app: tauri::AppHandle,
+    job_id: String,
+    story_id: String,
+) -> Result<(), String> {
+    forget_render_journal_file(&app_dir(&app)?.join("jobs"), &job_id, &story_id)
+}
+
+#[tauri::command]
 fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), String> {
     Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
+    if !is_render_job_active(&job_id)? {
+        return Err("The render job is no longer active.".into());
+    }
     let folder = app_dir(&app)?.join("jobs");
     fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let path = folder.join(format!("{job_id}.cancel"));
@@ -725,7 +855,11 @@ async fn render_story_v2(
        force_segment_ids.as_ref().is_some_and(|items| items.len() > 256) {
         return Err("Too many selected scenes or dialogue lines.".into());
     }
+    // Register synchronously, before the worker starts: fast cancel/history
+    // requests should observe the job even while the runtime queues work.
+    let guard = ActiveRenderGuard::start(&job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _active_job = guard;
         let root = app_dir(&app)?;
         let folder = root.join("audio");
         let jobs = root.join("jobs");
@@ -741,9 +875,9 @@ async fn render_story_v2(
             return Err("Render job already has a recovery journal.".into());
         }
         let progress_path = jobs.join(format!("{job_id}.progress.json"));
-        // A new UUID is supplied for each request by the UI; old sentinel is
-        // never interpreted as a fresh cancellation.
-        let _ = fs::remove_file(&cancel_path);
+        // Keep cancellation sent between synchronous registration and worker
+        // startup: removing the new UUID's marker here would lose fast cancels.
+        // A previously used job UUID is rejected by the persisted journal.
         let _ = fs::remove_file(&progress_path);
         let response = invoke_python(json!({
             "action": "render_story",
@@ -825,7 +959,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, cancel_story_render, discard_audio, export_wav
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -834,6 +968,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Parallel Rust test workers must not interleave global render/maintenance guards.
+    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
     fn sample_v2() -> StoryV2 {
         StoryV2 {
             schema_version: 2,
@@ -873,6 +1009,92 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    #[test]
+    fn active_render_guard_rejects_duplicate_and_resets_on_drop() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        assert!(!is_render_job_active(&id).unwrap());
+        {
+            let _guard = ActiveRenderGuard::start(&id).unwrap();
+            assert!(is_render_job_active(&id).unwrap());
+            assert!(ActiveRenderGuard::start(&id).is_err());
+        }
+        assert!(!is_render_job_active(&id).unwrap());
+        assert!(ActiveRenderGuard::start(&id).is_ok());
+    }
+
+    #[test]
+    fn history_filter_finds_older_matching_story_and_classifies_interruption() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-history-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story_a = Uuid::new_v4().to_string();
+        let story_b = Uuid::new_v4().to_string();
+        let original_job = Uuid::new_v4().to_string();
+        let manifest = json!({
+            "schema_version": 1, "story_id": story_a,
+            "state": "running", "done": 1, "total": 2,
+            "updated_at": "2026-10-20T10:00:00+00:00",
+        });
+        fs::write(folder.join(format!("{original_job}.manifest.json")),
+            manifest.to_string()).unwrap();
+        for _ in 0..24 {
+            let other = Uuid::new_v4();
+            let data = json!({
+                "schema_version": 1, "story_id": story_b,
+                "state": "completed", "done": 2, "total": 2,
+                "updated_at": "2026-10-20T10:01:00+00:00",
+            });
+            fs::write(folder.join(format!("{other}.manifest.json")),
+                data.to_string()).unwrap();
+        }
+        let matches = read_render_history(&folder, Some(&story_a)).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].job_id, original_job);
+        assert_eq!(matches[0].state, "interrupted");
+        {
+            let _guard = ActiveRenderGuard::start(&original_job).unwrap();
+            let active = read_render_history(&folder, Some(&story_a)).unwrap();
+            assert_eq!(active[0].state, "running");
+            assert!(forget_render_journal_file(&folder, &original_job, &story_a).is_err());
+        }
+        assert!(forget_render_journal_file(&folder, &original_job, &story_b).is_err());
+        assert!(folder.join(format!("{original_job}.manifest.json")).exists());
+        forget_render_journal_file(&folder, &original_job, &story_a).unwrap();
+        assert!(!folder.join(format!("{original_job}.manifest.json")).exists());
+        assert_eq!(read_render_history(&folder, Some(&story_a)).unwrap().len(), 0);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn journal_forget_rejects_malformed_json_without_deleting() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-bad-journal-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let job_id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{job_id}.manifest.json"));
+        fs::write(&path, b"not JSON").unwrap();
+        let story_id = Uuid::new_v4().to_string();
+        assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
+        assert!(path.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn cache_prune_blocks_live_renders_and_render_guard_blocks_pruning() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let active_id = Uuid::new_v4().to_string();
+        {
+            let _render = ActiveRenderGuard::start(&active_id).unwrap();
+            assert!(CachePruneGuard::start().is_err());
+        }
+        {
+            let _prune = CachePruneGuard::start().unwrap();
+            assert!(CachePruneGuard::start().is_err());
+            assert!(ActiveRenderGuard::start(&Uuid::new_v4().to_string()).is_err());
+        }
+        assert!(CachePruneGuard::start().is_ok());
     }
 
     #[test]

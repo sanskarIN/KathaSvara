@@ -12,7 +12,7 @@ import {
 type RenderHistory = {
   job_id: string;
   story_id: string;
-  state: "running" | "cancelled" | "failed" | "completed";
+  state: "running" | "interrupted" | "cancelled" | "failed" | "completed";
   done: number;
   total: number;
   updated_at: string;
@@ -58,6 +58,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     setAudio(null);
+    setHistory(null);
   }, [document]);
   useEffect(() => {
     if (!jobId) return;
@@ -159,15 +160,31 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function showRenderHistory() {
+    const revision = renderRevision.current;
     setLoadingHistory(true);
     try {
-      const records = await invoke<RenderHistory[]>("story_render_history");
-      setHistory(records.filter(record => record.story_id === document.id).slice(0, 10));
-      onMessage("Recent local render history loaded. Unfinished jobs can be retried using cached speech.");
+      const records = await invoke<RenderHistory[]>("story_render_history", { storyId: document.id });
+      if (revision !== renderRevision.current) return;
+      setHistory(records.slice(0, 10));
+      onMessage("Local history loaded. Interrupted jobs can be retried using unchanged cached dialogue.");
     } catch (error) {
-      onMessage("Could not read local render history: " + errorString(error));
+      if (revision === renderRevision.current) {
+        onMessage("Could not read local render history: " + errorString(error));
+      }
     } finally {
       setLoadingHistory(false);
+    }
+  }
+
+  async function forgetHistory(job: RenderHistory) {
+    if (job.state === "running") return;
+    if (!window.confirm("Forget this render attempt? The story, exported audio and reusable speech cache will remain unchanged.")) return;
+    try {
+      await invoke("forget_render_journal", { jobId: job.job_id, storyId: job.story_id });
+      setHistory(previous => previous?.filter(item => item.job_id !== job.job_id) ?? null);
+      onMessage("Local render history removed. Saved projects and generated audio were untouched.");
+    } catch (error) {
+      onMessage("Cannot forget render history: " + errorString(error));
     }
   }
 
@@ -356,16 +373,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           </div>
           {history && <section className="inspection-panel" aria-label="Recent local render jobs">
             <strong>Recent render attempts for this story</strong>
-            <p>Records store segment IDs and outcomes, not script text. Retry the story or
-              selected scene to reuse unchanged cached audio. Jobs marked running may
-              have been interrupted by a previous application exit.</p>
+            <p>Records store segment IDs and outcomes, not script text. Interrupted
+              means a previous worker is no longer active in this app process.
+              Generate again to reuse unchanged cached audio; retry is never automatic.</p>
             {history.length === 0
               ? <p>No recorded renders for this story yet.</p>
               : <ul>{history.map(item => (
                 <li key={item.job_id}>
-                  {item.state === "running" ? "Running or interrupted" : item.state}
+                  <strong>{item.state === "interrupted" ? "Interrupted — retry available" : item.state}</strong>
                   {" · "}{item.done}/{item.total} segments
                   {" · "}{item.updated_at}
+                  <button className="quiet-button" type="button" disabled={item.state === "running"}
+                    onClick={() => void forgetHistory(item)}>Forget record</button>
                 </li>
               ))}</ul>}
           </section>}
