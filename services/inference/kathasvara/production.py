@@ -62,6 +62,7 @@ def render_story(
     *,
     use_cache: bool = True,
     selected_scene_ids: set[str] | None = None,
+    selected_segment_ids: set[str] | None = None,
     force_segment_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Render resolved segments in order; cache content-addressed source audio.
@@ -77,17 +78,28 @@ def render_story(
     if any(
         seg.speaker_id is None for scene in doc.scenes
         if selected_scene_ids is None or scene.id in selected_scene_ids
-        for seg in scene.segments if seg.kind == "speech"
+        for seg in scene.segments
+        if seg.kind == "speech" and (
+            selected_segment_ids is None or seg.id in selected_segment_ids
+        )
     ):
         raise ValueError("Assign every unknown speaker manually before rendering.")
     available_scenes = {scene.id for scene in doc.scenes}
     if selected_scene_ids is not None and not selected_scene_ids.issubset(available_scenes):
         raise ValueError("Requested scene does not belong to the story.")
+    available_segment_ids = {
+        seg.id for scene in doc.scenes for seg in scene.segments if seg.kind == "speech"
+    }
+    if selected_segment_ids is not None and not selected_segment_ids.issubset(
+        available_segment_ids
+    ):
+        raise ValueError("Requested dialogue segment does not belong to this story.")
     speech = [
         (seg, next(char for char in doc.characters if char.id == seg.speaker_id))
         for scene in doc.scenes
         if selected_scene_ids is None or scene.id in selected_scene_ids
         for seg in scene.segments if seg.kind == "speech"
+        and (selected_segment_ids is None or seg.id in selected_segment_ids)
     ]
     if not speech or len(speech) > MAX_RENDER_SEGMENTS:
         raise ValueError("A render needs 1–256 spoken segments.")
