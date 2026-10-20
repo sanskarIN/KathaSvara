@@ -1031,7 +1031,7 @@ fn write_srt(destination: &Path, content: &str) -> Result<(), String> {
         destination.extension().and_then(|ext| ext.to_str()) != Some("srt") {
         return Err("Choose a new absolute .srt subtitle destination.".into());
     }
-    if content.is_empty() || content.len() > 250_000 || !content.starts_with("1\\n") {
+    if content.is_empty() || content.len() > 250_000 || !content.starts_with("1\n") {
         return Err("Invalid or oversized SRT subtitle content.".into());
     }
     let mut file = fs::OpenOptions::new().write(true).create_new(true)
