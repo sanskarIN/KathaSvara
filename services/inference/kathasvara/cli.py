@@ -12,6 +12,7 @@ from .diagnostics import diagnose
 from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
+from .pronunciation import apply_glossary
 from .production import render_story
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
@@ -71,6 +72,25 @@ def handle(request: dict[str, object]) -> dict[str, object]:
                 "changed": normalized != text,
             },
         }
+    if request.get("action") == "preview_pronunciation":
+        project = request.get("project")
+        segment_id = request.get("segment_id")
+        if not isinstance(project, dict) or not isinstance(segment_id, str):
+            raise TypeError("Preview requires a story document and segment identifier.")
+        document = from_dict(project)
+        for scene in document.scenes:
+            for segment in scene.segments:
+                if segment.id == segment_id:
+                    if segment.kind != "speech":
+                        raise ValueError("Stage directions are not synthesized.")
+                    result = apply_glossary(segment.spoken_text, document.pronunciation_glossary)
+                    return {"ok": True, "result": {
+                        "original": segment.original_text,
+                        "reviewed": segment.spoken_text,
+                        "effective": result["text"],
+                        "changes": result["changes"],
+                    }}
+        raise ValueError("Segment does not belong to the selected story.")
     if request.get("action") == "render_story":
         project = request.get("project")
         output = request.get("output")
