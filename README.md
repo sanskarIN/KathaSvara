@@ -2,7 +2,7 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Published experimental pre-release (v0.2.0):** [KathaSvara v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) is **published on GitHub** with source archives and an unsigned Windows `.exe` developer candidate, SHA-256 checksums, and setup instructions. The [v0.1.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) and [v0.1.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) previews remain available. **v0.2.0 is not stable or self-contained**: it needs external Python/model dependencies, and real Hindi audio quality, distinct character voices and clean Windows launch remain unverified.
+> **Latest published experimental pre-release:** [KathaSvara v0.2.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1) includes pronunciation review, single-segment retry, more reliable offline inference diagnostics, and an **unsigned, unbundled Windows x64 developer EXE** with checksum and setup notice. [v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0), [v0.1.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) and [v0.1.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remain available. **Not stable or self-contained**: a separate compatible Python 3.11/model environment is required; real Hindi audio quality, distinct-character voices and clean Windows GUI launch remain unverified.
 
 ## v0.2.0 experimental pre-release — characters and scenes
 
@@ -12,9 +12,9 @@
 
 The [v0.2.0 pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) includes an **unsigned, unbundled Windows EXE** compiled on its release commit, with a `SHA256SUMS.txt` checksum and a dependency-warning `README.txt`. It requires external Python and model dependencies; do not treat it as a verified standalone installer. Automated release CI passed, but interactive launch and real Hindi listening acceptance remain open.
 
-## v0.2.1 reliability features in development
+## v0.2.1 published developer preview — pronunciation and reliability
 
-Project-local pronunciation rules, reversible user corrections, separately edited spoken text, exact no-model pre-TTS text preview, selective content-keyed audio cache reuse and stricter cached WAV checks are implemented in the v0.2.1 development source. They remain subject to PR CI and honest release gates. See [PR #5](https://github.com/sanskarIN/KathaSvara/pull/5). Separate characters still **do not imply verified distinct voices**.
+The [v0.2.1 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1) delivers project-local pronunciation corrections, separately reviewed spoken text, exact no-model pre-TTS preview, selective content-keyed audio cache reuse, safe single-line retry, stronger cached-WAV checks and more reliable bounded Python subprocess IO. [PR #5](https://github.com/sanskarIN/KathaSvara/pull/5) was merged, and [the exact-commit release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39370507279) passed all Python, React, Windows Rust, executable build, checksum and publication checks. **Distinct character voices, real Hindi listening and clean-machine interactive Windows acceptance remain unverified**.
 
 ## What the development source implements
 
@@ -30,7 +30,7 @@ Project-local pronunciation rules, reversible user corrections, separately edite
 - Detect stale audio when the script or voice settings change; bound Python inference runtime and validate WAV chunk integrity.
 - Python, Rust and TypeScript unit-test foundations.
 
-This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.2.0 experimental pre-release notes](docs/releases/v0.2.0-notes.md) for precise limitations and what's changed.
+This developer preview requires manual Python/Tauri setup and may need further integration fixes. No model weights or sample generated voices are bundled. See [v0.2.1 experimental pre-release notes](docs/releases/v0.2.1-notes.md) for precise limitations and what's changed.
 
 ## Quick start (development mode only)
 
@@ -66,7 +66,7 @@ Our priority is natural Hindi output, not feature counts. No private text or ref
 - **v0.1.0:** published source-only experimental developer preview after automated checks.
 - **v0.1.1:** published source-only experimental developer pre-release with model-free setup diagnostics.
 - **v0.2.0:** [published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) with scene/character authoring, deterministic dialogue parsing, bounded multi-segment rendering, cache and cooperative cancellation. Unsigned unbundled Windows EXE compiled by GitHub Actions; no real-model listening or clean-machine launch is claimed.
-- **v0.2.1:** experimental pronunciation and reliability work tracked in [PR #5](https://github.com/sanskarIN/KathaSvara/pull/5), [architecture](docs/architecture/v0.2.1-production-reliability.md) and [release notes](docs/releases/v0.2.1-notes.md). Check [GitHub Releases](https://github.com/sanskarIN/KathaSvara/releases) for actual publication status rather than assuming a version mention means the release is live.
+- **v0.2.1:** [published as an experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1) with verified Windows x64 EXE build/checksum, model-free pronunciation preview and selective retry. [Implementation PR #5](https://github.com/sanskarIN/KathaSvara/pull/5) is merged; manual tests remain tracked in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
 - **Later:** independent speaker routing only after model API evidence, real Hindi audio quality tests, stable packaging, multitrack audio and additional engines.
 
 ## Creator and community

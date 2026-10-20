@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.1 — Experimental developer pre-release track
+## [v0.2.1 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1)
 
 - Add a validated project-local pronunciation glossary (NFC, Devanagari-aware word boundaries, escaped literal matching, deterministic nonrecursive overrides), plus no-model exact pre-TTS text preview.
 - Support reversible editing of reviewed spoken text without altering original story scripts or stage directions.
@@ -9,7 +9,7 @@
 - Improve redacted Environment Doctor for Python/inference directory configuration and local write readiness.
 - Handle first-time story IDs and stale in-flight audio more cautiously; retain unsupported/unknown speaker labels honestly.
 - Add Python/React/Rust regression coverage, and replace the v0.2.0 commit-message publisher with a guarded v0.2.1 SHA-pinned manual pre-release workflow.
-- **Distribution:** only an unsigned, unbundled Windows x64 EXE after workflow verification; no packaged weights, signed installer, real Hindi listening claim, or verified separate character voices. See [acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+- **Distribution:** published an unsigned, unbundled Windows x64 EXE after [passing exact-commit checks](https://github.com/sanskarIN/KathaSvara/actions/runs/39370507279) and SHA-256 asset verification; no packaged weights, signed installer, real Hindi listening claim, or verified separate character voices. See [acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
 
 
 ## [v0.2.0 — Experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0)
