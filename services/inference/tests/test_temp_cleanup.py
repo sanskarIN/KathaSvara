@@ -21,13 +21,13 @@ def test_preview_and_confirm_delete_only_old_generated_partials(tmp_path: Path) 
     audio.mkdir()
     cache.mkdir()
     job = str(uuid.uuid4())
-    temp = str(uuid.uuid4())
+    temp = uuid.uuid4().hex
     old_audio = audio / f"{job}-{temp}.partial.wav"
     old_cache = cache / f"{'a' * 64}-{temp}.partial.wav"
     completed = audio / f"{job}.wav"
     finished_cache = cache / f"{'b' * 64}.wav"
     ordinary = audio / "precious.partial.wav"
-    recent = audio / f"{uuid.uuid4()}-{uuid.uuid4()}.partial.wav"
+    recent = audio / f"{uuid.uuid4()}-{uuid.uuid4().hex}.partial.wav"
     for path in (old_audio, old_cache, completed, finished_cache, ordinary, recent):
         path.write_bytes(b"test")
     current = time.time()
@@ -43,6 +43,46 @@ def test_preview_and_confirm_delete_only_old_generated_partials(tmp_path: Path) 
     assert not old_audio.exists() and not old_cache.exists()
     assert all(path.exists() for path in (completed, finished_cache, ordinary, recent))
     assert (tmp_path / ".kathasvara-cache-operation.lock").is_file()
+
+
+def test_invalid_hyphenated_suffix_and_user_files_are_ignored(tmp_path: Path) -> None:
+    audio = tmp_path / "audio"
+    cache = tmp_path / "segment-cache"
+    audio.mkdir()
+    cache.mkdir()
+    stale = time.time() - 100_000
+    # Actual synthesis suffix is lowercase uuid4().hex, not a hyphenated UUID.
+    unsupported = [
+        audio / f"{uuid.uuid4()}-{uuid.uuid4()}.partial.wav",
+        cache / f"{'e' * 64}-{uuid.uuid4()}.partial.wav",
+        audio / f"{uuid.uuid4()}-{uuid.uuid4().hex.upper()}.partial.wav",
+        audio / f"{uuid.uuid4()}-{uuid.uuid4().hex}.partial.wav.bak",
+    ]
+    for path in unsupported:
+        path.write_bytes(b"KEEP")
+        os.utime(path, (stale, stale))
+    result = cleanup_partial_wavs(tmp_path, dry_run=False)
+    assert result["candidates"] == 0
+    assert result["removed"] == 0
+    assert all(path.read_bytes() == b"KEEP" for path in unsupported)
+
+
+def test_real_streaming_wav_filename_is_selected_after_24_hours(tmp_path: Path) -> None:
+    from kathasvara.audio_stream import StreamingWav
+
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    output = audio / f"{uuid.uuid4()}.wav"
+    partial = StreamingWav(output, rate=24000, sf=object(), max_frames=24000)._partial
+    assert partial.parent == audio
+    partial.write_bytes(b"interrupted")
+    old = time.time() - 100_000
+    os.utime(partial, (old, old))
+    report = cleanup_partial_wavs(tmp_path)
+    assert report["candidates"] == 1
+    assert cleanup_partial_wavs(tmp_path, dry_run=False)["removed"] == 1
+    assert not partial.exists()
+    assert not output.exists()
 
 
 def test_active_renderer_lock_blocks_even_preview_and_mutation(tmp_path: Path) -> None:
@@ -75,7 +115,7 @@ def test_cache_symlink_entries_remain_untouched(tmp_path: Path) -> None:
     cache.mkdir()
     outside = tmp_path / "outside.wav"
     outside.write_bytes(b"untouched")
-    fake = cache / f"{'d' * 64}-{uuid.uuid4()}.partial.wav"
+    fake = cache / f"{'d' * 64}-{uuid.uuid4().hex}.partial.wav"
     try:
         fake.symlink_to(outside)
     except (OSError, NotImplementedError):
@@ -88,3 +128,47 @@ def test_cache_symlink_entries_remain_untouched(tmp_path: Path) -> None:
 def test_invalid_cleanup_flags_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="boolean"):
         cleanup_partial_wavs(tmp_path, dry_run="yes")  # type: ignore[arg-type]
+
+def test_scan_limit_fails_without_any_partial_deletion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import kathasvara.temp_cleanup as maintenance
+
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    files = [
+        audio / f"{uuid.uuid4()}-{uuid.uuid4().hex}.partial.wav"
+        for _ in range(2)
+    ]
+    for path in files:
+        path.write_bytes(b"KEEP")
+        old = time.time() - 100_000
+        os.utime(path, (old, old))
+    monkeypatch.setattr(maintenance, "MAX_SCANNED_ENTRIES", 1)
+    with pytest.raises(ValueError, match="Too many entries"):
+        cleanup_partial_wavs(tmp_path, dry_run=False)
+    assert all(path.read_bytes() == b"KEEP" for path in files)
+
+
+def test_second_directory_symlink_refuses_before_deleting_first_directory(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    stale = audio / f"{uuid.uuid4()}-{uuid.uuid4().hex}.partial.wav"
+    stale.write_bytes(b"KEEP")
+    old = time.time() - 100_000
+    os.utime(stale, (old, old))
+    external = tmp_path / "external"
+    external.mkdir()
+    cache_link = tmp_path / "segment-cache"
+    try:
+        cache_link.symlink_to(external, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable.")
+    # The shared cache lock refuses a symlink before directory preflight,
+    # both paths correctly fail closed without touching the older audio file.
+    with pytest.raises(ValueError, match="non-symlink|symlinked"):
+        cleanup_partial_wavs(tmp_path, dry_run=False)
+    assert stale.read_bytes() == b"KEEP"
+

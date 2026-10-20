@@ -181,11 +181,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
 
   async function forgetHistory(job: RenderHistory) {
     if (job.state === "running") return;
-    if (!window.confirm("Forget this render attempt? The story, exported audio and reusable speech cache will remain unchanged.")) return;
+    if (!window.confirm("Forget this inactive render attempt and its temporary progress/cancel markers? The story, finished WAVs, exports and speech cache will remain unchanged.")) return;
     try {
       await invoke("forget_render_journal", { jobId: job.job_id, storyId: job.story_id });
       setHistory(previous => previous?.filter(item => item.job_id !== job.job_id) ?? null);
-      onMessage("Local render history removed. Saved projects and generated audio were untouched.");
+      onMessage("Render record and matching bookkeeping markers removed. Projects and completed WAV audio were untouched.");
     } catch (error) {
       onMessage("Cannot forget render history: " + errorString(error));
     }

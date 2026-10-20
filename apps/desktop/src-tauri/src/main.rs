@@ -881,6 +881,26 @@ fn forget_render_journal_file(
     if data["schema_version"] != 1 || data["story_id"].as_str() != Some(story_id) {
         return Err("The history record belongs to a different story.".into());
     }
+    // A user-confirmed forget also removes its small cancellation/progress
+    // bookkeeping files. Validate BOTH optional files before deleting anything
+    // to avoid partial cleanup when an unexpected symlink is encountered.
+    let mut sidecars = Vec::new();
+    for (suffix, bound) in [(".progress.json", 1024), (".cancel", 8)] {
+        let sidecar = folder.join(format!("{job_id}{suffix}"));
+        let metadata = match fs::symlink_metadata(&sidecar) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Cannot inspect render sidecar: {error}")),
+        };
+        if !metadata.file_type().is_file() || metadata.len() > bound {
+            return Err("Render bookkeeping sidecar is not a bounded regular file.".into());
+        }
+        sidecars.push(sidecar);
+    }
+    for sidecar in sidecars {
+        fs::remove_file(sidecar)
+            .map_err(|e| format!("Cannot remove render bookkeeping file: {e}"))?;
+    }
     fs::remove_file(path).map_err(|e| format!("Cannot remove render history record: {e}"))
 }
 
@@ -1258,7 +1278,16 @@ mod tests {
         }
         assert!(forget_render_journal_file(&folder, &original_job, &story_b).is_err());
         assert!(folder.join(format!("{original_job}.manifest.json")).exists());
+        let progress = folder.join(format!("{original_job}.progress.json"));
+        let cancel = folder.join(format!("{original_job}.cancel"));
+        let other = folder.join(format!("{}.progress.json", Uuid::new_v4()));
+        fs::write(&progress, br#"{"done":1,"total":2}"#).unwrap();
+        fs::write(&cancel, b"cancel").unwrap();
+        fs::write(&other, b"keep").unwrap();
         forget_render_journal_file(&folder, &original_job, &story_a).unwrap();
+        assert!(!progress.exists());
+        assert!(!cancel.exists());
+        assert!(other.exists());
         assert!(!folder.join(format!("{original_job}.manifest.json")).exists());
         assert_eq!(read_render_history(&folder, Some(&story_a)).unwrap().len(), 0);
         fs::remove_dir_all(folder).unwrap();
@@ -1274,6 +1303,22 @@ mod tests {
         let story_id = Uuid::new_v4().to_string();
         assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
         assert!(path.exists());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn unsafe_progress_sidecar_refuses_to_forget_manifest() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-sidecar-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let job_id = Uuid::new_v4().to_string();
+        let story_id = Uuid::new_v4().to_string();
+        let manifest = folder.join(format!("{job_id}.manifest.json"));
+        fs::write(&manifest, json!({"schema_version":1, "story_id":story_id}).to_string()).unwrap();
+        let progress = folder.join(format!("{job_id}.progress.json"));
+        fs::create_dir_all(&progress).unwrap();
+        assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
+        assert!(manifest.exists());
+        assert!(progress.is_dir());
         fs::remove_dir_all(folder).unwrap();
     }
 

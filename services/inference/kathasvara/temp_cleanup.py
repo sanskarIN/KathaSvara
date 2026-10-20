@@ -19,8 +19,11 @@ MAX_SCANNED_ENTRIES = 20_000
 MAX_REMOVED_ENTRIES = 1_024
 
 _UUID = r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
-_AUDIO_PARTIAL = re.compile(rf"{_UUID}-{_UUID}\.partial\.wav\Z")
-_CACHE_PARTIAL = re.compile(rf"[0-9a-f]{{64}}-{_UUID}\.partial\.wav\Z")
+# StreamingWav and _atomic_wav create suffixes with uuid4().hex (32
+# lowercase hexadecimal characters), NOT a second hyphenated UUID.
+_TEMP_SUFFIX = r"[0-9a-f]{32}"
+_AUDIO_PARTIAL = re.compile(rf"{_UUID}-{_TEMP_SUFFIX}\.partial\.wav\Z")
+_CACHE_PARTIAL = re.compile(rf"[0-9a-f]{{64}}-{_TEMP_SUFFIX}\.partial\.wav\Z")
 
 
 def cleanup_partial_wavs(
@@ -44,18 +47,23 @@ def cleanup_partial_wavs(
     bytes_removed = 0
     ignored = 0
     scanned = 0
+    candidates: list[tuple[Path, int, int, int, int]] = []
+    targets = (
+        (root / "audio", _AUDIO_PARTIAL),
+        (root / "segment-cache", _CACHE_PARTIAL),
+    )
     # This lock is NOT removed: it is also used by Python narration workers.
     with exclusive_cache_access(root / "segment-cache"):
-        for folder, allowed in (
-            (root / "audio", _AUDIO_PARTIAL),
-            (root / "segment-cache", _CACHE_PARTIAL),
-        ):
+        # Validate *both* directories before any deletion. A late symlink or
+        # excessive entry count must not leave one directory partially cleaned.
+        for folder, _pattern in targets:
             if folder.is_symlink():
                 raise ValueError("Cleanup refuses a symlinked audio/cache directory.")
+            if folder.exists() and not folder.is_dir():
+                raise ValueError("Cleanup target must be a directory.")
+        for folder, allowed in targets:
             if not folder.exists():
                 continue
-            if not folder.is_dir():
-                raise ValueError("Cleanup target must be a directory.")
             for path in folder.iterdir():
                 scanned += 1
                 if scanned > MAX_SCANNED_ENTRIES:
@@ -75,20 +83,27 @@ def cleanup_partial_wavs(
                     continue
                 selected += 1
                 bytes_selected += info.st_size
-                if dry_run or removed >= MAX_REMOVED_ENTRIES:
-                    continue
+                candidates.append((
+                    path, info.st_size, info.st_dev, info.st_ino, info.st_mtime_ns,
+                ))
+        # A complete, bounded scan has succeeded before any destructive work.
+        # Revalidate metadata just before unlink; skip races and symlink swaps.
+        if not dry_run:
+            for path, size, device, inode, modified_ns in candidates[:MAX_REMOVED_ENTRIES]:
                 try:
                     after = path.lstat()
                     if (not stat.S_ISREG(after.st_mode) or
                         (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) !=
-                        (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)):
+                        (device, inode, size, modified_ns)):
                         ignored += 1
                         continue
+                    if path.parent.is_symlink():
+                        raise ValueError("Cleanup folder changed during deletion.")
                     path.unlink()
                 except FileNotFoundError:
                     continue
                 removed += 1
-                bytes_removed += info.st_size
+                bytes_removed += size
     return {
         "dry_run": dry_run,
         "candidates": selected,
