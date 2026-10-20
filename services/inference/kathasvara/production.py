@@ -152,7 +152,13 @@ def render_story(
                         exaggeration=profile.exaggeration, cfg_weight=profile.cfg_weight,
                     )),
                     np,
-                )
+                ).copy()
+                # Fade to zero at edit boundaries to avoid hard-edge clicks
+                # when appending neighboring chunk waveforms or silence.
+                fade = min(int(rate * 0.008), generated.size // 4)
+                if fade > 1:
+                    generated[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
+                    generated[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
                 if part_index:
                     parts.append(np.zeros(int(rate * 0.12), dtype=np.float32))
                 parts.append(generated)
