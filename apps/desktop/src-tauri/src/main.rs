@@ -361,14 +361,24 @@ const MAX_PYTHON_RESPONSE: usize = 1_048_576;
 fn read_bounded_response(mut source: impl Read) -> Result<Vec<u8>, String> {
     let mut response = Vec::new();
     let mut chunk = [0_u8; 8192];
+    let mut exceeded_limit = false;
     loop {
         let size = source.read(&mut chunk)
             .map_err(|_| "Cannot read the local inference response.".to_string())?;
-        if size == 0 { return Ok(response); }
-        if response.len().saturating_add(size) > MAX_PYTHON_RESPONSE {
-            return Err("Inference response exceeds the maximum allowed size.".into());
+        if size == 0 {
+            return if exceeded_limit {
+                Err("Inference response exceeds the maximum allowed size.".into())
+            } else {
+                Ok(response)
+            };
         }
-        response.extend_from_slice(&chunk[..size]);
+        // Keep draining stdout after overflow. Stopping the read early can
+        // block the child on a full pipe while the parent waits for its exit.
+        if response.len().saturating_add(size) > MAX_PYTHON_RESPONSE {
+            exceeded_limit = true;
+        } else if !exceeded_limit {
+            response.extend_from_slice(&chunk[..size]);
+        }
     }
 }
 
@@ -882,6 +892,14 @@ mod tests {
         assert_eq!(cache_budget_bytes(512).unwrap(), 512 * 1024 * 1024);
         assert!(cache_budget_bytes(0).is_err());
         assert!(cache_budget_bytes(2_049).is_err());
+    }
+
+    #[test]
+    fn oversized_response_is_fully_drained_without_growing_memory() {
+        let payload = vec![b'a'; MAX_PYTHON_RESPONSE * 4];
+        let mut input = std::io::Cursor::new(payload);
+        assert!(read_bounded_response(&mut input).is_err());
+        assert_eq!(input.position() as usize, MAX_PYTHON_RESPONSE * 4);
     }
 
     #[test]
