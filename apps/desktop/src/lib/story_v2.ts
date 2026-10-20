@@ -35,6 +35,12 @@ export interface SceneV2 {
   segments: SegmentV2[];
   notes: string;
 }
+export interface PronunciationRuleV2 {
+  id: string;
+  original: string;
+  spoken: string;
+  enabled: boolean;
+}
 export interface StoryV2 {
   schema_version: 2;
   id: string;
@@ -42,6 +48,8 @@ export interface StoryV2 {
   text: string;
   characters: CharacterV2[];
   scenes: SceneV2[];
+  /** Missing in older v0.2.0 documents; serialized as [] on next save. */
+  pronunciation_glossary?: PronunciationRuleV2[];
 }
 export interface DialogueParseResponse {
   ok: true;
@@ -78,6 +86,7 @@ export function legacyToStoryV2(project: StoryProject, id: string = crypto.rando
     text: project.text,
     characters: [makeCharacter("Narrator", "narrator")],
     scenes: [],
+    pronunciation_glossary: [],
   };
 }
 
@@ -192,4 +201,45 @@ export function renameCharacter(project: StoryV2, id: string, name: string): Sto
 export function unresolvedSpeech(project: StoryV2): SegmentV2[] {
   return project.scenes.flatMap(scene => scene.segments)
     .filter(seg => seg.kind === "speech" && seg.speaker_id === null);
+}
+
+/** Changes only the reviewed speech, never the untouched source script. */
+export function reviewSpokenText(project: StoryV2, segmentId: string, spokenText: string): StoryV2 {
+  if (!spokenText.trim() || spokenText.length > 100_000 || spokenText.includes("\u0000")) {
+    throw new Error("Reviewed speech must contain 1–100000 valid characters.");
+  }
+  let found = false;
+  const scenes = project.scenes.map(scene => ({
+    ...scene,
+    segments: scene.segments.map(seg => {
+      if (seg.id !== segmentId || seg.kind !== "speech") return seg;
+      found = true;
+      return seg.spoken_text === spokenText ? seg : {
+        ...seg, spoken_text: spokenText, status: "stale", audio_ref: null, duration_seconds: null,
+      };
+    }),
+  }));
+  if (!found) throw new Error("Spoken segment was not found.");
+  return { ...project, scenes };
+}
+
+export function setGlossary(project: StoryV2, rules: PronunciationRuleV2[]): StoryV2 {
+  if (rules.length > 100) throw new Error("Maximum 100 pronunciation rules.");
+  const ids = new Set<string>();
+  const sources = new Set<string>();
+  for (const rule of rules) {
+    const original = rule.original.trim().normalize("NFC");
+    const spoken = rule.spoken.trim().normalize("NFC");
+    if (!rule.id || rule.id.length > 80 || !original || original.length > 80 ||
+        !spoken || spoken.length > 160 || original === spoken ||
+        /[\u0000-\u001f\u007f]/.test(rule.id + original + spoken) ||
+        ids.has(rule.id) || sources.has(original.toLocaleLowerCase())) {
+      throw new Error("Pronunciation rules need unique, nonempty terms and valid lengths.");
+    }
+    ids.add(rule.id);
+    sources.add(original.toLocaleLowerCase());
+  }
+  // The combined preview is stale, but the Python content-addressed audio cache
+  // will still reuse segments whose *effective* speech has not changed.
+  return { ...project, pronunciation_glossary: rules };
 }

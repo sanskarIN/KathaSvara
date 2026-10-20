@@ -13,6 +13,7 @@ from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
 from .production import render_story
+from .pronunciation import apply_glossary
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
 
@@ -71,6 +72,25 @@ def handle(request: dict[str, object]) -> dict[str, object]:
                 "changed": normalized != text,
             },
         }
+    if request.get("action") == "preview_pronunciation":
+        project = request.get("project")
+        segment_id = request.get("segment_id")
+        if not isinstance(project, dict) or not isinstance(segment_id, str):
+            raise TypeError("Preview requires a story document and segment identifier.")
+        document = from_dict(project)
+        for scene in document.scenes:
+            for segment in scene.segments:
+                if segment.id == segment_id:
+                    if segment.kind != "speech":
+                        raise ValueError("Stage directions are not synthesized.")
+                    result = apply_glossary(segment.spoken_text, document.pronunciation_glossary)
+                    return {"ok": True, "result": {
+                        "original": segment.original_text,
+                        "reviewed": segment.spoken_text,
+                        "effective": result["text"],
+                        "changes": result["changes"],
+                    }}
+        raise ValueError("Segment does not belong to the selected story.")
     if request.get("action") == "render_story":
         project = request.get("project")
         output = request.get("output")
@@ -78,6 +98,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         cancel = request.get("cancel_file")
         progress = request.get("progress_file")
         selected = request.get("selected_scene_ids")
+        selected_segments = request.get("selected_segment_ids")
         force = request.get("force_segment_ids")
         if not isinstance(project, dict):
             raise TypeError("Expected a version 2 story document.")
@@ -92,6 +113,12 @@ def handle(request: dict[str, object]) -> dict[str, object]:
             not all(isinstance(item, str) for item in selected)
         ):
             raise TypeError("Selected scenes must be an ID array.")
+        if selected_segments is not None and (
+            not isinstance(selected_segments, list) or
+            not all(isinstance(item, str) for item in selected_segments) or
+            len(selected_segments) > 256
+        ):
+            raise TypeError("Selected dialogue lines must be a bounded ID array.")
         if force is not None and (
             not isinstance(force, list) or
             not all(isinstance(item, str) for item in force)
@@ -114,6 +141,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         result = render_story(
             doc, Path(output), Path(cache), on_progress=report, is_cancelled=cancelled,
             selected_scene_ids=set(selected) if selected is not None else None,
+            selected_segment_ids=set(selected_segments) if selected_segments is not None else None,
             force_segment_ids=set(force) if force is not None else None,
         )
         return {"ok": True, "result": result}

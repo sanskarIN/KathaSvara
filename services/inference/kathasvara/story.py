@@ -10,6 +10,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .pronunciation import PronunciationRule, glossary_from_dict, validate_glossary
+
 SCHEMA_VERSION = 2
 ENGINE_ID = "chatterbox-multilingual"
 NARRATOR_ID = "narrator"
@@ -130,10 +132,12 @@ class StoryDocument:
     characters: list[Character]
     scenes: list[Scene]
     schema_version: int = SCHEMA_VERSION
+    pronunciation_glossary: list[PronunciationRule] = field(default_factory=list)
 
     def validate(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             raise ValueError("Unsupported story schema.")
+        validate_glossary(self.pronunciation_glossary)
         _name(self.id, "Document ID", 80)
         _name(self.title, "Story title")
         if len(self.text) > 100_000:
@@ -197,6 +201,7 @@ def migrate_legacy(project: dict[str, Any]) -> dict[str, Any]:
         "text": project["text"],
         "characters": [asdict(narrator())],
         "scenes": [],
+        "pronunciation_glossary": [],
     }
 
 
@@ -221,6 +226,7 @@ def from_dict(payload: dict[str, Any]) -> StoryDocument:
     doc = StoryDocument(
         id=migrated["id"], title=migrated["title"], text=migrated["text"],
         characters=chars, scenes=scenes, schema_version=migrated["schema_version"],
+        pronunciation_glossary=glossary_from_dict(migrated.get("pronunciation_glossary", [])),
     )
     doc.validate()
     return doc

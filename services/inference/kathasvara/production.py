@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from .engine import ChatterboxHindi, VoiceSettings
-from .hindi import normalize_hindi, split_for_engine
+from .hindi import split_for_engine
+from .pronunciation import apply_glossary
 from .story import StoryDocument
 
 MAX_RENDER_SEGMENTS = 256
@@ -61,6 +62,7 @@ def render_story(
     *,
     use_cache: bool = True,
     selected_scene_ids: set[str] | None = None,
+    selected_segment_ids: set[str] | None = None,
     force_segment_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Render resolved segments in order; cache content-addressed source audio.
@@ -76,17 +78,28 @@ def render_story(
     if any(
         seg.speaker_id is None for scene in doc.scenes
         if selected_scene_ids is None or scene.id in selected_scene_ids
-        for seg in scene.segments if seg.kind == "speech"
+        for seg in scene.segments
+        if seg.kind == "speech" and (
+            selected_segment_ids is None or seg.id in selected_segment_ids
+        )
     ):
         raise ValueError("Assign every unknown speaker manually before rendering.")
     available_scenes = {scene.id for scene in doc.scenes}
     if selected_scene_ids is not None and not selected_scene_ids.issubset(available_scenes):
         raise ValueError("Requested scene does not belong to the story.")
+    available_segment_ids = {
+        seg.id for scene in doc.scenes for seg in scene.segments if seg.kind == "speech"
+    }
+    if selected_segment_ids is not None and not selected_segment_ids.issubset(
+        available_segment_ids
+    ):
+        raise ValueError("Requested dialogue segment does not belong to this story.")
     speech = [
         (seg, next(char for char in doc.characters if char.id == seg.speaker_id))
         for scene in doc.scenes
         if selected_scene_ids is None or scene.id in selected_scene_ids
         for seg in scene.segments if seg.kind == "speech"
+        and (selected_segment_ids is None or seg.id in selected_segment_ids)
     ]
     if not speech or len(speech) > MAX_RENDER_SEGMENTS:
         raise ValueError("A render needs 1–256 spoken segments.")
@@ -112,7 +125,9 @@ def render_story(
             raise RenderCancelled("Render cancelled between dialogue segments.")
         profile = character.voice
         profile.validate()
-        normalized = normalize_hindi(seg.spoken_text)
+        # Effective text is reviewed separately; source and spoken_text are immutable here.
+        # Unrelated rules do not affect content-based cache fingerprints.
+        normalized = apply_glossary(seg.spoken_text, doc.pronunciation_glossary)["text"]
         if not normalized:
             raise ValueError("Spoken dialogue cannot be empty.")
         chunks = split_for_engine(normalized)
@@ -124,7 +139,7 @@ def render_story(
         # Cache key represents model ID and all *supported* settings only.
         # The model ID should incorporate the exact revision when known.
         fingerprint = json.dumps({
-            "v": 1, "model": profile.model_id, "engine": profile.engine_id,
+            "v": 2, "model": profile.model_id, "engine": profile.engine_id,
             "text": normalized, "exaggeration": profile.exaggeration,
             "cfg_weight": profile.cfg_weight, "rate": rate,
         }, sort_keys=True, ensure_ascii=False)
@@ -135,7 +150,9 @@ def render_story(
         if use_cache and cached.exists() and seg.id not in (force_segment_ids or set()):
             try:
                 info = sf.info(str(cached))
-                if info.channels == 1 and info.samplerate == rate and info.frames > 0:
+                if (not cached.is_symlink() and info.format == "WAV" and
+                    info.subtype == "PCM_16" and info.channels == 1 and
+                    info.samplerate == rate and 0 < info.frames <= rate * MAX_OUTPUT_SECONDS):
                     candidate, _ = sf.read(str(cached), dtype="float32", always_2d=False)
                     segment_samples = _samples(candidate, np)
                     was_cached = True
