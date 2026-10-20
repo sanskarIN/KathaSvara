@@ -2,7 +2,7 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Current releases:** [v0.1.0 developer preview](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) is published. **v0.1.1 is the next source-only pre-release candidate**; see [GitHub Releases](https://github.com/sanskarIN/KathaSvara/releases) to verify publication. Neither version includes verified Hindi-model audio, a packaged Windows application, model weights, binaries, or sample voices.
+> **Latest pre-release:** [v0.1.1 — Developer Preview (Source Only)](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.1) is **published on GitHub**. The previous [v0.1.0 preview](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.1.0) remains available. Both are source-only developer releases; model weights, Windows installers, audible Hindi voice-quality acceptance, and standalone desktop packaging remain **unverified or unavailable**.
 
 ## What the development source implements
 
@@ -42,7 +42,7 @@ Detailed Windows, Linux and macOS instructions: [development setup](docs/install
 | Chatterbox Hindi adapter | Implemented in source; **real synthesis unverified** |
 | WAV writing, preview and export | Implemented in source; end-to-end unverified |
 | Inspect Hindi text and import TXT / Markdown | Implemented in source; desktop interaction unverified |
-| Python tests | v0.1.0 passed on its release commit; v0.1.1 requires fresh CI checks |
+| Python tests | Passing on both v0.1.0 and v0.1.1 release commits |
 | Multi-character voices | Future milestone |
 | Full audio timeline and music mixing | Future milestone |
 | Managed Python runtime / signed Windows installer | Future milestone |
@@ -52,7 +52,7 @@ Our priority is natural Hindi output, not feature counts. No private text or ref
 ## Next milestones
 
 - **v0.1.0:** source-only developer pre-release published with Python, React and Windows Rust checks passing.
-- **v0.1.1:** model-free Python TTS environment diagnostics and clearer developer setup; source-only preview gated on CI.
+- **v0.1.1:** source-only pre-release published after passing Python, React and Windows Rust CI; adds model-free Python TTS diagnostics and clearer developer setup.
 - **Next:** real Hindi model smoke test, interactive desktop verification, reliable model worker lifecycle and installation packaging.
 - **v0.2.0:** speaker/character assignment and persistent voice profiles.
 - **Later:** multi-engine support, timeline, cinematic audio production, packaging and distribution.
