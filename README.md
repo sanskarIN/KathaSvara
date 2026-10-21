@@ -2,7 +2,11 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Latest development pre-release target:** [KathaSvara v0.4.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.1), built with guardrails for full-length WAV export, subtitle integrity, and explicit recovery cleanup. Its guarded publication workflow must pass first. The Windows x64 EXE remains **unsigned, unbundled and experimental**; requires separate Python 3.11, speech model, weights and WebView2. Model speech quality and clean-machine installation are **not verified**. See [release notes](docs/releases/v0.4.1-notes.md), [setup requirements](docs/installation/portable-windows-candidate.md) and [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+> **Latest published experimental pre-release:** [KathaSvara v0.4.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.1), published on October 21, 2026 from commit [`0ec3d9e`](https://github.com/sanskarIN/KathaSvara/commit/0ec3d9ec81b7d7b735eb1a00ac569fd40d6e0363). The [exact-SHA release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39535984065) passed Python, React, Windows Rust, Windows Python locks, unsigned Windows x64 EXE compilation and post-upload SHA-256 verification. The EXE is **unsigned, unbundled and experimental**; separate Python 3.11, speech model, weights and WebView2 prerequisites remain essential. Real Hindi audio listening and clean-machine Windows installation are **not verified**. See [release notes](docs/releases/v0.4.1-notes.md), [setup requirements](docs/installation/portable-windows-candidate.md) and [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+
+## v0.4.2 development — inspect render plans without model weights
+
+The next engineering batch adds **Inspect render plan (no model)** in Characters & Scenes. It validates dialogue selection and profiles, counts planned Hindi engine chunks after pronunciation rules, and shows aggregate bounds without loading a TTS model, generating speech or storing a new recovery journal. This is **unreleased development** and does not establish voice quality, real duration or clean Windows usability. See [v0.4.2 development notes](docs/releases/v0.4.2-development.md).
 
 ## v0.4.1 experimental developer preview — export, subtitles and recovery
 

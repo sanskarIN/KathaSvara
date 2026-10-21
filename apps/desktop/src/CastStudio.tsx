@@ -10,6 +10,17 @@ import {
   renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
+type RenderPlan = {
+  segments: number;
+  source_characters: number;
+  spoken_characters: number;
+  chunks: number;
+  forced_segments: number;
+  model_loaded: false;
+  duration_known: false;
+  distinct_voices_verified: false;
+};
+
 type RenderHistory = {
   job_id: string;
   story_id: string;
@@ -40,6 +51,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [history, setHistory] = useState<RenderHistory[] | null>(null);
+  const [renderPlan, setRenderPlan] = useState<RenderPlan | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const renderRevision = useRef(0);
@@ -60,6 +73,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     setAudio(null);
     setHistory(null);
+    setRenderPlan(null);
   }, [document]);
   useEffect(() => {
     if (!jobId) return;
@@ -162,6 +176,28 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       setRendering(false);
     }
   }
+  async function inspectRenderPlan() {
+    if (rendering || planBusy) return;
+    const revision = renderRevision.current;
+    setPlanBusy(true);
+    setRenderPlan(null);
+    try {
+      const result = await invoke<RenderPlan>("preflight_render", {
+        project: document, selectedSceneIds: null,
+        selectedSegmentIds: null, forceSegmentIds: null,
+      });
+      if (revision !== renderRevision.current) return;
+      setRenderPlan(result);
+      onMessage("Model-free plan reviewed: no model loaded and no speech duration or voice quality assumed.");
+    } catch (error) {
+      if (revision === renderRevision.current) {
+        onMessage("Render preflight failed: " + errorString(error));
+      }
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
   async function showRenderHistory() {
     const revision = renderRevision.current;
     setLoadingHistory(true);
@@ -382,6 +418,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="render-tools">
           <button className="primary-button" disabled={busy || rendering || !document.scenes.length}
             onClick={() => void startRender()}>Generate story dialogue WAV</button>
+          <button className="secondary-button" disabled={busy || rendering || planBusy || !document.scenes.length}
+            onClick={() => void inspectRenderPlan()}>{planBusy ? "Checking plan…" : "Inspect render plan (no model)"}</button>
           <button className="quiet-button" disabled={busy || rendering || !document.scenes.length}
             onClick={() => void startRender(undefined, undefined, true)}>Force re-render story</button>
           {activeScene && <button className="secondary-button" disabled={busy || rendering}
@@ -391,6 +429,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             onClick={() => void showRenderHistory()}>
             {loadingHistory ? "Reading history…" : "Recent render history"}
           </button>
+          {renderPlan && <p className="helper" role="status">
+            Preflight: {renderPlan.segments} dialogue lines · {renderPlan.chunks} model chunks ·
+            {" "}{renderPlan.spoken_characters} spoken characters (after pronunciation rules).
+            No model loaded; duration, Hindi naturalness and distinct voices are not verified.
+          </p>}
           <div className="render-meter" role="status" aria-live="polite">
             {rendering
               ? (progress.total ? `Segments ${progress.done} / ${progress.total}` : "Loading local inference model…")
