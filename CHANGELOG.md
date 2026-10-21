@@ -2,6 +2,8 @@
 
 ## v0.4.1 — Unreleased development
 
+- Reject selected or forced-retry segment IDs outside the chosen scene/line set before model loading instead of silently ignoring requests; respond to pre-load cancellation before doing expensive inference setup.
+- Enforce 20-minute cumulative audio frame limits on model chunks and planned inter-speaker pauses **before** writing reusable cache WAVs; model-free regressions assert rejected renders do not publish oversized cache/audio files.
 - Keep verified long-story WAV outputs on disk when they exceed the 25 MiB inline webview preview threshold, exposing an **export-only** UI state instead of deleting valid audio.
 - Stream native WAV export to a new destination without buffering the entire recording; reject malformed RIFF/PCM16 headers, invalid durations, oversized files and existing export paths.
 - Carry ephemeral, pronunciation-glossary-adjusted spoken text alongside measured dialogue timings so Hindi SRT export matches the generated narration rather than a potentially changed source document.
