@@ -2,6 +2,8 @@
 
 ## v0.5.0 — Early development (not released)
 
+- Suggest matching Hindi-safe WAV/SRT filenames tied to the original render scope (whole story, selected scene or line), not to the current UI tab; reject stale save dialogs if the document or active audio changes.
+
 - Offer explicitly confirmed fresh full-story retries for failed/cancelled/interrupted render journals tied to the current story, reusing only valid unchanged cached dialogue (not silently reconstructing original scene selection).
 - Add an opt-in, nonpersistent, per-WAV human QA checklist for listening, pronunciation, dialogue turns and exported Hindi SRT review; no item is auto-approved, and re-render/edits reset the checklist.
 

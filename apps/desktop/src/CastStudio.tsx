@@ -5,6 +5,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
 import { buildDialogueSrt } from "./lib/subtitles";
 import { resolveRenderSelection } from "./lib/render_selection";
+import { isCurrentExportSession, renderExportLabel, suggestedOutputFile, type AudioExportLabel } from "./lib/export_names";
 import {
   canOfferManualRetry, recordSubtitleExport, reviewForAudio, reviewProgress,
   updateAudioReview, type AudioReview, type ReviewStep,
@@ -63,6 +64,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [auditBusy, setAuditBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
+  const [audioExportLabel, setAudioExportLabel] = useState<AudioExportLabel | null>(null);
+  const audioEpoch = useRef(0);
   // Never persisted or transferred to the model: only manual QA for the current WAV.
   const [review, setReview] = useState<AudioReview | null>(null);
   const renderRevision = useRef(0);
@@ -81,7 +84,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     renderRevision.current += 1;
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
+    audioEpoch.current += 1;
     setAudio(null);
+    setAudioExportLabel(null);
     setReview(null);
     setHistory(null);
     setRenderPlan(null);
@@ -99,7 +104,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     renderRevision.current += 1;
     if (jobId) void invoke("cancel_story_render", { jobId }).catch(() => {});
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
+    audioEpoch.current += 1;
     setAudio(null);
+    setAudioExportLabel(null);
     setReview(null);
     onChange(previous => update(previous));
     setDirty(true);
@@ -145,10 +152,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       return;
     }
     const id = crypto.randomUUID();
+    // Scope and scene order are captured when generation begins, not when an
+    // unrelated scene tab is selected during playback or export.
+    const exportLabel = renderExportLabel(document, id, sceneId, forceSegmentId);
     const revision = renderRevision.current;
     setJobId(id);
     setProgress({ done: 0, total: 0 });
     setRendering(true);
+    audioEpoch.current += 1;
+    setAudioExportLabel(null);
     setRenderPlan(null);
     setHistory(null);
     setReview(null);
@@ -166,6 +178,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         return;
       }
       setAudio(result);
+      setAudioExportLabel(exportLabel);
       // A successful render never counts as human listening or caption acceptance.
       setReview(null);
       onMessage(result.preview_available === false
@@ -300,8 +313,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function exportSceneSubtitles() {
-    if (!audio?.segment_timings?.length) return;
+    if (!audio?.segment_timings?.length || !audioExportLabel) return;
     const revision = renderRevision.current;
+    const epoch = audioEpoch.current;
+    const label = audioExportLabel;
     const audioId = audio.audio_id;
     try {
       const lines = document.scenes.flatMap(scene =>
@@ -312,16 +327,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const content = buildDialogueSrt(audio.segment_timings, lines);
       const destination = await save({
         title: "Export segment-timed Hindi SubRip subtitles",
-        defaultPath: "kathasvara-dialogue.srt",
+        defaultPath: suggestedOutputFile(label, "srt"),
         filters: [{ name: "SubRip subtitles", extensions: ["srt"] }],
       });
       if (!destination) return;
-      if (revision !== renderRevision.current) {
-        onMessage("Story changed while choosing SRT destination. Generate and review the new narration first.");
+      if (!isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
+        revision, renderRevision.current)) {
+        onMessage("Story or generated audio changed while choosing SRT destination. Re-export the current WAV.");
         return;
       }
       await invoke("export_subtitles", { destination, content });
-      if (revision === renderRevision.current) {
+      if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
+        revision, renderRevision.current)) {
         setReview(previous => recordSubtitleExport(previous, audioId));
       }
       onMessage("Measured dialogue-level .srt captions exported. Review caption timing and text before marking subtitles checked.");
@@ -331,17 +348,25 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
 
   async function exportAudio() {
-    if (!audio) return;
+    if (!audio || !audioExportLabel) return;
+    const revision = renderRevision.current;
+    const epoch = audioEpoch.current;
+    const label = audioExportLabel;
+    const audioId = audio.audio_id;
     try {
       const destination = await save({
         title: "Export scene or story dialogue WAV",
-        defaultPath: "kathasvara-dialogue.wav",
+        defaultPath: suggestedOutputFile(label, "wav"),
         filters: [{ name: "Uncompressed WAV", extensions: ["wav"] }],
       });
-      if (destination) {
-        await invoke("export_wav", { audioId: audio.audio_id, destination });
-        onMessage("Dialogue WAV exported locally.");
+      if (!destination) return;
+      if (!isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
+        revision, renderRevision.current)) {
+        onMessage("Story or generated audio changed while choosing WAV destination. Re-export the current WAV.");
+        return;
       }
+      await invoke("export_wav", { audioId, destination });
+      onMessage("Dialogue WAV exported locally. The matching SRT uses the same filename stem.");
     } catch (error) {
       onMessage("Cannot export audio: " + errorString(error));
     }
@@ -349,7 +374,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   async function clearAudio() {
     if (!audio) return;
     const id = audio.audio_id;
+    audioEpoch.current += 1;
     setAudio(null);
+    setAudioExportLabel(null);
     setReview(null);
     try {
       await invoke("discard_audio", { audioId: id });
@@ -417,7 +444,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const loaded = await invoke<StoryV2>("load_story_v2", { id: document.id });
       renderRevision.current += 1;
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
+      audioEpoch.current += 1;
       setAudio(null);
+      setAudioExportLabel(null);
+      setReview(null);
       onChange(loaded);
       setSelectedScene(loaded.scenes[0]?.id ?? null);
       setDirty(false);
@@ -583,6 +613,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               ? <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated dialogue preview" />
               : <p role="status">This long narration is saved locally, but exceeds the 25 MiB inline preview limit.
                 Use <strong>Export WAV</strong> to copy the complete audio to a new file and listen in your preferred audio player.</p>}
+            {audioExportLabel && <p className="helper" role="status">
+              Export scope: {audioExportLabel.scope === "story" ? "full story" :
+                audioExportLabel.scope === "scene" ? "selected scene" : "selected dialogue line"}.
+              WAV and SRT exports will suggest matching filenames captured at render time.
+            </p>}
             <small>{audio.duration_seconds.toFixed(1)} seconds · {audio.sample_rate} Hz · {audio.chunks} synthesis chunks
               {audio.file_bytes != null ? ` · ${(audio.file_bytes / (1024 * 1024)).toFixed(1)} MiB WAV` : ""}
             </small>
