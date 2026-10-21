@@ -185,3 +185,16 @@ audio { display: block; width: 100%; margin: 13px 0; }
 .pronunciation-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: 8px; background: var(--surface-2); color: var(--text); font: inherit; }
 .pronunciation-preview p, .pronunciation-preview ul { grid-column: 1 / -1; }
 .reviewed-dialogue-label textarea { resize: vertical; max-height: 220px; }
+
+/* v0.5.0 optional human review remains attached to the active local WAV only. */
+.review-checklist { display: grid; gap: 10px; margin: 14px 0; }
+.review-checklist label {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 12px; line-height: 1.55; color: var(--text);
+}
+.review-checklist input[type="checkbox"] {
+  flex: 0 0 auto; width: 16px; height: 16px; margin-top: 2px;
+  accent-color: var(--accent-solid);
+}
+.review-checklist label:has(input:disabled) { color: var(--muted); }
+.review-checklist input[type="checkbox"]:disabled { cursor: not-allowed; }
