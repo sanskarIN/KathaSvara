@@ -9,12 +9,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from test_production import FakeEngine, sample_doc
 
-import kathasvara.production as production
+from kathasvara import production
 from kathasvara.dialogue import parse_dialogue
 from kathasvara.production import RenderCancelled, render_story
 from kathasvara.story import narrator
-from test_production import FakeEngine, sample_doc
 
 
 def test_force_retry_rejects_unknown_segment_before_loading_model(tmp_path: Path) -> None:
