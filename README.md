@@ -6,6 +6,10 @@
 
 > **v0.4.2 release candidate:** This source prepares the [guarded experimental v0.4.2 release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.2) with selected-scene/model-free Hindi preflight, shared normalized speech chunks and safer cache read boundaries. Publication is automatic only after the exact-SHA Windows EXE build and all test/asset checks pass. **Latest confirmed already-published release before those checks: [v0.4.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.1).** Neither version is a signed/self-contained installer or proof of genuine Hindi voice listening. See [v0.4.2 release notes](docs/releases/v0.4.2-notes.md) and [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
 
+## v0.5.0 development — scene-by-scene readiness checks
+
+New in the **unreleased** v0.5.0 development branch: a no-model production audit inspects every Hindi scene independently and reports structural issues such as missing speaker assignments, scene size limits and stage-direction-only scenes. It separately reports whether the **whole story** can be rendered in one bounded job. Only aggregate counts and fixed reason codes cross the Python/Rust IPC; scene names stay in the local UI. This is not proof of real Hindi speech quality. See [v0.5.0 development plan](docs/releases/v0.5.0-development.md).
+
 ## v0.4.2 experimental developer preview — Hindi preflight and cache bounds
 
 The next engineering batch adds **Inspect render plan (no model)** in Characters & Scenes. It validates dialogue selection and profiles, counts planned Hindi engine chunks after pronunciation rules, and shows aggregate bounds without loading a TTS model, generating speech or storing a new recovery journal. This is **unreleased development** and does not establish voice quality, real duration or clean Windows usability. See [v0.4.2 development notes](docs/releases/v0.4.2-development.md).
