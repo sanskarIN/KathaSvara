@@ -2,11 +2,13 @@
 
 The [v0.5.0 experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) (check the release page for publication status) includes an unsigned Windows x64 **developer executable**, but it is **not a self-contained installer**. The app still requires separately installed compatible Python 3.11, Chatterbox, supported model weights and Tauri/WebView2 prerequisites. The Chatterbox and PyTorch stack can require substantial disk and GPU memory; actual Hindi speech and an interactive clean-machine Windows launch are unverified.
 
+The current development source uses a checked-in npm lockfile and `npm ci` for reproducible frontend installs. Dependency maintenance remains distinct from the published v0.5.0 release; see [dependency policy](../maintenance/npm-dependencies.md) and [issue #33](https://github.com/sanskarIN/KathaSvara/issues/33).
+
 The v0.5.0 source adds **model-free scene audits, matched WAV/SRT filename suggestions, manual WAV review and mocked desktop interaction tests**, but **the executable is still not a complete installer or real-Hindi acceptance certificate**. None of these tests verifies installed model weights or real Hindi voice quality. Follow the [manual Windows/Hindi acceptance protocol](../qa/windows-hindi-acceptance.md) and [open issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) before proposing stability.
 
 ## Windows 11 (first target)
 
-Install Git, Node.js 20 or later, Rust stable (with Microsoft C++ build tools) and the Tauri 2 Windows WebView2 prerequisites. Install Python **3.11**, preferably from python.org.
+Install Git, Node.js 22 (the CI-tested frontend version), Rust stable (with Microsoft C++ build tools) and the Tauri 2 Windows WebView2 prerequisites. Install Python **3.11**, preferably from python.org.
 
 Open PowerShell in the repository:
 
@@ -18,14 +20,14 @@ Open PowerShell in the repository:
     python -m pytest -q
     $env:KATHASVARA_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
     cd ..\..\apps\desktop
-    npm install
+    npm ci
     npm run tauri dev
 
 Keep that PowerShell session open because KATHASVARA_PYTHON is scoped to it. The desktop application starts the configured local Python runtime for each synthesis request. The first generation may be slower and may download weights.
 
 ## Linux
 
-Install Python 3.11, stable Rust, Node.js and the system packages documented by the official Tauri 2 Linux prerequisites (WebKitGTK 4.1, appindicator, build essentials and system libraries). From the repository root:
+Install Python 3.11, stable Rust, Node.js 22 and the system packages documented by the official Tauri 2 Linux prerequisites (WebKitGTK 4.1, appindicator, build essentials and system libraries). From the repository root:
 
     cd services/inference
     python3.11 -m venv .venv
@@ -34,12 +36,12 @@ Install Python 3.11, stable Rust, Node.js and the system packages documented by 
     python -m pytest -q
     export KATHASVARA_PYTHON="$(pwd)/.venv/bin/python"
     cd ../../apps/desktop
-    npm install
+    npm ci
     npm run tauri dev
 
 ## macOS
 
-Install the Tauri 2 Xcode/Command Line Tools requirements, Node.js, stable Rust and Python 3.11. Follow the Linux Python and Node commands, noting that installed PyTorch and model acceleration compatibility vary by macOS release and hardware.
+Install the Tauri 2 Xcode/Command Line Tools requirements, Node.js 22, stable Rust and Python 3.11. Follow the Linux Python and Node commands, noting that installed PyTorch and model acceleration compatibility vary by macOS release and hardware.
 
 ## Troubleshooting
 
