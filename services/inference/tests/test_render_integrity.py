@@ -164,7 +164,7 @@ def test_cached_symlink_never_inspected_or_loaded(
     doc = sample_doc()
     cache = tmp_path / "cache"
     render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
-    entry = sorted(cache.glob("*.wav"))[0]
+    entry = min(cache.glob("*.wav"))
     private = tmp_path / "outside.wav"
     entry.replace(private)
     try:
