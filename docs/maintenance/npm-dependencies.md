@@ -36,6 +36,12 @@ Active CI now runs `npm audit --audit-level=high` after `npm ci`; Dependabot is 
 
 The **published v0.5.0 tag and unsigned developer EXE are immutable** and still contain the source/build versions used at their original publication; these new Vite 8 changes are main-branch development **only**, not a new release. 
 
+## Joint React runtime migration after Vite 8
+
+React `19.3.1`, React DOM `19.3.1`, `@types/react` `19.3.0` and `@types/react-dom` `19.3.0` were installed and verified **together** on Node 22, with a regenerated lockfile. The independently generated React 19 Dependabot PRs [#40](https://github.com/sanskarIN/KathaSvara/pull/40) and [#41](https://github.com/sanskarIN/KathaSvara/pull/41) failed `npm ci` from peer dependency incompatibility because each upgraded only part of the linked runtime pair. Do not merge them individually.
+
+The combined migration passed all **55 Vitest React tests** (including mocked desktop interactions), the TypeScript/Vite production build, and `npm audit --audit-level=high` reporting zero advisories at the time of execution. These checks do **not** establish manual Windows WebView2 launch, real speech-model behavior, or future vulnerability immunity. The short-lived GitHub contents-write workflow was removed before PR merge; Windows release-candidate checks are separate merge gates.
+
 ## Release immutability and limitations
 
 Previous version-specific GitHub publication workflows are kept unchanged to preserve their tested SHA and release history. Future release workflows should use `npm ci` and a complete pinned graph. The [v0.5.0 pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) is an unsigned developer EXE, not a complete installer, and manual Chatterbox Hindi playback and clean Windows installation acceptance remain open in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
