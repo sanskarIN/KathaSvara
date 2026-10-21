@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.0 — Early development (not released)
+
+- Introduce model-free, per-scene Hindi production readiness audit with aggregate counts and privacy-safe reason codes; report whole-story plan readiness separately from individually valid scenes.
+- Wire the read-only audit through Python CLI, Rust/Tauri IPC and CastStudio and add model-free regression tests; no genuine speech or Windows acceptance claims.
+
 ## v0.4.2 — Experimental developer prerelease source (publication gated)
 
 - Enable explicit full-story or selected-scene model-free preflight with a shared typed render scope, preserving scene/line retry parity and private script text.
