@@ -1,0 +1,105 @@
+"""Rendering selection, cancellation and cache-boundary regression tests.
+
+These use deterministic fake audio only; no Hindi model weights are downloaded.
+SPDX-License-Identifier: MPL-2.0
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import kathasvara.production as production
+from kathasvara.dialogue import parse_dialogue
+from kathasvara.production import RenderCancelled, render_story
+from kathasvara.story import narrator
+from test_production import FakeEngine, sample_doc
+
+
+def test_force_retry_rejects_unknown_segment_before_loading_model(tmp_path: Path) -> None:
+    mock = FakeEngine()
+    with pytest.raises(ValueError, match="Forced regeneration must target"):
+        render_story(
+            sample_doc(), tmp_path / "retry.wav", tmp_path / "cache",
+            mock, force_segment_ids={"not-a-story-segment"},
+        )
+    assert mock.loads == 0
+    assert not (tmp_path / "retry.wav").exists()
+
+
+def test_scene_selection_refuses_line_from_unselected_scene(tmp_path: Path) -> None:
+    doc = parse_dialogue(
+        "दो दृश्य",
+        "# पहला दृश्य\nNarrator: पहले गाँव में।\n---\n# दूसरा दृश्य\nNarrator: फिर नगर में।",
+        [narrator()],
+    )
+    assert len(doc.scenes) == 2
+    scene = doc.scenes[0]
+    other_line = doc.scenes[1].segments[0].id
+    mock = FakeEngine()
+    with pytest.raises(ValueError, match="outside the chosen scenes"):
+        render_story(
+            doc, tmp_path / "invalid.wav", tmp_path / "cache", mock,
+            selected_scene_ids={scene.id}, selected_segment_ids={other_line},
+        )
+    assert mock.loads == 0
+    with pytest.raises(ValueError, match="Forced regeneration must target"):
+        render_story(
+            doc, tmp_path / "forced.wav", tmp_path / "cache", mock,
+            selected_scene_ids={scene.id}, force_segment_ids={other_line},
+        )
+    assert mock.loads == 0
+
+
+def test_cancel_requested_before_model_load_skips_inference(tmp_path: Path) -> None:
+    mock = FakeEngine()
+    with pytest.raises(RenderCancelled, match="before model loading"):
+        render_story(
+            sample_doc(), tmp_path / "cancelled.wav", tmp_path / "cache",
+            mock, is_cancelled=lambda: True,
+        )
+    assert mock.loads == 0
+    assert mock.calls == []
+    assert not (tmp_path / "cancelled.wav").exists()
+
+
+def test_oversized_model_chunk_never_reaches_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
+
+    class TooLongEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            self.calls.append((text, settings.exaggeration))
+            return np.full(self.sample_rate * 2, 0.12, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="20-minute audio limit"):
+        render_story(
+            sample_doc(), tmp_path / "oversized.wav", tmp_path / "cache",
+            TooLongEngine(),
+        )
+    assert not (tmp_path / "oversized.wav").exists()
+    assert list((tmp_path / "cache").glob("*.wav")) == []
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_inter_segment_pause_is_checked_before_caching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
+
+    class NearLimitEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            self.calls.append((text, settings.exaggeration))
+            return np.full(int(self.sample_rate * .95), 0.12, dtype=np.float32)
+
+    # The first 0.95-second line fits, but its following 0.14-second pause
+    # does not. No segment cache entry should be published for this failed job.
+    with pytest.raises(ValueError, match="20-minute audio limit"):
+        render_story(
+            sample_doc(), tmp_path / "pause.wav", tmp_path / "cache",
+            NearLimitEngine(),
+        )
+    assert not (tmp_path / "pause.wav").exists()
+    assert list((tmp_path / "cache").glob("*.wav")) == []
