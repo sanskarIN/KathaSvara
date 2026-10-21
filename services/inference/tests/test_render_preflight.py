@@ -4,12 +4,14 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from test_production import FakeEngine, sample_doc
 
 from kathasvara.cli import handle
 from kathasvara.dialogue import parse_dialogue
-from kathasvara.render_preflight import inspect_render_plan
+from kathasvara.render_preflight import inspect_render_plan, prepare_render_plan
 from kathasvara.story import narrator
 
 
@@ -80,3 +82,85 @@ def test_renderer_reuses_preflight_before_loading_model(
         render_story(sample_doc(), tmp_path / "blocked.wav", tmp_path / "cache", mock)
     assert mock.loads == 0
     assert not (tmp_path / "blocked.wav").exists()
+
+
+def test_plan_preserves_exact_glossary_adjusted_text_and_chunks() -> None:
+    from kathasvara.pronunciation import PronunciationRule
+
+    doc = sample_doc()
+    doc.pronunciation_glossary = [
+        PronunciationRule(id="greeting", original="नमस्कार", spoken="नमन")
+    ]
+    original_source = doc.to_dict()
+    plan = prepare_render_plan(doc)
+    assert len(plan.lines) == 2
+    assert plan.lines[0].effective_text == "नमन।"
+    assert plan.lines[0].chunks == ("नमन।",)
+    assert plan.lines[1].effective_text == "प्रजा कैसी है?"
+    assert plan.chunk_count == sum(len(line.chunks) for line in plan.lines)
+    assert plan.spoken_characters == sum(len(line.effective_text) for line in plan.lines)
+    assert doc.to_dict() == original_source, "Read-only planning must never edit a project"
+    report = plan.counts_only()
+    assert set(report) == {
+        "segments", "source_characters", "spoken_characters", "chunks",
+        "forced_segments", "model_loaded", "duration_known",
+        "distinct_voices_verified",
+    }
+    assert "नमन" not in str(report) and "प्रजा" not in str(report)
+
+
+def test_render_uses_prepared_text_once_without_second_glossary_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import render_preflight
+    from kathasvara.production import render_story
+    from kathasvara.pronunciation import PronunciationRule
+
+    doc = sample_doc()
+    doc.pronunciation_glossary = [
+        PronunciationRule(id="first", original="नमस्कार", spoken="नमन")
+    ]
+    calls: list[str] = []
+    original = render_preflight.apply_glossary
+
+    def spy(text: str, glossary: object) -> dict:
+        calls.append(text)
+        return original(text, glossary)
+
+    monkeypatch.setattr(render_preflight, "apply_glossary", spy)
+    engine = FakeEngine()
+    result = render_story(
+        doc, tmp_path / "first.wav", tmp_path / "cache", engine,
+    )
+    assert len(calls) == 2, "Every selected line must be normalized just once"
+    assert [text for text, _settings in engine.calls] == [
+        "नमन।", "प्रजा कैसी है?",
+    ]
+    assert [entry["effective_text"] for entry in result["segments"]] == [
+        "नमन।", "प्रजा कैसी है?",
+    ]
+    assert result["chunks"] == 2
+
+
+def test_force_single_line_plan_does_not_normalize_other_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import render_preflight
+
+    doc = sample_doc()
+    line_id = doc.scenes[0].segments[1].id
+    calls: list[str] = []
+    original = render_preflight.apply_glossary
+
+    def spy(text: str, glossary: object) -> dict:
+        calls.append(text)
+        return original(text, glossary)
+
+    monkeypatch.setattr(render_preflight, "apply_glossary", spy)
+    plan = prepare_render_plan(
+        doc, selected_segment_ids={line_id}, force_segment_ids={line_id},
+    )
+    assert plan.forced_segments == 1
+    assert len(plan.lines) == 1
+    assert plan.lines[0].segment.id == line_id
+    assert calls == ["प्रजा कैसी है?"]
