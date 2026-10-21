@@ -1,6 +1,6 @@
 # Inspect a generated WAV without running the speech model
 
-**KathaSvara v0.5.0 development:** `kathasvara.wav_acceptance` is a read-only, standard-library-only WAV integrity checker. It does **not** require Chatterbox weights, a GPU, or network access. It is intended to collect bounded technical evidence for [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) after the creator has actually generated and exported an audio file.
+**KathaSvara v0.5.0 experimental developer pre-release / source tooling:** `kathasvara.wav_acceptance` is a read-only, standard-library-only WAV integrity checker. It does **not** require Chatterbox weights, a GPU, or network access. It is intended to collect bounded technical evidence for [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) after the creator has actually generated and exported an audio file.
 
 ## Run from the Python 3.11 inference environment
 
