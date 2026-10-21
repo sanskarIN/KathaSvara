@@ -6,6 +6,9 @@
 
 ## v0.5.0 development — scene-by-scene readiness checks
 
+New validation work includes **jsdom-based React interaction tests** of the desktop story controls using a mocked Tauri bridge. They exercise selected-scene rendering, measured SRT export, privacy-safe readiness reporting, stale-dialog protection and explicit recovery retry without downloading speech models. They do **not** verify real Hindi synthesis or a Windows desktop launch. Follow the [manual Windows and Hindi narration acceptance protocol](docs/qa/windows-hindi-acceptance.md) for evidence needed before any stable release.
+
+
 Export usability in unreleased v0.5.0 development: successful narration renders propose paired, Hindi-friendly `.wav`/`.srt` filenames with the generated full-story, scene or line scope captured at synthesis time. File dialogs are guarded against edits/new audio and existing destinations are never overwritten. This does not add an installer or prove real Hindi audio quality.
 
 
