@@ -6,6 +6,9 @@
 
 ## v0.5.0 development — scene-by-scene readiness checks
 
+Export usability in unreleased v0.5.0 development: successful narration renders propose paired, Hindi-friendly `.wav`/`.srt` filenames with the generated full-story, scene or line scope captured at synthesis time. File dialogs are guarded against edits/new audio and existing destinations are never overwritten. This does not add an installer or prove real Hindi audio quality.
+
+
 Also under active development: **Retry current full story** (only after explicit confirmation from an interrupted/failed/cancelled history record, with a new job and unchanged cache reuse) and an **optional per-WAV human QA checklist**. The checklist does not persist or automatically verify Hindi pronunciation or distinct character voices. Subtitle review can be marked only after exporting SRT for the current WAV. See [v0.5.0 development notes](docs/releases/v0.5.0-development.md).
 
 
