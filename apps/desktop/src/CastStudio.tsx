@@ -5,6 +5,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
 import { buildDialogueSrt } from "./lib/subtitles";
 import { resolveRenderSelection } from "./lib/render_selection";
+import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
@@ -19,24 +20,6 @@ type RenderPlan = {
   forced_segments: number;
   model_loaded: false;
   duration_known: false;
-  distinct_voices_verified: false;
-};
-
-type ProductionAudit = {
-  total_scenes: number;
-  ready_scenes: number;
-  full_story_ready: boolean;
-  full_story_reason: "ready" | "no_dialogue" | "unassigned_speaker" | "over_limit" | "needs_review";
-  full_story_chunks: number;
-  scenes: Array<{
-    scene_id: string;
-    ready: boolean;
-    reason: "ready" | "no_dialogue" | "unassigned_speaker" | "over_limit" | "needs_review";
-    segments: number;
-    chunks: number;
-  }>;
-  model_loaded: false;
-  audio_verified: false;
   distinct_voices_verified: false;
 };
 
@@ -226,6 +209,25 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       }
     } finally {
       setAuditBusy(false);
+    }
+  }
+
+  async function exportProductionManifest() {
+    if (!audit || auditBusy || rendering) return;
+    try {
+      // The export allowlist excludes scene/story IDs, private Hindi dialogue,
+      // speaker names, voice settings and generated audio paths.
+      const content = serializeProductionManifest(audit);
+      const destination = await save({
+        title: "Export model-free production readiness report",
+        defaultPath: "kathasvara-production-audit.json",
+        filters: [{ name: "Production audit JSON", extensions: ["json"] }],
+      });
+      if (!destination) return;
+      await invoke("export_production_manifest", { destination, content });
+      onMessage("Private-text-free production report exported. It does not prove voice quality or model readiness.");
+    } catch (error) {
+      onMessage("Cannot export production report: " + errorString(error));
     }
   }
 
@@ -487,6 +489,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             ))}</ul>
             <p className="helper">No model loaded and no speech or distinct voices verified.
               Check local model setup and listen to every generated WAV before publishing.</p>
+            <button type="button" className="secondary-button"
+              disabled={auditBusy || rendering}
+              onClick={() => void exportProductionManifest()}>
+              Export privacy-safe audit JSON
+            </button>
+            <p className="helper">Export contains scene numbers, aggregate counts and fixed reason
+              codes only — no dialogue, story/scene IDs, actor names or voice parameters.
+              The app will refuse to overwrite an existing JSON file.</p>
           </section>}
           {renderPlan && <p className="helper" role="status">
             {renderPlan.scope} preflight: {renderPlan.segments} dialogue lines · {renderPlan.chunks} model chunks ·
