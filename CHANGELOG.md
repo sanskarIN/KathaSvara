@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 build-system maintenance
 
+- Update **active** GitHub CI and Windows candidate workflows to `actions/checkout@v7` and `actions/setup-node@v7` after dedicated PR checks. Intentionally leave historical version-specific release workflows unchanged so dependency maintenance does not retrigger immutable-tag publication guards; see [issue #45](https://github.com/sanskarIN/KathaSvara/issues/45).
+
 - Update source-build TypeScript from 5.9.3 to **7.0.2** on top of tested React 19/Vite 8/jsdom 30 dependencies. Rebuild the npm lockfile, verify all 55 React tests, successful TypeScript 7 typecheck/Vite production build and npm audit. Use the normal Windows Rust and unsigned EXE candidate checks as merge gates; no v0.5.0 tag or published binary changes.
 
 - Upgrade the React 18 desktop runtime to **React 19.3.1 and React DOM 19.3.1 together**, with corresponding 19.3 type packages and refreshed npm lockfile. Both independent Dependabot PRs #40/#41 failed npm ci due to mismatched peers; the combined source-only migration passed 55 React tests, TypeScript production build and npm security audit before Windows CI. Remove the one-time privileged bootstrap workflow. Published v0.5.0 assets remain unchanged.
