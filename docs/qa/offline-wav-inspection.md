@@ -1,0 +1,47 @@
+# Inspect a generated WAV without running the speech model
+
+**KathaSvara v0.5.0 development:** `kathasvara.wav_acceptance` is a read-only, standard-library-only WAV integrity checker. It does **not** require Chatterbox weights, a GPU, or network access. It is intended to collect bounded technical evidence for [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) after the creator has actually generated and exported an audio file.
+
+## Run from the Python 3.11 inference environment
+
+From `services/inference` after installing the project into the active virtual environment:
+
+```powershell
+python -m kathasvara.wav_acceptance --wav "C:\FULL\PATH\TO\NEW-EXPORT.wav"
+```
+
+Use a **real absolute path** to a local file you own. The command never synthesizes, modifies, deletes, uploads, or copies the WAV. Exit code `0` reports structurally valid WAV; exit code `2` reports absent, unsupported or structurally invalid input without echoing the local filename.
+
+The report is printed as JSON to standard output. If you choose to save or share that output, inspect it first; the SHA-256 digest can reveal when two parties have the same recording.
+
+Example report fields (values below are illustrative, not evidence of a real-model test):
+
+```json
+{
+  "format": "kathasvara-wav-structural-inspection",
+  "schema_version": 1,
+  "structure_valid": true,
+  "codec": "pcm_s16le",
+  "channels": 1,
+  "sample_rate_hz": 24000,
+  "frames": 2400,
+  "duration_seconds": 0.1,
+  "file_bytes": 4844,
+  "sha256": "illustrative-not-a-real-sha256",
+  "model_loaded": false,
+  "hindi_listening_verified": false,
+  "distinct_voices_verified": false,
+  "human_review_required": true
+}
+```
+
+## What the check actually establishes
+
+- Absolute `.wav` path, non-symlink regular file, 44 bytes–512 MiB size bound.
+- PCM16 *uncompressed, mono* WAV, 8–192 kHz sample rate, nonzero duration no longer than 20 minutes.
+- Streamed frame reads to detect a truncated PCM data payload, using bounded chunks and a complete-file SHA-256 digest without holding the recording in RAM.
+- No script, text, character/scene names, local file paths, voices, downloaded checkpoints or hardware identifiers are placed in the success JSON.
+
+**What it explicitly cannot establish:** natural Hindi pronunciation, correct speaker identities, distinct character voices, emotional quality, clipping, subjective audio glitches, intended pauses, truthful script alignment, clean Windows desktop operation or model checkpoint authenticity. An all-zero/silent WAV can pass basic container validation; this command is **not** a speech quality test. Real human listening and the [Windows/Hindi acceptance protocol](windows-hindi-acceptance.md) are separate requirements.
+
+Do not interpret `structure_valid: true` as `hindi_listening_verified: true`. The latter is always `false` in this automated result. No stable release or acceptance issue may be closed based on this report alone.
