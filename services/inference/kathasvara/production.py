@@ -106,6 +106,12 @@ def render_story(
         for seg in scene.segments if seg.kind == "speech"
         and (selected_segment_ids is None or seg.id in selected_segment_ids)
     ]
+    # A requested line cannot silently disappear when a scene filter excludes it.
+    selected_ids = {segment.id for segment, _character in speech}
+    if selected_segment_ids is not None and not selected_segment_ids.issubset(selected_ids):
+        raise ValueError("Selected dialogue is outside the chosen scenes.")
+    if force_segment_ids is not None and not force_segment_ids.issubset(selected_ids):
+        raise ValueError("Forced regeneration must target selected spoken segments.")
     if not speech or len(speech) > MAX_RENDER_SEGMENTS:
         raise ValueError("A render needs 1–256 spoken segments.")
     if sum(len(seg.spoken_text) for seg, _ in speech) > MAX_RENDER_CHARACTERS:
@@ -123,6 +129,8 @@ def render_story(
             if journal_path is not None else nullcontext(None)
         )
         with journal_context as journal:
+            if is_cancelled is not None and is_cancelled():
+                raise RenderCancelled("Render cancelled before model loading.")
             adapter = engine if engine is not None else ChatterboxHindi()
             adapter.load()
             rate = adapter.sample_rate
