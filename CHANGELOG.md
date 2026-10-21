@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — post-v0.5.0 dependency maintenance
+
+- Commit npm v3 lockfile generated and verified in GitHub Actions with Node 22, and use `npm ci` for React CI and the Windows executable candidate. The one-time branch-only bootstrap workflow was removed immediately after use. Preserve previously published prerelease assets and workflows; no model/Windows acceptance claims. See [npm dependency policy](docs/maintenance/npm-dependencies.md).
+
+
 ## [v0.5.0 — Experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0)
 
 - **Experimental Windows x64 developer EXE, README and SHA-256 checksums** published only if the exact-SHA release workflow succeeds. No bundled Python/model, signed installer or manually accepted Hindi voice quality. [Release notes](docs/releases/v0.5.0-notes.md).
