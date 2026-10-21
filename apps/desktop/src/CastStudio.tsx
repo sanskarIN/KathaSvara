@@ -214,6 +214,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
 
   async function exportProductionManifest() {
     if (!audit || auditBusy || rendering) return;
+    const revision = renderRevision.current;
     try {
       // The export allowlist excludes scene/story IDs, private Hindi dialogue,
       // speaker names, voice settings and generated audio paths.
@@ -224,6 +225,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         filters: [{ name: "Production audit JSON", extensions: ["json"] }],
       });
       if (!destination) return;
+      if (revision !== renderRevision.current) {
+        onMessage("The story changed while choosing the export location. Run the audit again.");
+        return;
+      }
       await invoke("export_production_manifest", { destination, content });
       onMessage("Private-text-free production report exported. It does not prove voice quality or model readiness.");
     } catch (error) {
