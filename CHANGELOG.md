@@ -2,6 +2,8 @@
 
 ## v0.5.0 — Early development (not released)
 
+- Add mocked React desktop interaction tests for model-free audit/export, scoped WAV/SRT generation, per-WAV review, stale-dialog invalidation and confirmed history retry; expand Windows/Hindi manual listening and clean-machine acceptance guidance, without claiming real-model results.
+
 - Suggest matching Hindi-safe WAV/SRT filenames tied to the original render scope (whole story, selected scene or line), not to the current UI tab; reject stale save dialogs if the document or active audio changes.
 
 - Offer explicitly confirmed fresh full-story retries for failed/cancelled/interrupted render journals tied to the current story, reusing only valid unchanged cached dialogue (not silently reconstructing original scene selection).
