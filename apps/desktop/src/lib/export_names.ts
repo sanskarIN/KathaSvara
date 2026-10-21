@@ -54,3 +54,19 @@ export function suggestedOutputFile(label: AudioExportLabel, kind: "wav" | "srt"
   }
   return `${label.baseName}.${kind}`;
 }
+
+/** File dialogs are asynchronous; reject their result if the story or active WAV
+ * changed before the user finished selecting a destination.
+ */
+export function isCurrentExportSession(
+  label: AudioExportLabel | null,
+  audioId: string,
+  expectedEpoch: number,
+  currentEpoch: number,
+  expectedRevision: number,
+  currentRevision: number,
+): boolean {
+  return label?.audioId === audioId &&
+    expectedEpoch === currentEpoch &&
+    expectedRevision === currentRevision;
+}
