@@ -28,6 +28,14 @@ Example report fields (values below are illustrative, not evidence of a real-mod
   "duration_seconds": 0.1,
   "file_bytes": 4844,
   "sha256": "illustrative-not-a-real-sha256",
+  "level_hints": {
+    "peak_dbfs": null,
+    "rms_dbfs": null,
+    "near_silence_hint": true,
+    "possible_clipping_hint": false,
+    "clipped_sample_percentage": 0.0,
+    "signal_review_required": true
+  },
   "model_loaded": false,
   "hindi_listening_verified": false,
   "distinct_voices_verified": false,
@@ -40,8 +48,9 @@ Example report fields (values below are illustrative, not evidence of a real-mod
 - Absolute `.wav` path, non-symlink regular file, 44 bytes–512 MiB size bound.
 - PCM16 *uncompressed, mono* WAV, 8–192 kHz sample rate, nonzero duration no longer than 20 minutes.
 - Streamed frame reads to detect a truncated PCM data payload, using bounded chunks and a complete-file SHA-256 digest without holding the recording in RAM.
+- Conservative `level_hints` computed from PCM amplitudes in the same bounded pass: peak and RMS dBFS (`null` for digital silence), percentage of samples at 16-bit full scale, `near_silence_hint` for RMS ≤ -60 dBFS, and `possible_clipping_hint` when at least 1% of samples reach ±32767/32768. Both hints are **advisory**. `signal_review_required` is true when either hint triggers; human review is **always** required even when both are false.
 - No script, text, character/scene names, local file paths, voices, downloaded checkpoints or hardware identifiers are placed in the success JSON.
 
-**What it explicitly cannot establish:** natural Hindi pronunciation, correct speaker identities, distinct character voices, emotional quality, clipping, subjective audio glitches, intended pauses, truthful script alignment, clean Windows desktop operation or model checkpoint authenticity. An all-zero/silent WAV can pass basic container validation; this command is **not** a speech quality test. Real human listening and the [Windows/Hindi acceptance protocol](windows-hindi-acceptance.md) are separate requirements.
+**What it explicitly cannot establish:** natural Hindi pronunciation, correct speaker identities, distinct character voices, emotional quality, absence of all clipping, subjective audio glitches, intended pauses, truthful script alignment, clean Windows desktop operation or model checkpoint authenticity. A warning-free file can still be poor narration or silent for long stretches. A file with a clipping/quiet hint may contain intentional silence or valid effects. All-zero WAVs still pass basic container validation but now trigger a quietness warning. These **simple level statistics are not a voice or speech-quality classifier**. Real human listening and the [Windows/Hindi acceptance protocol](windows-hindi-acceptance.md) are separate requirements.
 
 Do not interpret `structure_valid: true` as `hindi_listening_verified: true`. The latter is always `false` in this automated result. No stable release or acceptance issue may be closed based on this report alone.
