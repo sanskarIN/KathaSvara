@@ -2,6 +2,9 @@
 
 ## v0.4.2 — Early development (not published)
 
+- Enable explicit full-story or selected-scene model-free preflight with a shared typed render scope, preserving scene/line retry parity and private script text.
+- Reject over-budget cached WAVs by header frame count before loading PCM; skip symlinked cache aliases before metadata inspection. Add model-free tests for both.
+
 - Begin a privacy-preserving model-free render-plan inspection path with selected segment validation and counts computed after Hindi pronunciation rules. No audio-quality claims or release yet.
 - Share one pre-synthesis, in-memory Hindi effective-text/chunk snapshot between model-free preflight and actual render, preventing duplicate glossary passes and preserving summary privacy. Add model-free regressions for unchanged scripts and targeted retries.
 

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
 import { buildDialogueSrt } from "./lib/subtitles";
+import { resolveRenderSelection } from "./lib/render_selection";
 import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
@@ -51,7 +52,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [history, setHistory] = useState<RenderHistory[] | null>(null);
-  const [renderPlan, setRenderPlan] = useState<RenderPlan | null>(null);
+  const [renderPlan, setRenderPlan] = useState<(RenderPlan & { scope: string }) | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
@@ -124,23 +125,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
   async function startRender(sceneId?: string, forceSegmentId?: string, forceAll = false) {
     if (rendering) return;
-    if (!document.scenes.length) {
-      onMessage("Parse labeled dialogue before rendering selected scenes.");
-      return;
-    }
-    const selected = sceneId ? document.scenes.filter(scene => scene.id === sceneId) : document.scenes;
-    const speech = selected.flatMap(scene => scene.segments)
-      .filter(seg => seg.kind === "speech" && (!forceSegmentId || seg.id === forceSegmentId));
-    if (!speech.length) {
-      onMessage("Select a scene with spoken dialogue before rendering.");
-      return;
-    }
-    if (speech.some(seg => !seg.speaker_id)) {
-      onMessage("Assign the selected dialogue speaker before rendering.");
-      return;
-    }
-    if (speech.length > 256 || speech.reduce((length, seg) => length + seg.spoken_text.length, 0) > 100_000) {
-      onMessage("Render limit: 256 spoken segments and 100,000 characters. Choose a scene or split the story.");
+    let selection;
+    try {
+      selection = resolveRenderSelection(document, { sceneId, segmentId: forceSegmentId, forceAll });
+    } catch (error) {
+      onMessage(errorString(error));
       return;
     }
     const id = crypto.randomUUID();
@@ -148,6 +137,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setJobId(id);
     setProgress({ done: 0, total: 0 });
     setRendering(true);
+    setRenderPlan(null);
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     setAudio(null);
     onMessage("Generating speech locally, with one model voice and per-character supported controls. Cancellation is cooperative.");
@@ -155,11 +145,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const result = await invoke<AudioResult>("render_story_v2", {
         project: document,
         jobId: id,
-        selectedSceneIds: sceneId ? [sceneId] : null,
-        selectedSegmentIds: forceSegmentId ? [forceSegmentId] : null,
-        forceSegmentIds: forceAll
-          ? document.scenes.flatMap(scene => scene.segments.filter(seg => seg.kind === "speech").map(seg => seg.id))
-          : forceSegmentId ? [forceSegmentId] : null,
+        ...selection,
       });
       if (revision !== renderRevision.current) {
         await invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
@@ -176,18 +162,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       setRendering(false);
     }
   }
-  async function inspectRenderPlan() {
+  async function inspectRenderPlan(sceneId?: string) {
     if (rendering || planBusy) return;
     const revision = renderRevision.current;
     setPlanBusy(true);
     setRenderPlan(null);
     try {
+      const selection = resolveRenderSelection(document, { sceneId });
       const result = await invoke<RenderPlan>("preflight_render", {
-        project: document, selectedSceneIds: null,
-        selectedSegmentIds: null, forceSegmentIds: null,
+        project: document, ...selection,
       });
       if (revision !== renderRevision.current) return;
-      setRenderPlan(result);
+      const scope = sceneId
+        ? document.scenes.find(scene => scene.id === sceneId)?.title ?? "Selected scene"
+        : "Full story";
+      setRenderPlan({ ...result, scope });
       onMessage("Model-free plan reviewed: no model loaded and no speech duration or voice quality assumed.");
     } catch (error) {
       if (revision === renderRevision.current) {
@@ -424,13 +413,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             onClick={() => void startRender(undefined, undefined, true)}>Force re-render story</button>
           {activeScene && <button className="secondary-button" disabled={busy || rendering}
             onClick={() => void startRender(activeScene.id)}>Generate selected scene</button>}
+          {activeScene && <button className="secondary-button"
+            disabled={busy || rendering || planBusy}
+            onClick={() => void inspectRenderPlan(activeScene.id)}>
+            Inspect selected scene (no model)
+          </button>}
           <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
           <button className="secondary-button" disabled={loadingHistory}
             onClick={() => void showRenderHistory()}>
             {loadingHistory ? "Reading history…" : "Recent render history"}
           </button>
           {renderPlan && <p className="helper" role="status">
-            Preflight: {renderPlan.segments} dialogue lines · {renderPlan.chunks} model chunks ·
+            {renderPlan.scope} preflight: {renderPlan.segments} dialogue lines · {renderPlan.chunks} model chunks ·
             {" "}{renderPlan.spoken_characters} spoken characters (after pronunciation rules).
             No model loaded; duration, Hindi naturalness and distinct voices are not verified.
           </p>}
@@ -485,7 +479,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="scene-navigation" aria-label="Scenes">
           {document.scenes.map(scene => (
             <button key={scene.id} className={"quiet-button " + (activeScene?.id === scene.id ? "selected-scene" : "")}
-              onClick={() => setSelectedScene(scene.id)}>{scene.title}</button>
+              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>{scene.title}</button>
           ))}
         </div>
         {activeScene ? (
