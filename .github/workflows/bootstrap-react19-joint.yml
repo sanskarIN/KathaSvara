@@ -1,0 +1,42 @@
+name: One-time React 19 joint migration validation (dev branch only)
+on:
+  push:
+    branches: [dev/post-v0.5.0-react19-combined]
+    paths:
+      - ".github/workflows/bootstrap-react19-joint.yml"
+permissions:
+  contents: write
+jobs:
+  validate-joint-react:
+    if: github.repository == 'sanskarIN/KathaSvara' && github.ref == 'refs/heads/dev/post-v0.5.0-react19-combined'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/post-v0.5.0-react19-combined
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Update React runtime and types together
+        working-directory: apps/desktop
+        run: |
+          npm install --save --no-audit --no-fund react@^19.3.1 react-dom@^19.3.1
+          npm install --save-dev --no-audit --no-fund @types/react@^19.3.0 @types/react-dom@^19.3.0
+          npm ci --no-audit --no-fund
+          npm ls react react-dom @types/react @types/react-dom --depth=0
+      - name: Regression and security gate
+        working-directory: apps/desktop
+        run: |
+          npm run test
+          npm run build
+          npm audit --audit-level=high
+      - name: Commit only migrated npm files to feature branch
+        run: |
+          set -euo pipefail
+          git config user.name "KathaSvara Development"
+          git config user.email "sanskarin@outlook.in"
+          git add apps/desktop/package.json apps/desktop/package-lock.json
+          git diff --cached --quiet && exit 0
+          git commit -m "build(deps): upgrade React and React DOM together to 19.3 with matching types"
+          git push origin HEAD:dev/post-v0.5.0-react19-combined
