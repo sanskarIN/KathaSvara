@@ -3,6 +3,7 @@
 ## v0.4.2 — Early development (not published)
 
 - Begin a privacy-preserving model-free render-plan inspection path with selected segment validation and counts computed after Hindi pronunciation rules. No audio-quality claims or release yet.
+- Share one pre-synthesis, in-memory Hindi effective-text/chunk snapshot between model-free preflight and actual render, preventing duplicate glossary passes and preserving summary privacy. Add model-free regressions for unchanged scripts and targeted retries.
 
 ## [v0.4.1 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.1)
 
