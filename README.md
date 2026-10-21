@@ -6,7 +6,7 @@
 
 ## Post-v0.5.0 development (not a new release)
 
-For reproducible source builds, `apps/desktop/package-lock.json` now pins the frontend dependency graph, and React/Windows candidate checks install via `npm ci` under Node 22. This does **not** update the already-published v0.5.0 executable or establish that dependencies are vulnerability-free. Review the [npm maintenance policy](docs/maintenance/npm-dependencies.md) and [security-update tracking issue #33](https://github.com/sanskarIN/KathaSvara/issues/33).
+Source builds now use **Vite 8.3.5, React plugin 6.1.2 and Vitest 5.0.5** with a regenerated npm v3 lockfile and Node 22 `npm ci`. The migrated suite passed all 55 React tests, a TypeScript build, and an npm security audit reporting zero known vulnerabilities at check time. Active frontend CI checks high-severity npm advisories and weekly Dependabot updates are configured. This does **not** update the already-published v0.5.0 executable, certify long-term dependency security, or prove real Hindi narration quality. Review the [npm maintenance policy](docs/maintenance/npm-dependencies.md) and [security-update tracking issue #33](https://github.com/sanskarIN/KathaSvara/issues/33).
 
 ## v0.5.0 experimental pre-release — scene-by-scene readiness checks
 

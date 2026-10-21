@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased — post-v0.5.0 dependency maintenance
+## Unreleased — post-v0.5.0 build-system maintenance
 
+- Migrate source-build tooling from Vite 5.4.21 / React plugin 4.7.0 / Vitest 2.1.9 to exact Vite 8.3.5 / React plugin 6.1.2 / Vitest 5.0.5; regenerate npm lockfile (159 entries) and run 55 React tests, TS build and npm audit on Node 22. Add high-severity npm audit to CI, lockfile cache and weekly Dependabot configuration for npm/Actions. Keep changes unreleased, with original tag/assets untouched.
 - Commit npm v3 lockfile generated and verified in GitHub Actions with Node 22, and use `npm ci` for React CI and the Windows executable candidate. The one-time branch-only bootstrap workflow was removed immediately after use. Preserve previously published prerelease assets and workflows; no model/Windows acceptance claims. See [npm dependency policy](docs/maintenance/npm-dependencies.md).
 
 
