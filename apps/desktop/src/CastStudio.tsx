@@ -22,6 +22,24 @@ type RenderPlan = {
   distinct_voices_verified: false;
 };
 
+type ProductionAudit = {
+  total_scenes: number;
+  ready_scenes: number;
+  full_story_ready: boolean;
+  full_story_reason: "ready" | "no_dialogue" | "unassigned_speaker" | "over_limit" | "needs_review";
+  full_story_chunks: number;
+  scenes: Array<{
+    scene_id: string;
+    ready: boolean;
+    reason: "ready" | "no_dialogue" | "unassigned_speaker" | "over_limit" | "needs_review";
+    segments: number;
+    chunks: number;
+  }>;
+  model_loaded: false;
+  audio_verified: false;
+  distinct_voices_verified: false;
+};
+
 type RenderHistory = {
   job_id: string;
   story_id: string;
@@ -54,6 +72,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [history, setHistory] = useState<RenderHistory[] | null>(null);
   const [renderPlan, setRenderPlan] = useState<(RenderPlan & { scope: string }) | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
+  const [audit, setAudit] = useState<ProductionAudit | null>(null);
+  const [auditBusy, setAuditBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const renderRevision = useRef(0);
@@ -75,6 +95,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setAudio(null);
     setHistory(null);
     setRenderPlan(null);
+    setAudit(null);
   }, [document]);
   useEffect(() => {
     if (!jobId) return;
@@ -184,6 +205,27 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       }
     } finally {
       setPlanBusy(false);
+    }
+  }
+
+  async function inspectProductionReadiness() {
+    if (rendering || auditBusy) return;
+    const revision = renderRevision.current;
+    setAuditBusy(true);
+    setAudit(null);
+    try {
+      const result = await invoke<ProductionAudit>("audit_production", {
+        project: document,
+      });
+      if (revision !== renderRevision.current) return;
+      setAudit(result);
+      onMessage("Model-free production audit complete. Review each scene before loading the speech model.");
+    } catch (error) {
+      if (revision === renderRevision.current) {
+        onMessage("Production audit failed: " + errorString(error));
+      }
+    } finally {
+      setAuditBusy(false);
     }
   }
 
@@ -418,11 +460,34 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             onClick={() => void inspectRenderPlan(activeScene.id)}>
             Inspect selected scene (no model)
           </button>}
+          <button className="secondary-button"
+            disabled={busy || rendering || auditBusy || !document.scenes.length}
+            onClick={() => void inspectProductionReadiness()}>
+            {auditBusy ? "Checking scenes…" : "Audit scene readiness (no model)"}
+          </button>
           <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
           <button className="secondary-button" disabled={loadingHistory}
             onClick={() => void showRenderHistory()}>
             {loadingHistory ? "Reading history…" : "Recent render history"}
           </button>
+          {audit && <section className="inspection-panel" aria-label="Production readiness audit">
+            <strong>Hindi production readiness · model-free</strong>
+            <p>{audit.ready_scenes} / {audit.total_scenes} scenes ready for a render attempt.
+              {" "}Entire story: {audit.full_story_ready
+                ? `plan valid (${audit.full_story_chunks} chunks)`
+                : `needs review (${audit.full_story_reason.replaceAll("_", " ")})`}.
+            </p>
+            <ul>{audit.scenes.map(item => (
+              <li key={item.scene_id}>
+                <strong>{document.scenes.find(scene => scene.id === item.scene_id)?.title ?? "Scene"}</strong>
+                {" · "}{item.ready ? "ready to attempt" : item.reason.replaceAll("_", " ")}
+                {" · "}{item.segments} speech lines
+                {item.ready ? ` · ${item.chunks} chunks` : ""}
+              </li>
+            ))}</ul>
+            <p className="helper">No model loaded and no speech or distinct voices verified.
+              Check local model setup and listen to every generated WAV before publishing.</p>
+          </section>}
           {renderPlan && <p className="helper" role="status">
             {renderPlan.scope} preflight: {renderPlan.segments} dialogue lines · {renderPlan.chunks} model chunks ·
             {" "}{renderPlan.spoken_characters} spoken characters (after pronunciation rules).
