@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kathasvara-inference"
-version = "0.4.1"
+version = "0.4.2"
 description = "Offline-first Hindi storytelling speech adapter"
 requires-python = ">=3.11"
 license = {text = "MPL-2.0"}

@@ -1,4 +1,4 @@
-KathaSvara v0.4.1 — Unsigned Windows x64 experimental developer executable
+KathaSvara v0.4.2 — Unsigned Windows x64 experimental developer executable
 ==================================================================
 
 THIS IS NOT A COMPLETE INSTALLER OR A RELEASE-READY APPLICATION.
@@ -47,7 +47,7 @@ No voice model, generated sample, or commercial voice-clone asset is bundled.
 KathaSvara app sources are MPL-2.0; third-party dependencies/checkpoints have
 separate license terms.
 
-The guarded v0.4.1 release workflow can publish an experimental developer pre-release
+The guarded v0.4.2 release workflow can publish an experimental developer pre-release
 only after tests, executable compilation and SHA-256 verification succeed.
 This does NOT verify interactive launch or real Hindi narration on a clean machine.
 Manual playback, project persistence, save/export, source compatibility and audio

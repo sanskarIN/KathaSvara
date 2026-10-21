@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.2 — Early development (not published)
+## v0.4.2 — Experimental developer prerelease source (publication gated)
 
 - Enable explicit full-story or selected-scene model-free preflight with a shared typed render scope, preserving scene/line retry parity and private script text.
 - Reject over-budget cached WAVs by header frame count before loading PCM; skip symlinked cache aliases before metadata inspection. Add model-free tests for both.
