@@ -2,7 +2,7 @@
 
 Thank you for improving accessible Hindi storytelling.
 
-1. Check current issues and the v0.1.0 development acceptance checklist.
+1. Check current issues, especially [manual real-Hindi and Windows acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3), and the [Windows/Hindi acceptance protocol](docs/qa/windows-hindi-acceptance.md). Do not claim model quality from mocked audio tests.
 2. Fork the repository or work in a descriptive feature branch.
 3. Keep changes small, tested and licensed under MPL-2.0 with accurate attributions.
 4. Prefer real speech examples and clear reproducible reports over unsupported quality claims.
