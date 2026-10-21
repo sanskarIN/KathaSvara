@@ -183,4 +183,5 @@ def test_cached_symlink_never_inspected_or_loaded(
     report = render_story(doc, tmp_path / "safe.wav", cache, FakeEngine())
     assert report["segments"]
     assert private.exists()
-    assert entry.is_symlink()
+    assert not entry.is_symlink(), "Safe regeneration should replace only the cache alias."
+    assert entry.is_file()
