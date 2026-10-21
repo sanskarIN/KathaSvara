@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.4.2 — Early development (not published)
+
+- Begin a privacy-preserving model-free render-plan inspection path with selected segment validation and counts computed after Hindi pronunciation rules. No audio-quality claims or release yet.
+
 ## v0.4.1 — Experimental pre-release source
 
 - Reject selected or forced-retry segment IDs outside the chosen scene/line set before model loading instead of silently ignoring requests; respond to pre-load cancellation before doing expensive inference setup.

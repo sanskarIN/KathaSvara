@@ -14,6 +14,7 @@ from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
 from .production import render_story
+from .render_preflight import inspect_render_plan
 from .pronunciation import apply_glossary
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
@@ -113,6 +114,20 @@ def handle(request: dict[str, object]) -> dict[str, object]:
                         "changes": result["changes"],
                     }}
         raise ValueError("Segment does not belong to the selected story.")
+    if request.get("action") == "preflight_render":
+        project = request.get("project")
+        if not isinstance(project, dict):
+            raise TypeError("Preflight requires a story document.")
+        filters: dict[str, set[str] | None] = {}
+        for name in ("selected_scene_ids", "selected_segment_ids", "force_segment_ids"):
+            ids = request.get(name)
+            if ids is not None and (
+                not isinstance(ids, list) or len(ids) > 256 or
+                not all(isinstance(item, str) for item in ids)
+            ):
+                raise TypeError("Preflight selections must be bounded arrays of identifiers.")
+            filters[name] = set(ids) if ids is not None else None
+        return {"ok": True, "result": inspect_render_plan(from_dict(project), **filters)}
     if request.get("action") == "render_story":
         project = request.get("project")
         output = request.get("output")
