@@ -106,6 +106,12 @@ def render_story(
         for seg in scene.segments if seg.kind == "speech"
         and (selected_segment_ids is None or seg.id in selected_segment_ids)
     ]
+    # A requested line cannot silently disappear when a scene filter excludes it.
+    selected_ids = {segment.id for segment, _character in speech}
+    if selected_segment_ids is not None and not selected_segment_ids.issubset(selected_ids):
+        raise ValueError("Selected dialogue is outside the chosen scenes.")
+    if force_segment_ids is not None and not force_segment_ids.issubset(selected_ids):
+        raise ValueError("Forced regeneration must target selected spoken segments.")
     if not speech or len(speech) > MAX_RENDER_SEGMENTS:
         raise ValueError("A render needs 1–256 spoken segments.")
     if sum(len(seg.spoken_text) for seg, _ in speech) > MAX_RENDER_CHARACTERS:
@@ -123,6 +129,8 @@ def render_story(
             if journal_path is not None else nullcontext(None)
         )
         with journal_context as journal:
+            if is_cancelled is not None and is_cancelled():
+                raise RenderCancelled("Render cancelled before model loading.")
             adapter = engine if engine is not None else ChatterboxHindi()
             adapter.load()
             rate = adapter.sample_rate
@@ -175,6 +183,7 @@ def render_story(
                             segment_samples = None
                     if segment_samples is None:
                         parts = []
+                        generated_frames = 0
                         for part_index, chunk in enumerate(chunks):
                             if is_cancelled is not None and is_cancelled():
                                 raise RenderCancelled("Render cancelled between speech chunks.")
@@ -184,6 +193,12 @@ def render_story(
                                 )),
                                 np,
                             ).copy()
+                            # Reject oversized model output before concatenating chunks or
+                            # publishing a potentially huge reusable cache entry.
+                            join_frames = int(rate * 0.12) if part_index else 0
+                            if (samples_total + generated_frames + join_frames + generated.size >
+                                rate * MAX_OUTPUT_SECONDS):
+                                raise ValueError("Render exceeds the 20-minute audio limit.")
                             # Fade to zero at edit boundaries to avoid hard-edge clicks
                             # when appending neighboring chunk waveforms or silence.
                             fade = min(int(rate * 0.008), generated.size // 4)
@@ -191,17 +206,25 @@ def render_story(
                                 generated[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
                                 generated[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
                             if part_index:
-                                parts.append(np.zeros(int(rate * 0.12), dtype=np.float32))
+                                parts.append(np.zeros(join_frames, dtype=np.float32))
                             parts.append(generated)
+                            generated_frames += join_frames + generated.size
                         segment_samples = np.concatenate(parts)
-                        if use_cache:
-                            _atomic_wav(cached, segment_samples, rate, sf)
+                    # Check the spoken frames AND the planned inter-speaker silence
+                    # before caching new audio, so failed long renders cannot fill the cache.
+                    pause_frames = (
+                        int(rate * min(profile.pause_ms, 2000) / 1000)
+                        if index != len(speech) - 1 else 0
+                    )
+                    if (samples_total + segment_samples.size + pause_frames >
+                        rate * MAX_OUTPUT_SECONDS):
+                        raise ValueError("Render exceeds the 20-minute audio limit.")
+                    if not was_cached and use_cache:
+                        _atomic_wav(cached, segment_samples, rate, sf)
                     # Measured duration is derived from generated PCM samples, never estimated from words.
                     measured = float(segment_samples.size) / float(rate)
                     start_frame = samples_total
                     samples_total += segment_samples.size
-                    if samples_total / rate > MAX_OUTPUT_SECONDS:
-                        raise ValueError("Render exceeds the 20-minute audio limit.")
                     output_stream.write(segment_samples)
                     completed.append({
                         "segment_id": seg.id, "speaker_id": seg.speaker_id,
@@ -215,8 +238,7 @@ def render_story(
                         "effective_text": normalized,
                     })
                     if index != len(speech) - 1:
-                        pause = min(profile.pause_ms, 2000)
-                        silence = np.zeros(int(rate * pause / 1000), dtype=np.float32)
+                        silence = np.zeros(pause_frames, dtype=np.float32)
                         output_stream.write(silence)
                         samples_total += silence.size
                     if journal is not None:
