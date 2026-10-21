@@ -72,9 +72,10 @@ def test_rejects_empty_missing_relative_non_wav_and_corrupt_files(tmp_path: Path
         inspect_wav_candidate(tmp_path / "not-wav.txt")
     with pytest.raises(ValueError, match="Cannot open"):
         inspect_wav_candidate(tmp_path / "missing.wav")
+    empty = tmp_path / "empty.wav"
+    empty.touch()
     with pytest.raises(ValueError, match="regular audio"):
-        inspect_wav_candidate(tmp_path / "empty.wav") if (
-            tmp_path / "empty.wav").touch() is None else None
+        inspect_wav_candidate(empty)
     bogus = tmp_path / "bogus.wav"
     bogus.write_bytes(b"not a wave" * 12)
     with pytest.raises(ValueError, match="invalid PCM"):
