@@ -1,0 +1,50 @@
+name: Bootstrap reviewed Vite 8 migration (development branch only)
+
+on:
+  push:
+    branches: [dev/post-v0.5.0-modernize-vite]
+    paths:
+      - ".github/workflows/bootstrap-vite8-migration.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.repository == 'sanskarIN/KathaSvara' && github.ref == 'refs/heads/dev/post-v0.5.0-modernize-vite'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/post-v0.5.0-modernize-vite
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Update only the reviewed Vite, plugin-react and Vitest packages
+        working-directory: apps/desktop
+        run: |
+          node --version
+          npm --version
+          npm install --save-dev --save-exact --no-audit --no-fund vite@8.3.5 @vitejs/plugin-react@6.1.2 vitest@5.0.5
+          node -e 'let p=require("./package-lock.json"); if(p.lockfileVersion!==3 || p.packages["node_modules/vite"].version!=="8.3.5" || p.packages["node_modules/@vitejs/plugin-react"].version!=="6.1.2" || p.packages["node_modules/vitest"].version!=="5.0.5") throw Error("Migrated graph mismatch"); console.log("Dependency graph entries", Object.keys(p.packages).length);'
+          npm ci --no-audit --no-fund
+          npm ls vite vitest @vitejs/plugin-react --depth=0
+      - name: Run actual React and mocked Tauri regression suite
+        working-directory: apps/desktop
+        run: |
+          npm run test
+          npm run build
+      - name: Inspect npm security advisories for migrated full dependency graph
+        working-directory: apps/desktop
+        run: |
+          npm audit --audit-level=high
+      - name: Commit only verified package and lock files to development branch
+        run: |
+          set -euo pipefail
+          git config user.name "KathaSvara Development"
+          git config user.email "sanskarin@outlook.in"
+          git add apps/desktop/package.json apps/desktop/package-lock.json
+          git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+          git commit -m "build(deps): migrate Vite 8, React plugin 6 and Vitest 5 with npm lock"
+          git push origin HEAD:dev/post-v0.5.0-modernize-vite
