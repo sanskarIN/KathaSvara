@@ -1,6 +1,6 @@
 # Windows and Hindi narration acceptance protocol (manual, not yet passed)
 
-**Project:** KathaSvara — experimental desktop. **First reviewed release:** [v0.4.2](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.2). **Tracking:** [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+**Project:** KathaSvara — experimental desktop. **Target experimental pre-release (if published):** [v0.5.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0). **Tracking:** [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
 
 This checklist is deliberately **not an automated pass certificate**. Existing GitHub workflows compile/tests the source and unsigned developer EXE; they do **not** prove that the application launches on a clean Windows machine, that real Chatterbox model weights can be obtained and loaded, or that Hindi speech is natural. Do not close issue #3 or announce a stable release based only on mocked tests or these blank checklists.
 
@@ -8,10 +8,10 @@ This checklist is deliberately **not an automated pass certificate**. Existing G
 
 Use Windows 11 x64 with a supported WebView2 runtime and Python 3.11. Record the OS build, RAM and model-compatible CPU/GPU/VRAM (coarse characteristics only). Do not include local usernames, sensitive file paths, access tokens or machine identifiers in public reports.
 
-Use the developer executable only from the [verified GitHub release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.2) and inspect `README.txt`. Compare SHA-256 using PowerShell:
+Use the developer executable only from the [verified GitHub release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) and inspect `README.txt`. Compare SHA-256 using PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\KathaSvara-v0.4.2-dev-win64.exe
+Get-FileHash -Algorithm SHA256 .\KathaSvara-v0.5.0-dev-win64.exe
 ```
 
 The expected digest is recorded in the release's `SHA256SUMS.txt`. This is an **unsigned, unbundled executable**, not an MSI/NSIS installer; do not bypass a security block or turn off Windows security measures. A clean-machine test must distinguish a refusal to run an unsigned test binary from an actual application defect.
