@@ -17,14 +17,15 @@ from typing import Any
 from .audio_stream import StreamingWav
 from .cache_lock import exclusive_cache_access
 from .engine import ChatterboxHindi, VoiceSettings
-from .hindi import split_for_engine
-from .pronunciation import apply_glossary
 from .render_journal import RenderJournal
+from .render_preflight import (
+    MAX_CHUNKS,
+    MAX_RENDER_CHARACTERS,
+    MAX_RENDER_SEGMENTS,
+    prepare_render_plan,
+)
 from .story import StoryDocument
 
-MAX_RENDER_SEGMENTS = 256
-MAX_RENDER_CHARACTERS = 100_000
-MAX_CHUNKS = 500
 MAX_OUTPUT_SECONDS = 1200
 
 
@@ -75,11 +76,7 @@ def render_story(
     A failure leaves completed cache entries in place for explicit retry.
     The final combined audio is atomically replaced only after successful finish.
     """
-    # Read-only deterministic validation runs before model imports/loading.
-    # Import here to avoid a module initialization cycle with shared render limits.
-    from .render_preflight import inspect_render_plan
-
-    inspect_render_plan(
+    plan = prepare_render_plan(
         doc, selected_scene_ids=selected_scene_ids,
         selected_segment_ids=selected_segment_ids,
         force_segment_ids=force_segment_ids,
@@ -88,42 +85,7 @@ def render_story(
         raise ValueError("Choose a new absolute WAV destination.")
     if not cache_dir.is_absolute() or cache_dir.resolve() == output.resolve().parent:
         raise ValueError("Use a dedicated absolute cache directory.")
-    if any(
-        seg.speaker_id is None for scene in doc.scenes
-        if selected_scene_ids is None or scene.id in selected_scene_ids
-        for seg in scene.segments
-        if seg.kind == "speech" and (
-            selected_segment_ids is None or seg.id in selected_segment_ids
-        )
-    ):
-        raise ValueError("Assign every unknown speaker manually before rendering.")
-    available_scenes = {scene.id for scene in doc.scenes}
-    if selected_scene_ids is not None and not selected_scene_ids.issubset(available_scenes):
-        raise ValueError("Requested scene does not belong to the story.")
-    available_segment_ids = {
-        seg.id for scene in doc.scenes for seg in scene.segments if seg.kind == "speech"
-    }
-    if selected_segment_ids is not None and not selected_segment_ids.issubset(
-        available_segment_ids
-    ):
-        raise ValueError("Requested dialogue segment does not belong to this story.")
-    speech = [
-        (seg, next(char for char in doc.characters if char.id == seg.speaker_id))
-        for scene in doc.scenes
-        if selected_scene_ids is None or scene.id in selected_scene_ids
-        for seg in scene.segments if seg.kind == "speech"
-        and (selected_segment_ids is None or seg.id in selected_segment_ids)
-    ]
-    # A requested line cannot silently disappear when a scene filter excludes it.
-    selected_ids = {segment.id for segment, _character in speech}
-    if selected_segment_ids is not None and not selected_segment_ids.issubset(selected_ids):
-        raise ValueError("Selected dialogue is outside the chosen scenes.")
-    if force_segment_ids is not None and not force_segment_ids.issubset(selected_ids):
-        raise ValueError("Forced regeneration must target selected spoken segments.")
-    if not speech or len(speech) > MAX_RENDER_SEGMENTS:
-        raise ValueError("A render needs 1–256 spoken segments.")
-    if sum(len(seg.spoken_text) for seg, _ in speech) > MAX_RENDER_CHARACTERS:
-        raise ValueError("A render exceeds the 100000-character limit.")
+    speech = plan.lines
     try:
         import numpy as np
         import soundfile as sf
@@ -146,26 +108,18 @@ def render_story(
                 raise RuntimeError("Unsupported sample rate.")
             cache_dir.mkdir(parents=True, exist_ok=True)
             completed: list[dict[str, Any]] = []
-            chunk_count = 0
+            chunk_count = plan.chunk_count
             samples_total = 0
             # The composer holds only the current dialogue segment; no full-story array.
             with StreamingWav(output, rate, sf, rate * MAX_OUTPUT_SECONDS) as output_stream:
-                for index, (seg, character) in enumerate(speech):
+                for index, line in enumerate(speech):
                     if is_cancelled is not None and is_cancelled():
                         raise RenderCancelled("Render cancelled between dialogue segments.")
+                    seg, character = line.segment, line.character
                     profile = character.voice
-                    profile.validate()
-                    # Effective text is reviewed separately; source and spoken_text are immutable here.
-                    # Unrelated rules do not affect content-based cache fingerprints.
-                    normalized = apply_glossary(seg.spoken_text, doc.pronunciation_glossary)["text"]
-                    if not normalized:
-                        raise ValueError("Spoken dialogue cannot be empty.")
-                    chunks = split_for_engine(normalized)
-                    if not chunks or len(chunks) > 40:
-                        raise ValueError("Segment requires too many speech chunks.")
-                    chunk_count += len(chunks)
-                    if chunk_count > MAX_CHUNKS:
-                        raise ValueError("Too many speech chunks in one render.")
+                    # Use the exact text and chunk snapshot checked by preflight:
+                    # no second glossary pass or divergent re-chunking.
+                    normalized, chunks = line.effective_text, line.chunks
                     # Cache key represents model ID and all *supported* settings only.
                     # The model ID should incorporate the exact revision when known.
                     fingerprint = json.dumps({
