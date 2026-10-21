@@ -6,6 +6,9 @@
 
 ## v0.5.0 development — scene-by-scene readiness checks
 
+Also under active development: **Retry current full story** (only after explicit confirmation from an interrupted/failed/cancelled history record, with a new job and unchanged cache reuse) and an **optional per-WAV human QA checklist**. The checklist does not persist or automatically verify Hindi pronunciation or distinct character voices. Subtitle review can be marked only after exporting SRT for the current WAV. See [v0.5.0 development notes](docs/releases/v0.5.0-development.md).
+
+
 New **Export privacy-safe audit JSON** is available after a user runs the model-free scene readiness audit. It saves an explicitly requested JSON report of scene numbers, counts and fixed readiness codes; no script content, character names, scene/story IDs, model paths or recordings are exported. The native exporter validates the schema, rejects invalid claims and refuses to overwrite existing files. These are development capabilities, **not** real-Hindi voice testing or a new v0.5.0 release. See [development details](docs/releases/v0.5.0-development.md).
 
 
