@@ -19,6 +19,8 @@ use tauri::Manager;
 use uuid::Uuid;
 
 mod wav_file;
+mod production_manifest;
+use production_manifest::write_production_manifest;
 use wav_file::inspect_wav_file;
 
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
@@ -1210,11 +1212,16 @@ fn export_subtitles(destination: String, content: String) -> Result<(), String> 
     write_srt(Path::new(&destination), &content)
 }
 
+#[tauri::command]
+fn export_production_manifest(destination: String, content: String) -> Result<(), String> {
+    write_production_manifest(Path::new(&destination), &content)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");

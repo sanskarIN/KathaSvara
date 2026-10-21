@@ -6,6 +6,9 @@
 
 ## v0.5.0 development — scene-by-scene readiness checks
 
+New **Export privacy-safe audit JSON** is available after a user runs the model-free scene readiness audit. It saves an explicitly requested JSON report of scene numbers, counts and fixed readiness codes; no script content, character names, scene/story IDs, model paths or recordings are exported. The native exporter validates the schema, rejects invalid claims and refuses to overwrite existing files. These are development capabilities, **not** real-Hindi voice testing or a new v0.5.0 release. See [development details](docs/releases/v0.5.0-development.md).
+
+
 New in the **unreleased** v0.5.0 development branch: a no-model production audit inspects every Hindi scene independently and reports structural issues such as missing speaker assignments, scene size limits and stage-direction-only scenes. It separately reports whether the **whole story** can be rendered in one bounded job. Only aggregate counts and fixed reason codes cross the Python/Rust IPC; scene names stay in the local UI. This is not proof of real Hindi speech quality. See [v0.5.0 development plan](docs/releases/v0.5.0-development.md).
 
 ## v0.4.2 experimental developer preview — Hindi preflight and cache bounds

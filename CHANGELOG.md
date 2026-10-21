@@ -2,6 +2,8 @@
 
 ## v0.5.0 — Early development (not released)
 
+- Add opt-in, strictly bounded privacy-safe JSON production manifest export. Export only scene numbers, aggregate render-plan counts and fixed readiness codes, with no script text, actor names, IDs or voice settings; Rust rejects extra fields and existing output files.
+
 - Introduce model-free, per-scene Hindi production readiness audit with aggregate counts and privacy-safe reason codes; report whole-story plan readiness separately from individually valid scenes.
 - Wire the read-only audit through Python CLI, Rust/Tauri IPC and CastStudio and add model-free regression tests; no genuine speech or Windows acceptance claims.
 
