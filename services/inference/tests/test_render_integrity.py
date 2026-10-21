@@ -103,3 +103,21 @@ def test_inter_segment_pause_is_checked_before_caching(
         )
     assert not (tmp_path / "pause.wav").exists()
     assert list((tmp_path / "cache").glob("*.wav")) == []
+
+
+def test_valid_single_line_force_retry_regenerates_selected_audio(tmp_path: Path) -> None:
+    doc = sample_doc()
+    line_id = doc.scenes[0].segments[0].id
+    cache = tmp_path / "cache"
+    # Seed a valid segment cache from a complete prior render.
+    render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
+    mock = FakeEngine()
+    result = render_story(
+        doc, tmp_path / "one-line.wav", cache, mock,
+        selected_segment_ids={line_id}, force_segment_ids={line_id},
+    )
+    assert len(mock.calls) == 1
+    assert len(result["segments"]) == 1
+    assert result["segments"][0]["segment_id"] == line_id
+    assert result["segments"][0]["cached"] is False
+    assert (tmp_path / "one-line.wav").is_file()
