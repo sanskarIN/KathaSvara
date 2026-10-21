@@ -26,7 +26,15 @@ The package-lock was initially generated with `npm install --package-lock-only -
 3. Run `npm ci --no-audit --no-fund`, `npm run test`, `npm run build` and the GitHub Windows Rust / candidate EXE checks. A lockfile that passes tests on one machine is not proof of cross-OS runtime compatibility or of clean Windows usage.
 4. Check Dependabot and GitHub security findings. A successful Dependabot update or `npm audit` report is an input for triage, **not** a blanket security guarantee. Review major version upgrades and any plugin/build ABI changes separately.
 
-The initial resolved graph includes **Vite 5.4.21** within the previously declared `^5.4.0` range. This maintenance batch **does not** make an untested major Vite, Vitest or Tauri upgrade. Audit findings or future Dependabot PRs require separate compatibility review. See [issue #33](https://github.com/sanskarIN/KathaSvara/issues/33).
+## Reviewed 2026-10-21 Vite 8 migration (unreleased main-source changes)
+
+The development source now pins **Vite 8.3.5**, **@vitejs/plugin-react 6.1.2** and **Vitest 5.0.5** as exact direct development dependencies, recorded in the committed npm v3 lockfile. The migrated tree contained **159 entries** in the GitHub Node 22 bootstrap. The dedicated GitHub job used `npm ci`, ran all **55 React/Vitest tests** and the TypeScript/Vite build and obtained **`npm audit --audit-level=high`: 0 known reported vulnerabilities** at verification time. It is not a guarantee against future vulnerabilities. The temporary contents-write migration workflow was deleted before merge.
+
+The Vite 8 ecosystem replaces Rollup/esbuild with Rolldown/Oxc internally, so tests and the actual Windows Tauri unsigned EXE build must both pass before merging. Vitest 5 changes its default `clearMocks` behavior; integration tests explicitly reset mocks and remain part of CI. The app's configured Vite dev server continues listening only on **127.0.0.1:1420**, not on a public interface; do not loosen this in an update.
+
+Active CI now runs `npm audit --audit-level=high` after `npm ci`; Dependabot is configured weekly for npm and GitHub Actions. A future registry advisory may cause audit CI to fail deliberately. Evaluate advisories rather than automatically disabling the gate. Follow [issue #33](https://github.com/sanskarIN/KathaSvara/issues/33) for evidence of a successful actual Dependabot update and any remaining dependency checks.
+
+The **published v0.5.0 tag and unsigned developer EXE are immutable** and still contain the source/build versions used at their original publication; these new Vite 8 changes are main-branch development **only**, not a new release. 
 
 ## Release immutability and limitations
 
