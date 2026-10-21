@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import struct
 import wave
 from pathlib import Path
 
@@ -37,6 +38,14 @@ def test_structural_wav_metadata_and_sha_have_no_private_paths(tmp_path: Path) -
     assert result["model_loaded"] is False
     assert result["hindi_listening_verified"] is False
     assert result["distinct_voices_verified"] is False
+    assert result["level_hints"] == {
+        "peak_dbfs": None,
+        "rms_dbfs": None,
+        "near_silence_hint": True,
+        "possible_clipping_hint": False,
+        "clipped_sample_percentage": 0.0,
+        "signal_review_required": True,
+    }
     assert "गोपनीय" not in str(result)
     assert str(tmp_path) not in str(result)
 
@@ -109,3 +118,75 @@ def test_failed_cli_never_echoes_private_input_paths(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "private-credential-path" not in captured.err
+
+
+def pcm16_file(path: Path, values: list[int], rate: int = 8000) -> Path:
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(struct.pack("<" + "h" * len(values), *values))
+    return path
+
+
+def test_moderate_signal_does_not_trigger_quiet_or_clipping_hints(tmp_path: Path) -> None:
+    path = pcm16_file(tmp_path / "normal.wav", [8000, -8000] * 500)
+    result = inspect_wav_candidate(path)
+    hint = result["level_hints"]
+    assert hint["peak_dbfs"] == -12.25
+    assert hint["rms_dbfs"] == -12.25
+    assert hint["near_silence_hint"] is False
+    assert hint["possible_clipping_hint"] is False
+    assert hint["signal_review_required"] is False
+    assert hint["clipped_sample_percentage"] == 0.0
+    assert result["hindi_listening_verified"] is False
+
+
+def test_exact_clip_threshold_is_a_hint_not_a_speech_failure(tmp_path: Path) -> None:
+    # Exactly one percent full-scale samples: warning only, not an invalid WAV.
+    path = pcm16_file(tmp_path / "hard-clip.wav", [32767] * 10 + [5000] * 990)
+    result = inspect_wav_candidate(path)
+    assert result["structure_valid"] is True
+    assert result["level_hints"]["peak_dbfs"] == -0.0
+    assert result["level_hints"]["clipped_sample_percentage"] == 1.0
+    assert result["level_hints"]["possible_clipping_hint"] is True
+    assert result["level_hints"]["near_silence_hint"] is False
+    assert result["human_review_required"] is True
+
+
+def test_negative_pcm_full_scale_and_single_saturation_are_counted(tmp_path: Path) -> None:
+    path = pcm16_file(tmp_path / "negative.wav", [-32768] * 100)
+    result = inspect_wav_candidate(path)
+    assert result["level_hints"]["peak_dbfs"] == 0.0
+    assert result["level_hints"]["rms_dbfs"] == 0.0
+    assert result["level_hints"]["clipped_sample_percentage"] == 100.0
+    assert result["level_hints"]["possible_clipping_hint"] is True
+
+
+def test_quiet_nonzero_pcm_is_suspicious_but_not_silence(tmp_path: Path) -> None:
+    path = pcm16_file(tmp_path / "low-level.wav", [1, -1] * 500)
+    hint = inspect_wav_candidate(path)["level_hints"]
+    assert hint["peak_dbfs"] == -90.31
+    assert hint["rms_dbfs"] == -90.31
+    assert hint["near_silence_hint"] is True
+    assert hint["possible_clipping_hint"] is False
+    assert hint["signal_review_required"] is True
+
+
+def test_statistics_handle_boundaries_between_streaming_chunks(tmp_path: Path) -> None:
+    # >8192 samples: numbers must be accumulated, not overwritten per chunk.
+    path = pcm16_file(tmp_path / "stream.wav", [2000] * 8192 + [-4000] * 8192)
+    hint = inspect_wav_candidate(path)["level_hints"]
+    assert hint["peak_dbfs"] == -18.27
+    assert hint["near_silence_hint"] is False
+    assert hint["clipped_sample_percentage"] == 0.0
+    assert hint["signal_review_required"] is False
+
+
+def test_private_wav_name_absent_even_when_level_hints_are_present(tmp_path: Path) -> None:
+    path = pcm16_file(tmp_path / "secret-voice-sample.wav", [1234] * 20)
+    result = inspect_wav_candidate(path)
+    assert "secret-voice-sample" not in json.dumps(result)
+    assert "file_path" not in result
+    assert result["model_loaded"] is False
+    assert result["distinct_voices_verified"] is False

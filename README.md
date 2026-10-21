@@ -6,6 +6,9 @@
 
 ## v0.5.0 development — scene-by-scene readiness checks
 
+Unreleased WAV acceptance tooling can now flag unusually quiet recordings or many full-scale samples using bounded PCM statistics, without running a voice model. The warnings are diagnostic hints only; actual Hindi listening and clean-machine tests remain open in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). See [offline WAV inspection](docs/qa/offline-wav-inspection.md).
+
+
 New validation work includes **jsdom-based React interaction tests** of the desktop story controls using a mocked Tauri bridge. They exercise selected-scene rendering, measured SRT export, privacy-safe readiness reporting, stale-dialog protection and explicit recovery retry without downloading speech models. They do **not** verify real Hindi synthesis or a Windows desktop launch. Follow the [manual Windows and Hindi narration acceptance protocol](docs/qa/windows-hindi-acceptance.md) for evidence needed before any stable release.
 
 

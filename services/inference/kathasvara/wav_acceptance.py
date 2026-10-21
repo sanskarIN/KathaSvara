@@ -9,14 +9,41 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import stat
 import sys
 import wave
+from array import array
 from pathlib import Path
 
 MAX_WAV_BYTES = 512 * 1024 * 1024
 MAX_SECONDS = 1200
+# Human listening remains required. These are only conservative level warnings.
+QUIET_RMS_DBFS = -60.0
+CLIPPING_SAMPLE_FRACTION = 0.01
+
+
+def _dbfs(amplitude: float) -> float | None:
+    """Return null for digital silence rather than reporting -infinity in JSON."""
+    return round(20 * math.log10(amplitude / 32768.0), 2) if amplitude > 0 else None
+
+
+def _level_hints(*, peak: int, squared_sum: int, clipped: int, frames: int) -> dict[str, object]:
+    rms = math.sqrt(squared_sum / frames)
+    rms_dbfs = _dbfs(rms)
+    quiet = rms_dbfs is None or rms_dbfs <= QUIET_RMS_DBFS
+    possible_clipping = clipped / frames >= CLIPPING_SAMPLE_FRACTION
+    return {
+        "peak_dbfs": _dbfs(peak),
+        "rms_dbfs": rms_dbfs,
+        "near_silence_hint": quiet,
+        "possible_clipping_hint": possible_clipping,
+        "clipped_sample_percentage": round(100 * clipped / frames, 3),
+        # A simple amplitude check is not a signal classifier. It is only an
+        # invitation to listen to the WAV, never evidence of Hindi quality.
+        "signal_review_required": quiet or possible_clipping,
+    }
 
 
 def inspect_wav_candidate(path: Path) -> dict[str, object]:
@@ -47,17 +74,30 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                 # Header frame counts can lie when the file is truncated. Read
                 # in bounded chunks to confirm all claimed PCM samples exist.
                 seen = 0
+                squared_sum = 0
+                peak = 0
+                clipped = 0
                 while True:
                     samples = wav.readframes(8192)
                     if not samples:
                         break
                     if len(samples) % 2:
                         raise ValueError("PCM16 data contains a partial sample.")
-                    seen += len(samples) // 2
+                    pcm = array("h")
+                    pcm.frombytes(samples)
+                    if sys.byteorder != "little":
+                        pcm.byteswap()
+                    seen += len(pcm)
                     if seen > frames:
                         raise ValueError("WAV contains more frames than its declared data.")
+                    squared_sum += sum(value * value for value in pcm)
+                    peak = max(peak, max(abs(value) for value in pcm))
+                    clipped += sum(abs(value) >= 32767 for value in pcm)
                 if seen != frames:
                     raise ValueError("WAV audio is truncated or the frame count is incorrect.")
+                levels = _level_hints(
+                    peak=peak, squared_sum=squared_sum, clipped=clipped, frames=seen,
+                )
         except wave.Error as exc:
             raise ValueError("WAV contains an unsupported or invalid PCM header.") from exc
         raw.seek(0)
@@ -77,6 +117,7 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
         "duration_seconds": round(frames / rate, 3),
         "file_bytes": info.st_size,
         "sha256": digest.hexdigest(),
+        "level_hints": levels,
         "model_loaded": False,
         "hindi_listening_verified": False,
         "distinct_voices_verified": False,
