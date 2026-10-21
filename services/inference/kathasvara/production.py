@@ -124,20 +124,39 @@ def render_story(
                     }, sort_keys=True, ensure_ascii=False)
                     key = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
                     cached = cache_dir / f"{key}.wav"
+                    # Reserve the next silence before reading a reusable WAV into
+                    # memory. An oversized valid cache entry must not cause a
+                    # large allocation when the remaining story is nearly full.
+                    pause_frames = (
+                        int(rate * min(profile.pause_ms, 2000) / 1000)
+                        if index != len(speech) - 1 else 0
+                    )
+                    remaining_frames = rate * MAX_OUTPUT_SECONDS - samples_total - pause_frames
+                    if remaining_frames <= 0:
+                        raise ValueError("Render exceeds the 20-minute audio limit.")
                     segment_samples = None
                     was_cached = False
-                    if use_cache and cached.exists() and seg.id not in (force_segment_ids or set()):
+                    cached_over_budget = False
+                    if (use_cache and not cached.is_symlink() and cached.exists()
+                        and seg.id not in (force_segment_ids or set())):
                         try:
                             info = sf.info(str(cached))
-                            if (not cached.is_symlink() and info.format == "WAV" and
-                                info.subtype == "PCM_16" and info.channels == 1 and
-                                info.samplerate == rate and 0 < info.frames <= rate * MAX_OUTPUT_SECONDS):
-                                candidate, _ = sf.read(str(cached), dtype="float32", always_2d=False)
-                                segment_samples = _samples(candidate, np)
-                                was_cached = True
+                            if (info.format == "WAV" and info.subtype == "PCM_16" and
+                                info.channels == 1 and info.samplerate == rate and
+                                0 < info.frames <= rate * MAX_OUTPUT_SECONDS):
+                                if info.frames > remaining_frames:
+                                    cached_over_budget = True
+                                else:
+                                    candidate, _ = sf.read(
+                                        str(cached), dtype="float32", always_2d=False,
+                                    )
+                                    segment_samples = _samples(candidate, np)
+                                    was_cached = True
                         except (OSError, RuntimeError, ValueError):
                             # A corrupt cache is never used as valid speech.
                             segment_samples = None
+                    if cached_over_budget:
+                        raise ValueError("Render exceeds the 20-minute audio limit.")
                     if segment_samples is None:
                         parts = []
                         generated_frames = 0
@@ -169,12 +188,7 @@ def render_story(
                         segment_samples = np.concatenate(parts)
                     # Check the spoken frames AND the planned inter-speaker silence
                     # before caching new audio, so failed long renders cannot fill the cache.
-                    pause_frames = (
-                        int(rate * min(profile.pause_ms, 2000) / 1000)
-                        if index != len(speech) - 1 else 0
-                    )
-                    if (samples_total + segment_samples.size + pause_frames >
-                        rate * MAX_OUTPUT_SECONDS):
+                    if segment_samples.size > remaining_frames:
                         raise ValueError("Render exceeds the 20-minute audio limit.")
                     if not was_cached and use_cache:
                         _atomic_wav(cached, segment_samples, rate, sf)
