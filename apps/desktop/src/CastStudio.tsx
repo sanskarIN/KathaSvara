@@ -5,6 +5,10 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
 import { buildDialogueSrt } from "./lib/subtitles";
 import { resolveRenderSelection } from "./lib/render_selection";
+import {
+  canOfferManualRetry, recordSubtitleExport, reviewForAudio, reviewProgress,
+  updateAudioReview, type AudioReview, type ReviewStep,
+} from "./lib/production_review";
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import PronunciationStudio from "./PronunciationStudio";
 import {
@@ -59,6 +63,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [auditBusy, setAuditBusy] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
+  // Never persisted or transferred to the model: only manual QA for the current WAV.
+  const [review, setReview] = useState<AudioReview | null>(null);
   const renderRevision = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const currentJob = useRef<string | null>(null);
@@ -76,6 +82,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     setAudio(null);
+    setReview(null);
     setHistory(null);
     setRenderPlan(null);
     setAudit(null);
@@ -93,6 +100,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (jobId) void invoke("cancel_story_render", { jobId }).catch(() => {});
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     setAudio(null);
+    setReview(null);
     onChange(previous => update(previous));
     setDirty(true);
   }
@@ -142,6 +150,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setProgress({ done: 0, total: 0 });
     setRendering(true);
     setRenderPlan(null);
+    setHistory(null);
+    setReview(null);
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     setAudio(null);
     onMessage("Generating speech locally, with one model voice and per-character supported controls. Cancellation is cooperative.");
@@ -156,6 +166,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         return;
       }
       setAudio(result);
+      // A successful render never counts as human listening or caption acceptance.
+      setReview(null);
       onMessage(result.preview_available === false
         ? "Full-length WAV generated on disk. Inline preview is unavailable above 25 MiB; export the WAV to listen and review."
         : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
@@ -243,7 +255,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const records = await invoke<RenderHistory[]>("story_render_history", { storyId: document.id });
       if (revision !== renderRevision.current) return;
       setHistory(records.slice(0, 10));
-      onMessage("Local history loaded. Interrupted jobs can be retried using unchanged cached dialogue.");
+      onMessage("Local history loaded. Retry is manual: the current entire story will be revalidated with a fresh job ID; only unchanged cached speech can be reused.");
     } catch (error) {
       if (revision === renderRevision.current) {
         onMessage("Could not read local render history: " + errorString(error));
@@ -251,6 +263,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     } finally {
       setLoadingHistory(false);
     }
+  }
+
+  function retryFromHistory(job: RenderHistory) {
+    if (busy || rendering || !canOfferManualRetry(job, document.id)) return;
+    if (!window.confirm(
+      "Start a NEW full-story render from the CURRENT script and voice profiles? "
+      + "The original scene/line selection was not stored in recovery history and cannot "
+      + "be reconstructed. Only unchanged cached dialogue can be reused. "
+      + "This will not overwrite the previous attempt, its journal or any exported WAV."
+    )) return;
+    onMessage("Starting an explicit full-story retry. Existing journal remains; unchanged valid speech may be reused.");
+    void startRender();
   }
 
   async function forgetHistory(job: RenderHistory) {
@@ -277,6 +301,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
   async function exportSceneSubtitles() {
     if (!audio?.segment_timings?.length) return;
+    const revision = renderRevision.current;
+    const audioId = audio.audio_id;
     try {
       const lines = document.scenes.flatMap(scene =>
         scene.segments.filter(segment => segment.kind === "speech")
@@ -290,8 +316,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         filters: [{ name: "SubRip subtitles", extensions: ["srt"] }],
       });
       if (!destination) return;
+      if (revision !== renderRevision.current) {
+        onMessage("Story changed while choosing SRT destination. Generate and review the new narration first.");
+        return;
+      }
       await invoke("export_subtitles", { destination, content });
-      onMessage("Measured dialogue-level .srt captions exported. Review caption timing and text before publishing.");
+      if (revision === renderRevision.current) {
+        setReview(previous => recordSubtitleExport(previous, audioId));
+      }
+      onMessage("Measured dialogue-level .srt captions exported. Review caption timing and text before marking subtitles checked.");
     } catch (error) {
       onMessage("Cannot export dialogue subtitles: " + errorString(error));
     }
@@ -317,6 +350,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (!audio) return;
     const id = audio.audio_id;
     setAudio(null);
+    setReview(null);
     try {
       await invoke("discard_audio", { audioId: id });
       onMessage("Generated dialogue preview removed from local audio cache.");
@@ -396,6 +430,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
   const unresolvedNow = unresolvedSpeech(document);
+  const activeReview = audio ? reviewForAudio(review, audio.audio_id) : null;
+  const reviewState = audio ? reviewProgress(activeReview, audio.audio_id) : null;
+  const reviewPrompts: Array<{ step: ReviewStep; label: string }> = [
+    { step: "listened_in_full", label: "I listened to the entire generated WAV (in-app or exported)" },
+    { step: "pronunciation_reviewed", label: "I checked Hindi pronunciation and mixed-language words" },
+    { step: "character_turns_reviewed", label: "I checked dialogue order and intended character turns" },
+    { step: "subtitles_reviewed", label: "I reviewed exported SRT wording and cue timing" },
+  ];
   return (
     <section className="cast-layout" aria-label="Character and scene editor">
       <div className="panel cast-panel">
@@ -517,15 +559,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             <strong>Recent render attempts for this story</strong>
             <p>Records store segment IDs and outcomes, not script text. Interrupted
               means a previous worker is no longer active in this app process.
-              Generate again to reuse unchanged cached audio; retry is never automatic.</p>
+              The retry button starts a NEW whole-story attempt from the CURRENT document,
+              not necessarily the originally selected scene. Existing journals are not
+              overwritten; unchanged cached speech may be reused. Retry is never automatic.</p>
             {history.length === 0
               ? <p>No recorded renders for this story yet.</p>
               : <ul>{history.map(item => (
                 <li key={item.job_id}>
-                  <strong>{item.state === "interrupted" ? "Interrupted — retry available" : item.state}</strong>
+                  <strong>{item.state === "interrupted" ? "Interrupted" : item.state}</strong>
                   {" · "}{item.done}/{item.total} segments
                   {" · "}{item.updated_at}
-                  <button className="quiet-button" type="button" disabled={item.state === "running"}
+                  {canOfferManualRetry(item, document.id) && (
+                    <button className="secondary-button" type="button" disabled={busy || rendering}
+                      onClick={() => retryFromHistory(item)}>Retry current full story</button>
+                  )}
+                  <button className="quiet-button" type="button" disabled={item.state === "running" || rendering}
                     onClick={() => void forgetHistory(item)}>Forget record</button>
                 </li>
               ))}</ul>}
@@ -547,6 +595,37 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                 onClick={() => void exportSceneSubtitles()}>Export dialogue SRT</button>
               <button className="quiet-button" onClick={() => void clearAudio()}>Clear preview</button>
             </div>
+            {activeReview && reviewState && (
+              <section className="inspection-panel" aria-label="Manual narration quality checklist">
+                <strong>Human review for this WAV — {reviewState.completed} / {reviewState.total} marked</strong>
+                <p>Optional, local-only and not saved. Mark each item only after personally
+                  reviewing this exact WAV. A checked item is a user note, not a verified
+                  Chatterbox voice-quality or distinct-character voice claim.</p>
+                <div className="review-checklist">
+                  {reviewPrompts.map(({ step, label }) => (
+                    <label key={step}>
+                      <input type="checkbox"
+                        checked={activeReview.completed[step]}
+                        disabled={step === "subtitles_reviewed" && !activeReview.subtitleExported}
+                        onChange={event => {
+                          try {
+                            const next = updateAudioReview(activeReview, audio.audio_id, step, event.target.checked);
+                            setReview(next);
+                          } catch (error) {
+                            onMessage(errorString(error));
+                          }
+                        }} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="helper" role="status">
+                  {reviewState.personallyReviewed
+                    ? "All four items were marked by you for this WAV; no automatic audio quality verification was performed."
+                    : "Human review incomplete. Export dialogue SRT before marking subtitle review."}
+                </p>
+              </section>
+            )}
           </>}
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
