@@ -40,7 +40,13 @@ export function renderExportLabel(
   };
   const lineIndex = scene.segments.findIndex(segment =>
     segment.id === segmentId && segment.kind === "speech");
-  if (lineIndex < 0) throw new Error("The selected line is missing or not dialogue.");
+  if (lineIndex < 0) {
+    if (project.scenes.some(other =>
+      other.id !== scene.id && other.segments.some(segment => segment.id === segmentId))) {
+      throw new Error("The selected line is outside the scene.");
+    }
+    throw new Error("The selected line is missing or not dialogue.");
+  }
   return {
     audioId,
     baseName: `${prefix}${sceneSuffix}-line-${String(lineIndex + 1).padStart(3, "0")}`,
