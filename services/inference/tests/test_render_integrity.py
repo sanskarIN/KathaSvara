@@ -121,3 +121,66 @@ def test_valid_single_line_force_retry_regenerates_selected_audio(tmp_path: Path
     assert result["segments"][0]["segment_id"] == line_id
     assert result["segments"][0]["cached"] is False
     assert (tmp_path / "one-line.wav").is_file()
+
+
+
+def test_cached_audio_over_remaining_budget_rejected_before_pcm_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late cache hit must not allocate an over-budget float32 WAV array."""
+    import soundfile as sf
+
+    doc = sample_doc()
+    cache = tmp_path / "cache"
+    render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
+    assert len(list(cache.glob("*.wav"))) == 2
+
+    calls: list[str] = []
+    original = sf.read
+
+    def traced_read(path: str, *args: object, **kwargs: object):
+        calls.append(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(sf, "read", traced_read)
+    # Each segment contributes 2,400 frames. The first has a 3,360-frame
+    # pause, leaving only 720 frames for the cached second segment.
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 0.27)
+    with pytest.raises(ValueError, match="20-minute audio limit"):
+        render_story(
+            doc, tmp_path / "too_long.wav", cache, FakeEngine(),
+        )
+    assert len(calls) == 1, "Only the cache entry that fits may be read as PCM."
+    assert not (tmp_path / "too_long.wav").exists()
+    assert len(list(cache.glob("*.wav"))) == 2
+
+
+def test_cached_symlink_never_inspected_or_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The renderer must not follow a cache symlink supplied by another process."""
+    import soundfile as sf
+
+    doc = sample_doc()
+    cache = tmp_path / "cache"
+    render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
+    entry = sorted(cache.glob("*.wav"))[0]
+    private = tmp_path / "outside.wav"
+    entry.replace(private)
+    try:
+        entry.symlink_to(private)
+    except (NotImplementedError, OSError):
+        pytest.skip("Filesystem cannot create symlinks.")
+
+    # SoundFile metadata access to a cache alias should be skipped altogether.
+    original_info = sf.info
+    def check_no_symlink(path: str, *args: object, **kwargs: object):
+        if Path(path) == entry:
+            raise AssertionError("Attempted to inspect an untrusted cache symlink")
+        return original_info(path, *args, **kwargs)
+
+    monkeypatch.setattr(sf, "info", check_no_symlink)
+    report = render_story(doc, tmp_path / "safe.wav", cache, FakeEngine())
+    assert report["segments"]
+    assert private.exists()
+    assert entry.is_symlink()
