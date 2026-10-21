@@ -14,7 +14,7 @@ Thank you for improving accessible Hindi storytelling.
 
 Python: from services/inference run python -m pytest -q and python -m ruff check .
 
-Desktop: from apps/desktop on Node 22 run **npm ci**, npm run test, npm run build and npm run tauri dev. Commit package-lock.json with any dependency update; see [dependency policy](docs/maintenance/npm-dependencies.md).
+Desktop: from apps/desktop on Node 22 run **npm ci**, `npm audit --audit-level=high`, npm run test, npm run build and npm run tauri dev. Frontend uses Vite 8/React plugin 6/Vitest 5; review migration compatibility and security alerts when changing these tools. Commit package-lock.json with any dependency update; see [dependency policy](docs/maintenance/npm-dependencies.md).
 
 Rust: from apps/desktop/src-tauri run cargo fmt --check, cargo clippy --all-targets and cargo test.
 
