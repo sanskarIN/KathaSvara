@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
-import { renderExportLabel, suggestedOutputFile } from "./export_names";
+import { isCurrentExportSession, renderExportLabel, suggestedOutputFile } from "./export_names";
 import { legacyToStoryV2, type StoryV2 } from "./story_v2";
 
 function story(): StoryV2 {
@@ -79,5 +79,16 @@ describe("scope-bound narration export names", () => {
     expect(label.audioId).toBe("audio-f");
     expect(JSON.stringify(doc)).toBe(snapshot);
     expect(() => renderExportLabel(doc, " ", "scene1")).toThrow("Audio ID");
+  });
+});
+
+describe("stale export dialog refusal", () => {
+  it("requires the same audio ID, generation and document revision", () => {
+    const label = renderExportLabel(story(), "wav1");
+    expect(isCurrentExportSession(label, "wav1", 3, 3, 8, 8)).toBe(true);
+    expect(isCurrentExportSession(label, "wav2", 3, 3, 8, 8)).toBe(false);
+    expect(isCurrentExportSession(label, "wav1", 3, 4, 8, 8)).toBe(false);
+    expect(isCurrentExportSession(label, "wav1", 3, 3, 8, 9)).toBe(false);
+    expect(isCurrentExportSession(null, "wav1", 3, 3, 8, 8)).toBe(false);
   });
 });
