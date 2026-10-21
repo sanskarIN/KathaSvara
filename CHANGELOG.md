@@ -1,6 +1,13 @@
 # Changelog
 
-## v0.4.2 — Experimental developer prerelease source (publication gated)
+## v0.5.0 — Early development (not released)
+
+- Introduce model-free, per-scene Hindi production readiness audit with aggregate counts and privacy-safe reason codes; report whole-story plan readiness separately from individually valid scenes.
+- Wire the read-only audit through Python CLI, Rust/Tauri IPC and CastStudio and add model-free regression tests; no genuine speech or Windows acceptance claims.
+
+## [v0.4.2 — Published experimental developer prerelease](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.2)
+
+- **Published October 21, 2026** from exact release SHA `07fb6f4`; [guarded release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39540443967) passed all test/build and uploaded-asset checks. Includes an unsigned Windows x64 developer EXE and SHA-256 companion, not a complete installer.
 
 - Enable explicit full-story or selected-scene model-free preflight with a shared typed render scope, preserving scene/line retry parity and private script text.
 - Reject over-budget cached WAVs by header frame count before loading PCM; skip symlinked cache aliases before metadata inspection. Add model-free tests for both.
