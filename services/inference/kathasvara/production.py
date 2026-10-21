@@ -75,7 +75,15 @@ def render_story(
     A failure leaves completed cache entries in place for explicit retry.
     The final combined audio is atomically replaced only after successful finish.
     """
-    doc.validate()
+    # Read-only deterministic validation runs before model imports/loading.
+    # Import here to avoid a module initialization cycle with shared render limits.
+    from .render_preflight import inspect_render_plan
+
+    inspect_render_plan(
+        doc, selected_scene_ids=selected_scene_ids,
+        selected_segment_ids=selected_segment_ids,
+        force_segment_ids=force_segment_ids,
+    )
     if not output.is_absolute() or output.suffix.lower() != ".wav" or output.exists():
         raise ValueError("Choose a new absolute WAV destination.")
     if not cache_dir.is_absolute() or cache_dir.resolve() == output.resolve().parent:

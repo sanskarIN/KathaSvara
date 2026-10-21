@@ -5,7 +5,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import pytest
-from test_production import sample_doc
+from test_production import FakeEngine, sample_doc
 
 from kathasvara.cli import handle
 from kathasvara.dialogue import parse_dialogue
@@ -66,3 +66,17 @@ def test_preflight_blocks_unassigned_speakers_and_invalid_selection() -> None:
 def test_preflight_zero_segments_is_not_an_implicit_full_render() -> None:
     with pytest.raises(ValueError, match="1–256"):
         inspect_render_plan(sample_doc(), selected_segment_ids=set())
+
+
+def test_renderer_reuses_preflight_before_loading_model(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import render_preflight
+    from kathasvara.production import render_story
+
+    mock = FakeEngine()
+    monkeypatch.setattr(render_preflight, "MAX_CHUNKS", 1)
+    with pytest.raises(ValueError, match="Too many speech chunks"):
+        render_story(sample_doc(), tmp_path / "blocked.wav", tmp_path / "cache", mock)
+    assert mock.loads == 0
+    assert not (tmp_path / "blocked.wav").exists()
