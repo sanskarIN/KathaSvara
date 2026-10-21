@@ -42,6 +42,12 @@ React `19.3.1`, React DOM `19.3.1`, `@types/react` `19.3.0` and `@types/react-do
 
 The combined migration passed all **55 Vitest React tests** (including mocked desktop interactions), the TypeScript/Vite production build, and `npm audit --audit-level=high` reporting zero advisories at the time of execution. These checks do **not** establish manual Windows WebView2 launch, real speech-model behavior, or future vulnerability immunity. The short-lived GitHub contents-write workflow was removed before PR merge; Windows release-candidate checks are separate merge gates.
 
+## TypeScript 7 on the upgraded frontend
+
+The development source now resolves **TypeScript 7.0.2** with React 19, Vite 8, Vitest 5 and jsdom 30. The migration from TypeScript 5.9.3 is captured in the lockfile (152 entries in the first regenerated graph). A Node 22 job executed `npm ci`, all **55 React/Vitest tests**, the `tsc --noEmit && vite build` production command and `npm audit --audit-level=high` with zero reported advisories at that moment. Follow-up Windows Rust and unsigned desktop candidate checks remain essential; a successful typecheck is not a runtime acceptance test.
+
+A feature-branch-only bootstrap workflow with write access was removed immediately after updating the reviewed npm files. This change is **not a new release** and does not rewrite the published v0.5.0 artifacts.
+
 ## Release immutability and limitations
 
 Previous version-specific GitHub publication workflows are kept unchanged to preserve their tested SHA and release history. Future release workflows should use `npm ci` and a complete pinned graph. The [v0.5.0 pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) is an unsigned developer EXE, not a complete installer, and manual Chatterbox Hindi playback and clean Windows installation acceptance remain open in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
