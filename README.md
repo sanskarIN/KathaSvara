@@ -4,6 +4,10 @@
 
 > **Latest experimental developer pre-release: [KathaSvara v0.5.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0).** The [guarded v0.5.0 workflow](.github/workflows/release-v0.5.0.yml) checks the exact main-branch commit, runs Python, React, Windows Rust, Windows Python cache-lock and Windows EXE build tests, then uploads the unsigned developer EXE, setup README and verified SHA-256 file. **This is not a standalone installer, signed binary, verified distinct-character TTS, or human-accepted natural Hindi narration.** Separately install compatible Python 3.11, approved Chatterbox model dependencies and weights. See [release notes](docs/releases/v0.5.0-notes.md), [Windows setup](docs/installation/portable-windows-candidate.md), [human acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) and [npm dependency tracking #33](https://github.com/sanskarIN/KathaSvara/issues/33).
 
+## Post-v0.5.0 development (not a new release)
+
+For reproducible source builds, `apps/desktop/package-lock.json` now pins the frontend dependency graph, and React/Windows candidate checks install via `npm ci` under Node 22. This does **not** update the already-published v0.5.0 executable or establish that dependencies are vulnerability-free. Review the [npm maintenance policy](docs/maintenance/npm-dependencies.md) and [security-update tracking issue #33](https://github.com/sanskarIN/KathaSvara/issues/33).
+
 ## v0.5.0 experimental pre-release — scene-by-scene readiness checks
 
 Included WAV acceptance tooling can now flag unusually quiet recordings or many full-scale samples using bounded PCM statistics, without running a voice model. The warnings are diagnostic hints only; actual Hindi listening and clean-machine tests remain open in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). See [offline WAV inspection](docs/qa/offline-wav-inspection.md).

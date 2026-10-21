@@ -52,7 +52,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install frontend packages
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: React unit and mocked desktop interaction tests (no real audio)
         run: npm run test
       - name: Typecheck and build

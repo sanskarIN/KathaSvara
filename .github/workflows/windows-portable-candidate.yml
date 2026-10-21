@@ -29,7 +29,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install frontend dependencies
         working-directory: apps/desktop
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run JS tests and build assets
         working-directory: apps/desktop
         run: |
