@@ -1,10 +1,10 @@
-KathaSvara v0.4.2 — Unsigned Windows x64 experimental developer executable
+KathaSvara v0.5.0 — Unsigned Windows x64 experimental developer executable
 ==================================================================
 
 THIS IS NOT A COMPLETE INSTALLER OR A RELEASE-READY APPLICATION.
 
-This unsigned executable comes from a GitHub Actions test build (if that
-workflow succeeds). It has not undergone end-user installation or manual
+This unsigned v0.5.0 executable comes from a gated, exact-commit GitHub Actions
+pre-release workflow only if all build, test and checksum checks succeed. It has not undergone end-user installation or manual
 Hindi audio acceptance testing.
 
 The desktop executable may open its React/Tauri UI, but real speech generation
@@ -47,8 +47,11 @@ No voice model, generated sample, or commercial voice-clone asset is bundled.
 KathaSvara app sources are MPL-2.0; third-party dependencies/checkpoints have
 separate license terms.
 
-The guarded v0.4.2 release workflow can publish an experimental developer pre-release
+The guarded v0.5.0 release workflow can publish an experimental developer pre-release
 only after tests, executable compilation and SHA-256 verification succeed.
 This does NOT verify interactive launch or real Hindi narration on a clean machine.
+The optional per-WAV review checklist does not verify voice identity by itself;
+the offline WAV inspector checks file integrity and level warning hints only.
+The latest documented manual QA procedure is in docs/qa/windows-hindi-acceptance.md.
 Manual playback, project persistence, save/export, source compatibility and audio
 acceptance remain open in issue #3.

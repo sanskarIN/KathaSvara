@@ -1,6 +1,8 @@
 # Changelog
 
-## v0.5.0 — Early development (not released)
+## [v0.5.0 — Experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0)
+
+- **Experimental Windows x64 developer EXE, README and SHA-256 checksums** published only if the exact-SHA release workflow succeeds. No bundled Python/model, signed installer or manually accepted Hindi voice quality. [Release notes](docs/releases/v0.5.0-notes.md).
 
 - Add conservative streamed offline WAV level statistics (RMS/peak dBFS, clipped-sample fraction, silence/clipping hints) for human QA triage. Metrics do not certify Hindi listening, synthesis quality or voice distinction.
 
