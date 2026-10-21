@@ -51,8 +51,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
       - name: Install frontend packages
         run: npm ci --no-audit --no-fund
+      - name: Audit complete locked npm dependency graph (high+)
+        run: npm audit --audit-level=high
       - name: React unit and mocked desktop interaction tests (no real audio)
         run: npm run test
       - name: Typecheck and build
