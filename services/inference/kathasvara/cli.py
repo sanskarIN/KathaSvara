@@ -14,6 +14,7 @@ from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
 from .production import render_story
+from .production_audit import audit_production_readiness
 from .pronunciation import apply_glossary
 from .render_preflight import inspect_render_plan
 from .story import Character, VoiceProfile, from_dict, narrator
@@ -114,6 +115,11 @@ def handle(request: dict[str, object]) -> dict[str, object]:
                         "changes": result["changes"],
                     }}
         raise ValueError("Segment does not belong to the selected story.")
+    if request.get("action") == "audit_production":
+        project = request.get("project")
+        if not isinstance(project, dict):
+            raise TypeError("Production audit requires a story document.")
+        return {"ok": True, "result": audit_production_readiness(from_dict(project))}
     if request.get("action") == "preflight_render":
         project = request.get("project")
         if not isinstance(project, dict):
