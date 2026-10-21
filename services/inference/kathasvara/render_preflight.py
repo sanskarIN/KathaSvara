@@ -7,8 +7,8 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 from .hindi import split_for_engine
-from .pronunciation import apply_glossary
 from .production import MAX_CHUNKS, MAX_RENDER_CHARACTERS, MAX_RENDER_SEGMENTS
+from .pronunciation import apply_glossary
 from .story import StoryDocument
 
 

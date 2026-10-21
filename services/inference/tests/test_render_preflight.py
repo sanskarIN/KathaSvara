@@ -5,12 +5,12 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import pytest
+from test_production import sample_doc
 
 from kathasvara.cli import handle
 from kathasvara.dialogue import parse_dialogue
 from kathasvara.render_preflight import inspect_render_plan
 from kathasvara.story import narrator
-from test_production import sample_doc
 
 
 def test_preflight_counts_hindi_without_model_or_writing_audio() -> None:

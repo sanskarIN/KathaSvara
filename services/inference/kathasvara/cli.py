@@ -14,8 +14,8 @@ from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
 from .production import render_story
-from .render_preflight import inspect_render_plan
 from .pronunciation import apply_glossary
+from .render_preflight import inspect_render_plan
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
 from .temp_cleanup import cleanup_partial_wavs
