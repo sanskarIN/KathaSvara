@@ -17,7 +17,7 @@ def _code(error: ValueError) -> str:
     if "Assign every unknown speaker" in message:
         return "unassigned_speaker"
     if "1–256 spoken segments" in message:
-        return "no_dialogue"
+        return "over_limit"
     if ("limit" in message.lower() or "Too many" in message or
         "chunks" in message or "exceeds" in message):
         return "over_limit"
@@ -48,10 +48,12 @@ def audit_production_readiness(document: StoryDocument) -> dict[str, object]:
             "scene_id": scene.id, "ready": True, "reason": "ready",
             "segments": len(plan.lines), "chunks": plan.chunk_count,
         })
+    total_speech = sum(int(scene["segments"]) for scene in scenes)
     try:
         full = prepare_render_plan(document)
     except ValueError as error:
-        full_ready, full_reason, full_chunks = False, _code(error), 0
+        reason = "no_dialogue" if total_speech == 0 else _code(error)
+        full_ready, full_reason, full_chunks = False, reason, 0
     else:
         full_ready, full_reason, full_chunks = True, "ready", full.chunk_count
     return {
