@@ -56,6 +56,8 @@ For a *separately authorized real-model test*, run `scripts/smoke_hindi.py` from
 
 Record **pass / fail / blocked / not tested** for every row. A build-only run must use **not tested** for desktop and real-voice rows.
 
+Before listening, run the [offline WAV inspector](offline-wav-inspection.md) on the **actual exported WAV** to record format, duration, SHA-256 and simple sound-level hints. The `near_silence_hint` and `possible_clipping_hint` flags identify audio to scrutinize, but a clean result is **not** voice-quality acceptance. Never treat the inspector's `structure_valid` field as a listening pass.
+
 ## 4. Real Hindi listening acceptance — human only
 
 Use an original, authorized 30–60-second narration sample with a narrator, Raja Bhoj, a farmer and a short quoted village reply; include punctuation, a number and one Hindi-English mixed phrase. The script is test data, not proof of a historical event. Obtain rights/consent for any reference clips; do not add real people's private voice recordings to public issues.
