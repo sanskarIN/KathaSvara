@@ -303,6 +303,19 @@ async fn parse_dialogue(
 }
 
 #[tauri::command]
+async fn audit_production(project: StoryV2) -> Result<Value, String> {
+    validate_story_v2(&project)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({
+            "action": "audit_production",
+            "project": project,
+        }))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Production audit returned no report.".to_string())
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn preflight_render(
     project: StoryV2,
     selected_scene_ids: Option<Vec<String>>,
@@ -1201,7 +1214,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
