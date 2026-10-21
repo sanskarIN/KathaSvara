@@ -1,8 +1,8 @@
 # Development environment (source only)
 
-The latest [v0.4.2 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.2) includes an unsigned Windows x64 **developer executable**, but it is **not a self-contained installer**. The app still requires separately installed compatible Python 3.11, Chatterbox, supported model weights and Tauri/WebView2 prerequisites. The Chatterbox and PyTorch stack can require substantial disk and GPU memory; actual Hindi speech and an interactive clean-machine Windows launch are unverified.
+The [v0.5.0 experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) (check the release page for publication status) includes an unsigned Windows x64 **developer executable**, but it is **not a self-contained installer**. The app still requires separately installed compatible Python 3.11, Chatterbox, supported model weights and Tauri/WebView2 prerequisites. The Chatterbox and PyTorch stack can require substantial disk and GPU memory; actual Hindi speech and an interactive clean-machine Windows launch are unverified.
 
-The [v0.5.0 development branch](https://github.com/sanskarIN/KathaSvara) adds **model-free scene audits, matched WAV/SRT filename suggestions, manual WAV review and mocked desktop interaction tests**, but **v0.5.0 is not published**. None of these tests verifies installed model weights or real Hindi voice quality. Follow the [manual Windows/Hindi acceptance protocol](../qa/windows-hindi-acceptance.md) and [open issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) before proposing stability.
+The v0.5.0 source adds **model-free scene audits, matched WAV/SRT filename suggestions, manual WAV review and mocked desktop interaction tests**, but **the executable is still not a complete installer or real-Hindi acceptance certificate**. None of these tests verifies installed model weights or real Hindi voice quality. Follow the [manual Windows/Hindi acceptance protocol](../qa/windows-hindi-acceptance.md) and [open issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) before proposing stability.
 
 ## Windows 11 (first target)
 
