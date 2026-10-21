@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 build-system maintenance
 
+- Update source-build TypeScript from 5.9.3 to **7.0.2** on top of tested React 19/Vite 8/jsdom 30 dependencies. Rebuild the npm lockfile, verify all 55 React tests, successful TypeScript 7 typecheck/Vite production build and npm audit. Use the normal Windows Rust and unsigned EXE candidate checks as merge gates; no v0.5.0 tag or published binary changes.
+
 - Upgrade the React 18 desktop runtime to **React 19.3.1 and React DOM 19.3.1 together**, with corresponding 19.3 type packages and refreshed npm lockfile. Both independent Dependabot PRs #40/#41 failed npm ci due to mismatched peers; the combined source-only migration passed 55 React tests, TypeScript production build and npm security audit before Windows CI. Remove the one-time privileged bootstrap workflow. Published v0.5.0 assets remain unchanged.
 
 - Migrate source-build tooling from Vite 5.4.21 / React plugin 4.7.0 / Vitest 2.1.9 to exact Vite 8.3.5 / React plugin 6.1.2 / Vitest 5.0.5; regenerate npm lockfile (159 entries) and run 55 React tests, TS build and npm audit on Node 22. Add high-severity npm audit to CI, lockfile cache and weekly Dependabot configuration for npm/Actions. Keep changes unreleased, with original tag/assets untouched.
