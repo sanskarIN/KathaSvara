@@ -18,12 +18,7 @@ from .audio_stream import StreamingWav
 from .cache_lock import exclusive_cache_access
 from .engine import ChatterboxHindi, VoiceSettings
 from .render_journal import RenderJournal
-from .render_preflight import (
-    MAX_CHUNKS,
-    MAX_RENDER_CHARACTERS,
-    MAX_RENDER_SEGMENTS,
-    prepare_render_plan,
-)
+from .render_preflight import prepare_render_plan
 from .story import StoryDocument
 
 MAX_OUTPUT_SECONDS = 1200
