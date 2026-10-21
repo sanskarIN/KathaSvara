@@ -2,7 +2,15 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
-> **Latest published experimental pre-release:** [KathaSvara v0.4.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0) includes **cross-process speech-cache safety** and **measured Hindi dialogue SRT export**, plus an **unsigned, unbundled Windows x64 developer EXE** with [setup notice](https://github.com/sanskarIN/KathaSvara/releases/download/v0.4.0/README.txt) and [SHA-256 checksum](https://github.com/sanskarIN/KathaSvara/releases/download/v0.4.0/SHA256SUMS.txt). The [exact-commit release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/39388218828) **passed** Python, React, Windows Rust, Windows Python locking, EXE compilation and post-upload asset integrity on release commit [`6773bf9`](https://github.com/sanskarIN/KathaSvara/commit/6773bf918839a215618ae8500fea1cda1b7a7b29). EXE SHA-256: `7ce3d90219580da15342c36967371a91bd75d63bfa02c5bf19fd6caab0465677`. Earlier [v0.3.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.3.0), [v0.2.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.1), [v0.2.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.2.0) and v0.1.x previews remain available. **Not stable or self-contained:** compatible Python 3.11, model weights and WebView2 requirements remain external, and real Hindi audio plus clean-machine Windows launch remain unverified.
+> **Latest development pre-release target:** [KathaSvara v0.4.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.1), built with guardrails for full-length WAV export, subtitle integrity, and explicit recovery cleanup. Its guarded publication workflow must pass first. The Windows x64 EXE remains **unsigned, unbundled and experimental**; requires separate Python 3.11, speech model, weights and WebView2. Model speech quality and clean-machine installation are **not verified**. See [release notes](docs/releases/v0.4.1-notes.md), [setup requirements](docs/installation/portable-windows-candidate.md) and [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+
+## v0.4.1 experimental developer preview — export, subtitles and recovery
+
+- Preserve valid WAVs above the inline 25 MiB preview limit, offer export-only status, and stream new-file export safely with native WAV header checks.
+- Match dialogue SRT text to the reviewed, glossary-adjusted text synthesized, validate real SubRip line breaks and millisecond cue ordering, and remove rejected post-render outputs.
+- Preview then explicitly confirm bounded cleanup of old temporary WAV files and job-specific progress/cancellation files without touching final speech, stories or caches.
+- Prevent incorrect segment re-render selection, honor early cancellation and keep overlong PCM and pause budgets out of the reusable speech cache.
+- Developer preview only: no bundled Python/weights, stable installation or manually accepted voice-quality guarantee.
 
 ## v0.4.0 published experimental developer preview — subtitles and cross-process safety
 

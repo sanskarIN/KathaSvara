@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.1 — Unreleased development
+## v0.4.1 — Experimental pre-release source
 
 - Reject selected or forced-retry segment IDs outside the chosen scene/line set before model loading instead of silently ignoring requests; respond to pre-load cancellation before doing expensive inference setup.
 - Enforce 20-minute cumulative audio frame limits on model chunks and planned inter-speaker pauses **before** writing reusable cache WAVs; model-free regressions assert rejected renders do not publish oversized cache/audio files.
@@ -19,7 +19,7 @@
 - Complete and validate the bounded directory scan before any deletion; refuse symlinked target folders, out-of-scope names, and oversized scans without partially cleaning eligible files.
 - When explicitly forgetting an inactive render-history record, remove only matching UUID progress/cancellation sidecars after validating their type and size. Do not touch the rendered WAV, speech cache, story file, or other jobs' bookkeeping files.
 - Expand no-model Python and Windows Rust regression tests for actual writer filenames, scan-abort non-deletion and safe job-specific sidecar removal.
-- **Not yet published:** [v0.4.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0) remains the latest experimental developer pre-release. Real Hindi speech/model quality and Windows clean-install acceptance remain open.
+- **Experimental v0.4.1 publication is gated by its exact-SHA workflow;** verify the [release tag](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.1) for status. Real Hindi speech/model quality and Windows clean-install acceptance remain open.
 
 ## [v0.4.0 — Published experimental developer pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.4.0)
 
