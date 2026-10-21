@@ -14,7 +14,7 @@ Thank you for improving accessible Hindi storytelling.
 
 Python: from services/inference run python -m pytest -q and python -m ruff check .
 
-Desktop: from apps/desktop run npm install, npm run test, npm run build and npm run tauri dev.
+Desktop: from apps/desktop on Node 22 run **npm ci**, npm run test, npm run build and npm run tauri dev. Commit package-lock.json with any dependency update; see [dependency policy](docs/maintenance/npm-dependencies.md).
 
 Rust: from apps/desktop/src-tauri run cargo fmt --check, cargo clippy --all-targets and cargo test.
 
