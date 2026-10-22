@@ -21,7 +21,7 @@ use uuid::Uuid;
 mod wav_file;
 mod production_manifest;
 use production_manifest::write_production_manifest;
-use wav_file::inspect_wav_file;
+use wav_file::{inspect_wav_file, wav_source_metadata_unchanged};
 
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
@@ -1155,7 +1155,14 @@ fn copy_validated_wav(source: &Path, destination: &Path) -> Result<(), String> {
     }
     let mut input = fs::File::open(source)
         .map_err(|_| "Generated audio is missing.".to_string())?;
+    let initial = input.metadata()
+        .map_err(|_| "Unable to inspect generated WAV source.".to_string())?;
     let size = inspect_wav_file(&mut input)?;
+    let checked = input.metadata()
+        .map_err(|_| "Unable to recheck generated WAV source.".to_string())?;
+    if !wav_source_metadata_unchanged(&initial, &checked) {
+        return Err("Generated WAV changed during validation; export it again.".into());
+    }
     let mut output = fs::OpenOptions::new().write(true).create_new(true)
         .open(destination).map_err(|e| format!("Cannot create destination file: {e}"))?;
     let copy = std::io::copy(&mut input, &mut output)
@@ -1163,7 +1170,12 @@ fn copy_validated_wav(source: &Path, destination: &Path) -> Result<(), String> {
             if copied != size {
                 return Err(std::io::Error::other("WAV source changed during export."));
             }
-            output.sync_all()
+            output.sync_all()?;
+            let final_meta = input.metadata()?;
+            if !wav_source_metadata_unchanged(&initial, &final_meta) {
+                return Err(std::io::Error::other("WAV source changed during export."));
+            }
+            Ok(())
         });
     if let Err(error) = copy {
         drop(output);
