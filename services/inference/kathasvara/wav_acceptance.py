@@ -119,7 +119,8 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                     for value in pcm:
                         amplitude = abs(value)
                         squared_sum += value * value
-                        peak = max(peak, amplitude)
+                        if amplitude > peak:
+                            peak = amplitude
                         if amplitude >= 32767:
                             clipped += 1
                         if amplitude <= NEAR_SILENCE_SAMPLE_MAX:
