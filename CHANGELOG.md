@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Add model-free, streaming **long internal quiet-span inspection** to exported mono PCM16 WAV acceptance reports: record the longest low-amplitude pause and its seek offset only when bounded by audible samples, while excluding leading/trailing silence. Flag 3-second internal gaps for optional human review without treating quiet passages as corrupt files. Includes regression tests across 8192-frame blocks and updated [WAV QA guidance](docs/qa/offline-wav-inspection.md). No real Hindi model or Windows listening acceptance is claimed.
+
 - Strengthen the read-only offline WAV inspector to reject concurrent file mutations even when the file length stays unchanged, using opened-file identity and nanosecond modification/metadata timestamps around the existing PCM and SHA-256 scans. Include a no-model regression test; these checks cannot certify an adversarial immutable snapshot or genuine Hindi narration.
 
 - Retire automatic `push` triggers for **already published** v0.2.1–v0.5.0 release workflows, retaining manual exact-SHA/tag-existence guards to prevent accidental republishing when workflow dependencies change. Add automated policy regressions and [release workflow lifecycle guidance](docs/maintenance/release-workflow-lifecycle.md). No tags or assets modified.
