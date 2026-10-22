@@ -245,6 +245,77 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(mocks.invoke.mock.calls.some(([command]) => command === "check_engine")).toBe(false);
   });
 
+  it.each([
+    ["WAV", "Export WAV", "export_wav"],
+    ["SRT", "Export dialogue SRT", "export_subtitles"],
+  ])("does not show stale %s export completion after the WAV is discarded",
+    async (_kind, buttonName, command) => {
+      let finishExport: (fail: boolean) => void = () => { throw new Error("Export not started"); };
+      mocks.save.mockResolvedValue("/test/export.wav");
+      mocks.invoke.mockImplementation((name: string) => {
+        if (name === "render_story_v2") return Promise.resolve(generatedAudio());
+        if (name === command) {
+          return new Promise<void>((resolve, reject) => {
+            finishExport = (fail: boolean) => {
+              if (fail) reject(new Error("old export failure"));
+              else resolve();
+            };
+          });
+        }
+        if (name === "discard_audio") return Promise.resolve(undefined);
+        return Promise.reject(new Error("Unexpected Tauri command: " + name));
+      });
+      const { onMessage } = mount();
+      fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+      await screen.findByRole("button", { name: buttonName });
+      fireEvent.click(screen.getByRole("button", { name: buttonName }));
+      await waitFor(() => expect(mocks.invoke.mock.calls.some(([name]) => name === command))
+        .toBe(true));
+      fireEvent.click(screen.getByRole("button", { name: "Clear preview" }));
+      await act(async () => { finishExport(false); });
+      expect(screen.queryByRole("region", { name: "Manual narration quality checklist" })).toBeNull();
+      expect(onMessage.mock.calls.some(([message]) => typeof message === "string" &&
+        (message.includes("exported locally") || message.includes("captions exported")))).toBe(false);
+    },
+  );
+
+  it.each([
+    ["WAV", "Export WAV", "export_wav"],
+    ["SRT", "Export dialogue SRT", "export_subtitles"],
+  ])("does not display stale %s export failure after a new preview is started",
+    async (_kind, buttonName, command) => {
+      let failExport: () => void = () => { throw new Error("Export not started"); };
+      mocks.save.mockResolvedValue("/test/export.wav");
+      mocks.invoke.mockImplementation((name: string) => {
+        if (name === "render_story_v2") return Promise.resolve(generatedAudio());
+        if (name === command) {
+          return new Promise<void>((_resolve, reject) => {
+            failExport = () => reject(new Error("old export failure"));
+          });
+        }
+        if (name === "discard_audio") return Promise.resolve(undefined);
+        return Promise.reject(new Error("Unexpected Tauri command: " + name));
+      });
+      const { onMessage } = mount();
+      fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+      await screen.findByRole("button", { name: buttonName });
+      fireEvent.click(screen.getByRole("button", { name: buttonName }));
+      await waitFor(() => expect(mocks.invoke.mock.calls.some(([name]) => name === command))
+        .toBe(true));
+      fireEvent.click(screen.getByRole("button", { name: "Clear preview" }));
+      fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+      await screen.findByRole("region", { name: "Manual narration quality checklist" });
+      await act(async () => { failExport(); });
+      expect(onMessage.mock.calls.some(([message]) =>
+        typeof message === "string" && message.includes("old export failure"))).toBe(false);
+      if (command === "export_subtitles") {
+        expect((screen.getByRole("checkbox", {
+          name: "I reviewed exported SRT wording and cue timing",
+        }) as HTMLInputElement).disabled).toBe(true);
+      }
+    },
+  );
+
   it("refuses a stale WAV destination if generated audio is cleared during the dialog", async () => {
     let finishSave: (path: string) => void = () => { throw new Error("Dialog wasn't opened"); };
     mocks.save.mockImplementation(() => new Promise<string>(resolve => { finishSave = resolve; }));

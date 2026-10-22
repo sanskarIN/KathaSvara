@@ -349,13 +349,19 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         return;
       }
       await invoke("export_subtitles", { destination, content });
+      // A pending filesystem export may finish after a new render or a
+      // preview deletion. Never credit its SRT review or show a misleading
+      // success status against the *new* current WAV.
       if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
         revision, renderRevision.current)) {
         setReview(previous => recordSubtitleExport(previous, audioId));
+        onMessage("Measured dialogue-level .srt captions exported. Review caption timing and text before marking subtitles checked.");
       }
-      onMessage("Measured dialogue-level .srt captions exported. Review caption timing and text before marking subtitles checked.");
     } catch (error) {
-      onMessage("Cannot export dialogue subtitles: " + errorString(error));
+      if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
+        revision, renderRevision.current)) {
+        onMessage("Cannot export dialogue subtitles: " + errorString(error));
+      }
     }
   }
 
@@ -407,9 +413,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         return;
       }
       await invoke("export_wav", { audioId, destination });
-      onMessage("Dialogue WAV exported locally. The matching SRT uses the same filename stem.");
+      if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
+        revision, renderRevision.current)) {
+        onMessage("Dialogue WAV exported locally. The matching SRT uses the same filename stem.");
+      }
     } catch (error) {
-      onMessage("Cannot export audio: " + errorString(error));
+      if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
+        revision, renderRevision.current)) {
+        onMessage("Cannot export audio: " + errorString(error));
+      }
     }
   }
   async function clearAudio() {
