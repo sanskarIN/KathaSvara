@@ -1100,6 +1100,13 @@ fn discard_audio(app: tauri::AppHandle, audio_id: String) -> Result<(), String> 
     }
 }
 
+fn generated_audio_for_inspection(root: &Path, audio_id: &str) -> Result<PathBuf, String> {
+    // Canonicalized UUID formatting ensures caller input cannot inject path
+    // components, alternate filenames or symlink references.
+    let id = Uuid::parse_str(audio_id).map_err(|_| "Invalid audio ID.".to_string())?;
+    Ok(root.join("audio").join(format!("{id}.wav")))
+}
+
 #[tauri::command]
 async fn inspect_generated_audio(
     app: tauri::AppHandle,
@@ -1107,8 +1114,7 @@ async fn inspect_generated_audio(
 ) -> Result<Value, String> {
     // Never accept a caller-supplied file path. The only source is this
     // app's already-generated UUID WAV inside its own audio directory.
-    let id = Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.".to_string())?;
-    let source = app_dir(&app)?.join("audio").join(format!("{id}.wav"));
+    let source = generated_audio_for_inspection(&app_dir(&app)?, &audio_id)?;
     let metadata = fs::symlink_metadata(&source)
         .map_err(|_| "Generated WAV is missing. Render again before inspecting.".to_string())?;
     if !metadata.file_type().is_file() {
@@ -1270,6 +1276,20 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    #[test]
+    fn generated_audio_inspection_accepts_only_uuid_scoped_app_data_path() {
+        let root = Path::new("private-app-data");
+        let valid = "123e4567-e89b-42d3-a456-426614174000";
+        let candidate = generated_audio_for_inspection(root, valid).unwrap();
+        assert_eq!(candidate, root.join("audio").join(format!("{valid}.wav")));
+        for invalid in [
+            "../private", "audio/123e4567-e89b-42d3-a456-426614174000",
+            "not-a-uuid", "", "123e4567-e89b-42d3-a456-426614174000.wav",
+        ] {
+            assert!(generated_audio_for_inspection(root, invalid).is_err());
+        }
+    }
+
     fn sample_v2() -> StoryV2 {
         StoryV2 {
             schema_version: 2,
