@@ -1,12 +1,8 @@
 name: Publish KathaSvara v0.3.0 experimental prerelease
 
 on:
-  # One-time guarded publication when this version-specific workflow reaches main.
-  # All jobs still rebuild/test the exact merging SHA; existing tags are never replaced.
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/release-v0.3.0.yml"
+  # Archived after publishing v0.3.0. Never auto-republish an existing tag.
+  # Keep manual dispatch for forensic verification of the immutable release guard.
   workflow_dispatch:
     inputs:
       release_sha:

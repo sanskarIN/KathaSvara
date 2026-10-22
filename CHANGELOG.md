@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Retire automatic `push` triggers for **already published** v0.2.1–v0.5.0 release workflows, retaining manual exact-SHA/tag-existence guards to prevent accidental republishing when workflow dependencies change. Add automated policy regressions and [release workflow lifecycle guidance](docs/maintenance/release-workflow-lifecycle.md). No tags or assets modified.
+
 - Preserve Devanagari written units when splitting overlong, unspaced speech tokens: avoid breaking vowel signs, nukta, virama conjuncts or zero-width Indic joiners at model-input chunk boundaries. Fail closed for a written unit larger than the 280-character chunk budget, without truncating the source. Add no-model regressions and [chunk-boundary QA notes](docs/qa/hindi-chunk-boundaries.md). This is source development, not real-model Hindi acceptance or a new published release.
 
 - Update source-build TypeScript from 5.9.3 to **7.0.2** on top of tested React 19/Vite 8/jsdom 30 dependencies. Rebuild the npm lockfile, verify all 55 React tests, successful TypeScript 7 typecheck/Vite production build and npm audit. Use the normal Windows Rust and unsigned EXE candidate checks as merge gates; no v0.5.0 tag or published binary changes.
