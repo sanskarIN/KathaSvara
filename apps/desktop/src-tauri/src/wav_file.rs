@@ -62,10 +62,11 @@ pub fn inspect_wav_file(source: &mut File) -> Result<u64, String> {
             let codec = u16::from_le_bytes([fmt[0], fmt[1]]);
             let channels = u16::from_le_bytes([fmt[2], fmt[3]]);
             let sample_rate = u32::from_le_bytes(fmt[4..8].try_into().map_err(|_| INVALID)?);
+            let byte_rate = u32::from_le_bytes(fmt[8..12].try_into().map_err(|_| INVALID)?);
             let block_align = u16::from_le_bytes([fmt[12], fmt[13]]);
             let bits = u16::from_le_bytes([fmt[14], fmt[15]]);
             if codec != 1 || channels != 1 || !(8_000..=192_000).contains(&sample_rate) ||
-                block_align != 2 || bits != 16
+                byte_rate != sample_rate * 2 || block_align != 2 || bits != 16
             {
                 return Err(INVALID.into());
             }
@@ -125,6 +126,38 @@ mod tests {
         assert!(inspect_wav_file(&mut reader).is_err());
         drop(reader);
         std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn rejects_inconsistent_pcm_byte_rate_even_with_correct_riff_length() {
+        let path = std::env::temp_dir().join(format!(
+            "kathasvara-byte-rate-{}.wav", uuid::Uuid::new_v4(),
+        ));
+        // A valid 1-frame, 24 kHz mono PCM16 header except the byte rate.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&38_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&24_000_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u32.to_le_bytes()); // Must be 48_000.
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&2_u32.to_le_bytes());
+        wav.extend_from_slice(&[0_u8; 2]);
+        std::fs::write(&path, &wav).unwrap();
+        let mut source = File::open(&path).unwrap();
+        assert!(inspect_wav_file(&mut source).is_err());
+        drop(source);
+        wav[28..32].copy_from_slice(&48_000_u32.to_le_bytes());
+        std::fs::write(&path, &wav).unwrap();
+        let mut source = File::open(&path).unwrap();
+        assert!(inspect_wav_file(&mut source).is_ok());
+        drop(source);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
