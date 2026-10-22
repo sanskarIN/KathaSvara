@@ -20,6 +20,7 @@ from .render_preflight import inspect_render_plan
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
 from .temp_cleanup import cleanup_partial_wavs
+from .wav_acceptance import inspect_wav_candidate
 
 
 def handle(request: dict[str, object]) -> dict[str, object]:
@@ -27,6 +28,13 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "engine": "chatterbox-multilingual", "language": "hi"}
     if request.get("action") == "diagnose":
         return {"ok": True, "result": diagnose()}
+    if request.get("action") == "inspect_generated_wav":
+        filename = request.get("path")
+        if not isinstance(filename, str):
+            raise TypeError("WAV inspection needs an absolute .wav filename.")
+        # No model or network required. The Rust desktop command resolves this
+        # file from its UUID-owned app-data audio directory, not a UI path.
+        return {"ok": True, "result": inspect_wav_candidate(Path(filename))}
     if request.get("action") == "abandoned_wav_cleanup":
         root = request.get("root")
         dry_run = request.get("dry_run", True)

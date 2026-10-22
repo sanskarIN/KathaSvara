@@ -2,6 +2,17 @@
 
 **KathaSvara v0.5.0 experimental developer pre-release / source tooling:** `kathasvara.wav_acceptance` is a read-only, standard-library-only WAV integrity checker. It does **not** require Chatterbox weights, a GPU, or network access. It is intended to collect bounded technical evidence for [manual acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) after the creator has actually generated and exported an audio file.
 
+## Inspect from the desktop (unreleased development source)
+
+After generating a story, selected scene, or dialogue-line WAV in **Character and Scene Studio**, click **Inspect generated WAV (no model)**. The app checks its own UUID-named local audio file through the Rust/Python bridge without asking for a filesystem path. It does **not** synthesize new audio or download a model.
+
+The result appears next to the existing manual narration review checklist. It shows overall RMS level and conservative quiet/clipping/long internal pause hints; when a preview is available, a flagged long gap can be located with **Jump to flagged quiet gap**. For narration larger than the inline preview cap, export WAV and review it in an external player. The three-second internal-pause hint does not imply an error: narrative pacing may be deliberate.
+
+- The inspection is **optional**, **read-only**, and must be manually requested for each current audio identity. A new render, audio deletion or story edit resets the report and rejects late results.
+- The UI validates model-free verification flags, report bounds and generated-audio metadata; inspection cannot automatically tick or satisfy any manual human QA item.
+- If the Python runtime is not configured or the file disappears, the app reports a generic error without copying absolute private file paths into the UI. The check requires the local Python source runtime, but **not** Chatterbox model weights.
+- **This desktop integration is post-v0.5.0 source development, not a feature of the existing published v0.5.0 binary.**
+
 ## Run from the Python 3.11 inference environment
 
 From `services/inference` after installing the project into the active virtual environment:

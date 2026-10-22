@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Connect the existing offline, model-free WAV quality inspector to the **Character and Scene Studio** desktop review panel. Use only a UUID-scoped generated audio path in Rust, sanitize private error paths, display quiet/clipping/long-pause hints and allow a local seek to an internal pause; reject stale inspections when the project/audio changes. Add Python protocol, TypeScript report-validation and mocked desktop IPC regressions. This does not auto-approve the human listening checklist or change published v0.5.0 assets.
+
 - Add model-free, streaming **long internal quiet-span inspection** to exported mono PCM16 WAV acceptance reports: record the longest low-amplitude pause and its seek offset only when bounded by audible samples, while excluding leading/trailing silence. Flag 3-second internal gaps for optional human review without treating quiet passages as corrupt files. Includes regression tests across 8192-frame blocks and updated [WAV QA guidance](docs/qa/offline-wav-inspection.md). No real Hindi model or Windows listening acceptance is claimed.
 
 - Strengthen the read-only offline WAV inspector to reject concurrent file mutations even when the file length stays unchanged, using opened-file identity and nanosecond modification/metadata timestamps around the existing PCM and SHA-256 scans. Include a no-model regression test; these checks cannot certify an adversarial immutable snapshot or genuine Hindi narration.
