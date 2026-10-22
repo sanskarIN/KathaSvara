@@ -51,6 +51,21 @@ function generatedAudio() {
   };
 }
 
+function inspectedAudio() {
+  return {
+    format: "kathasvara-wav-structural-inspection", schema_version: 1,
+    structure_valid: true, duration_seconds: 1.25, file_bytes: 60200,
+    sha256: "a".repeat(64), model_loaded: false, hindi_listening_verified: false,
+    distinct_voices_verified: false, human_review_required: true,
+    level_hints: {
+      rms_dbfs: -21.5, peak_dbfs: -3.0, clipped_sample_percentage: 0,
+      near_silence_hint: false, possible_clipping_hint: false,
+      long_internal_pause_hint: false, longest_internal_quiet_span_seconds: 0,
+      longest_internal_quiet_span_start_seconds: null, signal_review_required: false,
+    },
+  };
+}
+
 function mount(doc = story()) {
   const onMessage = vi.fn();
   const onChange = vi.fn();
@@ -103,6 +118,73 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(report.content).not.toContain("नीलकुंड");
     expect(report.content).not.toContain("नमस्कार");
     expect(report.content).not.toContain("scene-one");
+  });
+
+  it("shows model-free generated WAV hints without completing any human checklist step", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return generatedAudio();
+      if (command === "inspect_generated_audio") return inspectedAudio();
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Inspect generated WAV (no model)" });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect generated WAV (no model)" }));
+    const report = await screen.findByRole("region", {
+      name: "Generated WAV level and pause inspection",
+    });
+    expect(report.textContent).toContain("No basic level or long-gap warning found");
+    expect(report.textContent).toContain("human listening still required");
+    expect(mocks.invoke).toHaveBeenCalledWith("inspect_generated_audio", { audioId: ID });
+    expect(screen.getByText(/Human review incomplete/)).toBeTruthy();
+    expect(screen.getAllByRole("checkbox").every(element =>
+      !(element as HTMLInputElement).checked)).toBe(true);
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "inspect_generated_audio"))
+      .toHaveLength(1);
+  });
+
+  it("ignores delayed WAV QA inspection after the preview was discarded", async () => {
+    let finish: (result: unknown) => void = () => { throw new Error("No WAV inspect started"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "render_story_v2") return Promise.resolve(generatedAudio());
+      if (command === "inspect_generated_audio") {
+        return new Promise(resolve => { finish = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve(undefined);
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Inspect generated WAV (no model)" });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect generated WAV (no model)" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "inspect_generated_audio", { audioId: ID }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear preview" }));
+    const countBeforeLateResponse = onMessage.mock.calls.length;
+    await act(async () => { finish(inspectedAudio()); });
+    expect(screen.queryByRole("region", {
+      name: "Generated WAV level and pause inspection",
+    })).toBeNull();
+    expect(onMessage).toHaveBeenCalledTimes(countBeforeLateResponse);
+  });
+
+  it("refuses a WAV QA report whose size conflicts with current generated audio", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return generatedAudio();
+      if (command === "inspect_generated_audio") return {
+        ...inspectedAudio(), file_bytes: 60000,
+      };
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Inspect generated WAV (no model)" });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect generated WAV (no model)" }));
+    await waitFor(() => expect(onMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Generated WAV metadata changed")));
+    expect(screen.queryByRole("region", {
+      name: "Generated WAV level and pause inspection",
+    })).toBeNull();
   });
 
   it("renders a selected scene and pairs WAV/SRT filenames with human QA gating", async () => {
