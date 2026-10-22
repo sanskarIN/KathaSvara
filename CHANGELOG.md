@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Suppress stale WAV and dialogue SRT export **success/error UI feedback** if a creator clears, replaces or edits the active audio while native export is still running. Keep subtitle manual-review eligibility scoped to the current audio. Add mocked desktop race regressions for delayed WAV/SRT success and errors. A completed old export may still exist at its explicit destination, but it must not be attributed to the new preview.
+
 - Detect concurrent changes to locally generated WAV files during native streaming export even when their byte lengths stay unchanged. Compare opened-file modification timestamps and size before/after container validation and the output copy; remove the newly created destination if a change is detected. Add deterministic Rust metadata regression coverage. This is best-effort race detection, not a filesystem snapshot or human Hindi acceptance.
 
 - Connect the existing offline, model-free WAV quality inspector to the **Character and Scene Studio** desktop review panel. Use only a UUID-scoped generated audio path in Rust, sanitize private error paths, display quiet/clipping/long-pause hints and allow a local seek to an internal pause; reject stale inspections when the project/audio changes. Add Python protocol, TypeScript report-validation and mocked desktop IPC regressions. This does not auto-approve the human listening checklist or change published v0.5.0 assets.
