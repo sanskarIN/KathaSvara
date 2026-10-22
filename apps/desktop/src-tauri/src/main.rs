@@ -552,10 +552,11 @@ fn invoke_python(request: Value) -> Result<Value, String> {
     let stdout = child.stdout.take()
         .ok_or_else(|| "Python stdout was not connected.".to_string())?;
     let output_reader = thread::spawn(move || read_bounded_response(stdout));
-    let max_wait = if matches!(request.get("action").and_then(Value::as_str), Some("synthesize" | "render_story")) {
-        Duration::from_secs(600)
-    } else {
-        Duration::from_secs(15)
+    let max_wait = match request.get("action").and_then(Value::as_str) {
+        Some("synthesize" | "render_story") => Duration::from_secs(600),
+        // PCM inspection scans the entire allowed WAV twice without model weights.
+        Some("inspect_generated_wav") => Duration::from_secs(180),
+        _ => Duration::from_secs(15),
     };
     let started = Instant::now();
     loop {
@@ -1099,6 +1100,43 @@ fn discard_audio(app: tauri::AppHandle, audio_id: String) -> Result<(), String> 
     }
 }
 
+#[tauri::command]
+async fn inspect_generated_audio(
+    app: tauri::AppHandle,
+    audio_id: String,
+) -> Result<Value, String> {
+    // Never accept a caller-supplied file path. The only source is this
+    // app's already-generated UUID WAV inside its own audio directory.
+    let id = Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.".to_string())?;
+    let source = app_dir(&app)?.join("audio").join(format!("{id}.wav"));
+    let metadata = fs::symlink_metadata(&source)
+        .map_err(|_| "Generated WAV is missing. Render again before inspecting.".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Generated WAV must be a regular non-symlink file.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({
+            "action": "inspect_generated_wav",
+            "path": source,
+        })).map_err(|_| {
+            // Never echo an absolute audio path or a private machine directory
+            // from Python's error response to the desktop UI.
+            "Cannot inspect the generated WAV. Check the local Python runtime and audio file."
+                .to_string()
+        })?;
+        let report = response.get("result").cloned()
+            .ok_or_else(|| "WAV inspection returned no report.".to_string())?;
+        if report["structure_valid"] != true ||
+            report["model_loaded"] != false ||
+            report["hindi_listening_verified"] != false ||
+            report["human_review_required"] != true
+        {
+            return Err("WAV inspection returned inconsistent verification flags.".into());
+        }
+        Ok(report)
+    }).await.map_err(|_| "WAV inspection worker stopped unexpectedly.".to_string())?
+}
+
 fn copy_validated_wav(source: &Path, destination: &Path) -> Result<(), String> {
     if !destination.is_absolute() ||
         destination.extension().and_then(|ext| ext.to_str()) != Some("wav") {
@@ -1221,7 +1259,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, export_wav, export_subtitles, export_production_manifest
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
