@@ -164,3 +164,23 @@ def test_force_single_line_plan_does_not_normalize_other_lines(
     assert len(plan.lines) == 1
     assert plan.lines[0].segment.id == line_id
     assert calls == ["प्रजा कैसी है?"]
+
+
+def test_unsplittable_hindi_character_fails_preflight_before_loading_model(
+    tmp_path: Path,
+) -> None:
+    """An overlong written unit must not reach model loading or leave output."""
+    from kathasvara.production import render_story
+
+    doc = sample_doc()
+    doc.scenes[0].segments[0].spoken_text = "क" + "\u093c" * 280 + "अ"
+    with pytest.raises(ValueError, match="written Hindi character exceeds"):
+        inspect_render_plan(doc)
+
+    engine = FakeEngine()
+    output = tmp_path / "refused.wav"
+    with pytest.raises(ValueError, match="written Hindi character exceeds"):
+        render_story(doc, output, tmp_path / "cache", engine)
+    assert engine.loads == 0
+    assert engine.calls == []
+    assert not output.exists()
