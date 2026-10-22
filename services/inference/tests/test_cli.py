@@ -185,3 +185,38 @@ def test_abandoned_wav_protocol_is_dry_run_by_default(tmp_path) -> None:
 def test_abandoned_wav_protocol_rejects_invalid_targets(payload: dict[str, object]) -> None:
     with pytest.raises((ValueError, TypeError)):
         handle(payload)
+
+
+
+def test_generated_wav_inspection_protocol_is_model_free(tmp_path) -> None:
+    import wave
+
+    filename = tmp_path / "review.wav"
+    with wave.open(str(filename), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8000)
+        wav.writeframes(b"\x00\x00" * 800)
+
+    result = handle({"action": "inspect_generated_wav", "path": str(filename)})
+    assert result["ok"] is True
+    report = result["result"]
+    assert report["structure_valid"] is True
+    assert report["duration_seconds"] == 0.1
+    assert report["level_hints"]["near_silence_hint"] is True
+    assert report["level_hints"]["long_internal_pause_hint"] is False
+    assert report["model_loaded"] is False
+    assert report["hindi_listening_verified"] is False
+    assert report["human_review_required"] is True
+    assert str(filename) not in json.dumps(report)
+
+
+@pytest.mark.parametrize("path", [None, 1, False, "", "relative.wav", "/tmp/not-wav.txt"])
+def test_generated_wav_inspection_rejects_invalid_paths(path) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        handle({"action": "inspect_generated_wav", "path": path})
+
+
+def test_generated_wav_inspection_rejects_missing_file_without_model(tmp_path) -> None:
+    with pytest.raises(ValueError, match="Cannot open"):
+        handle({"action": "inspect_generated_wav", "path": str(tmp_path / "missing.wav")})
