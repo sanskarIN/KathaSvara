@@ -2,11 +2,23 @@
 //! Validate the RIFF/PCM16 container without allocating the full audio payload.
 //! Only local WAVs produced by KathaSvara are supported.
 use std::{
-    fs::File,
+    fs::{File, Metadata},
     io::{Read, Seek, SeekFrom},
 };
 
 const MAX_STORED_WAV: u64 = 512 * 1024 * 1024;
+
+/// Compare the metadata of an already-open WAV file before and after a
+/// streaming operation. Detects common same-size edits as well as truncation.
+/// This is not a cryptographic immutable snapshot; timestamp spoofing or edits
+/// after the final check still require stronger OS-level snapshot semantics.
+pub fn wav_source_metadata_unchanged(before: &Metadata, after: &Metadata) -> bool {
+    before.is_file() &&
+        after.is_file() &&
+        before.len() == after.len() &&
+        before.modified().ok().zip(after.modified().ok())
+            .is_some_and(|(first, last)| first == last)
+}
 
 pub fn inspect_wav_file(source: &mut File) -> Result<u64, String> {
     const INVALID: &str = "Stored audio is not a valid mono 16-bit PCM WAV.";
@@ -113,6 +125,23 @@ mod tests {
         assert!(inspect_wav_file(&mut reader).is_err());
         drop(reader);
         std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn same_length_metadata_change_invalidates_wav_export_snapshot() {
+        let path = std::env::temp_dir().join(format!(
+            "kathasvara-export-guard-{}.wav", uuid::Uuid::new_v4(),
+        ));
+        std::fs::write(&path, b"test-wave-bytes").unwrap();
+        let file = File::open(&path).unwrap();
+        let original = file.metadata().unwrap();
+        assert!(wav_source_metadata_unchanged(&original, &file.metadata().unwrap()));
+        file.set_modified(original.modified().unwrap() + std::time::Duration::from_secs(10))
+            .unwrap();
+        let edited = file.metadata().unwrap();
+        assert_eq!(edited.len(), original.len());
+        assert!(!wav_source_metadata_unchanged(&original, &edited));
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
