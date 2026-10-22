@@ -190,3 +190,40 @@ def test_private_wav_name_absent_even_when_level_hints_are_present(tmp_path: Pat
     assert "file_path" not in result
     assert result["model_loaded"] is False
     assert result["distinct_voices_verified"] is False
+
+
+
+def test_rejects_same_size_wav_changed_during_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Metadata change during the scan must invalidate even a complete PCM file."""
+    from kathasvara import wav_acceptance
+
+    path = wav_file(tmp_path / "private-concurrent.wav")
+    initial = path.stat()
+    actual_sha256 = hashlib.sha256
+
+    class MutatingDigest:
+        def __init__(self) -> None:
+            self._digest = actual_sha256()
+            self._mutated = False
+
+        def update(self, chunk: bytes) -> None:
+            self._digest.update(chunk)
+            if not self._mutated:
+                self._mutated = True
+                # Simulate an editor touching/replacing data of the same size
+                # while checksum generation is underway. Access times may
+                # change simply from reads, but modification time may not.
+                os.utime(path, ns=(
+                    initial.st_atime_ns,
+                    initial.st_mtime_ns + 2_000_000_000,
+                ))
+
+        def hexdigest(self) -> str:
+            return self._digest.hexdigest()
+
+    monkeypatch.setattr(wav_acceptance.hashlib, "sha256", MutatingDigest)
+    with pytest.raises(ValueError, match="changed during inspection"):
+        inspect_wav_candidate(path)
+    assert path.stat().st_size == initial.st_size

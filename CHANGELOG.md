@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Strengthen the read-only offline WAV inspector to reject concurrent file mutations even when the file length stays unchanged, using opened-file identity and nanosecond modification/metadata timestamps around the existing PCM and SHA-256 scans. Include a no-model regression test; these checks cannot certify an adversarial immutable snapshot or genuine Hindi narration.
+
 - Retire automatic `push` triggers for **already published** v0.2.1–v0.5.0 release workflows, retaining manual exact-SHA/tag-existence guards to prevent accidental republishing when workflow dependencies change. Add automated policy regressions and [release workflow lifecycle guidance](docs/maintenance/release-workflow-lifecycle.md). No tags or assets modified.
 
 - Preserve Devanagari written units when splitting overlong, unspaced speech tokens: avoid breaking vowel signs, nukta, virama conjuncts or zero-width Indic joiners at model-input chunk boundaries. Fail closed for a written unit larger than the 280-character chunk budget, without truncating the source. Add no-model regressions and [chunk-boundary QA notes](docs/qa/hindi-chunk-boundaries.md). This is source development, not real-model Hindi acceptance or a new published release.

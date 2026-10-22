@@ -104,7 +104,18 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
         digest = hashlib.sha256()
         while chunk := raw.read(1024 * 1024):
             digest.update(chunk)
-        if os.fstat(raw.fileno()).st_size != info.st_size:
+        # File length alone misses same-size rewrites while the level scan and
+        # SHA-256 pass are running. Compare opened-file identity and mutation
+        # times, excluding access time (which reads may legitimately update).
+        # This detects common concurrent edits, not adversarial timestamp
+        # restoration or a mutation that occurs after this final fstat.
+        final_info = os.fstat(raw.fileno())
+        if (
+            (final_info.st_dev, final_info.st_ino) != (info.st_dev, info.st_ino)
+            or final_info.st_size != info.st_size
+            or final_info.st_mtime_ns != info.st_mtime_ns
+            or final_info.st_ctime_ns != info.st_ctime_ns
+        ):
             raise ValueError("WAV changed during inspection.")
     return {
         "format": "kathasvara-wav-structural-inspection",
