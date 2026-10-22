@@ -44,6 +44,9 @@ def test_structural_wav_metadata_and_sha_have_no_private_paths(tmp_path: Path) -
         "near_silence_hint": True,
         "possible_clipping_hint": False,
         "clipped_sample_percentage": 0.0,
+        "longest_internal_quiet_span_seconds": 0.0,
+        "longest_internal_quiet_span_start_seconds": None,
+        "long_internal_pause_hint": False,
         "signal_review_required": True,
     }
     assert "गोपनीय" not in str(result)
@@ -227,3 +230,68 @@ def test_rejects_same_size_wav_changed_during_digest(
     with pytest.raises(ValueError, match="changed during inspection"):
         inspect_wav_candidate(path)
     assert path.stat().st_size == initial.st_size
+
+
+
+def test_long_internal_quiet_gap_prompts_review_at_actual_timestamp(tmp_path: Path) -> None:
+    # Audible samples at both ends make exactly 3 s of near-zero PCM an
+    # internal gap, not an opening/closing fade.
+    audio = [8000] * 400 + [0] * (3 * 8000) + [-8000] * 400
+    hint = inspect_wav_candidate(pcm16_file(tmp_path / "gap.wav", audio))["level_hints"]
+    assert hint["longest_internal_quiet_span_seconds"] == 3.0
+    assert hint["longest_internal_quiet_span_start_seconds"] == 0.05
+    assert hint["long_internal_pause_hint"] is True
+    assert hint["near_silence_hint"] is False
+    assert hint["possible_clipping_hint"] is False
+    assert hint["signal_review_required"] is True
+
+
+def test_short_internal_pause_is_measured_but_not_flagged(tmp_path: Path) -> None:
+    audio = [8000] * 100 + [0] * (2 * 8000) + [8000] * 100
+    hint = inspect_wav_candidate(pcm16_file(tmp_path / "pause.wav", audio))["level_hints"]
+    assert hint["longest_internal_quiet_span_seconds"] == 2.0
+    assert hint["longest_internal_quiet_span_start_seconds"] == 0.013
+    assert hint["long_internal_pause_hint"] is False
+    assert hint["signal_review_required"] is False
+
+
+def test_leading_and_trailing_silence_are_not_internal_gaps(tmp_path: Path) -> None:
+    audio = [0] * 24000 + [8000] * 800 + [0] * 24000
+    hint = inspect_wav_candidate(pcm16_file(tmp_path / "edges.wav", audio))["level_hints"]
+    assert hint["longest_internal_quiet_span_seconds"] == 0.0
+    assert hint["longest_internal_quiet_span_start_seconds"] is None
+    assert hint["long_internal_pause_hint"] is False
+
+
+def test_internal_quiet_span_crosses_streaming_frame_blocks(tmp_path: Path) -> None:
+    audio = [8000] * 8000 + [1] * 28000 + [8000] * 10
+    hint = inspect_wav_candidate(pcm16_file(tmp_path / "stream-gap.wav", audio))[
+        "level_hints"
+    ]
+    assert hint["longest_internal_quiet_span_seconds"] == 3.5
+    assert hint["longest_internal_quiet_span_start_seconds"] == 1.0
+    assert hint["long_internal_pause_hint"] is True
+
+
+def test_quiet_run_uses_pcm_amplitude_threshold_and_longest_span(tmp_path: Path) -> None:
+    # Amplitude 32 is near-silent; 33 stops the run. The later longer gap wins.
+    audio = [1000] + [32] * 8000 + [33] + [0] * 24000 + [1000]
+    hint = inspect_wav_candidate(pcm16_file(tmp_path / "two-gaps.wav", audio))[
+        "level_hints"
+    ]
+    assert hint["longest_internal_quiet_span_seconds"] == 3.0
+    assert hint["longest_internal_quiet_span_start_seconds"] == 1.0
+    assert hint["long_internal_pause_hint"] is True
+
+
+def test_long_gap_report_does_not_leak_private_path_or_claim_speech(
+    tmp_path: Path,
+) -> None:
+    audio = [5000] + [0] * 24000 + [5000]
+    file = pcm16_file(tmp_path / "गुप्त-कहानी.wav", audio)
+    report = inspect_wav_candidate(file)
+    assert "गुप्त-कहानी" not in json.dumps(report, ensure_ascii=False)
+    assert str(tmp_path) not in str(report)
+    assert report["hindi_listening_verified"] is False
+    assert report["distinct_voices_verified"] is False
+    assert report["human_review_required"] is True

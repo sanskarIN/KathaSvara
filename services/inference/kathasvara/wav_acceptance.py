@@ -22,6 +22,10 @@ MAX_SECONDS = 1200
 # Human listening remains required. These are only conservative level warnings.
 QUIET_RMS_DBFS = -60.0
 CLIPPING_SAMPLE_FRACTION = 0.01
+# Internal spans below this PCM16 amplitude are *near*-silence, not necessarily
+# digital zeros. Treat >=3 seconds surrounded by louder audio as a review hint.
+NEAR_SILENCE_SAMPLE_MAX = 32
+LONG_INTERNAL_PAUSE_SECONDS = 3
 
 
 def _dbfs(amplitude: float) -> float | None:
@@ -29,20 +33,35 @@ def _dbfs(amplitude: float) -> float | None:
     return round(20 * math.log10(amplitude / 32768.0), 2) if amplitude > 0 else None
 
 
-def _level_hints(*, peak: int, squared_sum: int, clipped: int, frames: int) -> dict[str, object]:
+def _level_hints(
+    *, peak: int, squared_sum: int, clipped: int, frames: int, rate: int,
+    longest_internal_pause_frames: int, longest_internal_pause_start: int | None,
+) -> dict[str, object]:
     rms = math.sqrt(squared_sum / frames)
     rms_dbfs = _dbfs(rms)
     quiet = rms_dbfs is None or rms_dbfs <= QUIET_RMS_DBFS
     possible_clipping = clipped / frames >= CLIPPING_SAMPLE_FRACTION
+    long_pause = longest_internal_pause_frames >= rate * LONG_INTERNAL_PAUSE_SECONDS
     return {
         "peak_dbfs": _dbfs(peak),
         "rms_dbfs": rms_dbfs,
         "near_silence_hint": quiet,
         "possible_clipping_hint": possible_clipping,
         "clipped_sample_percentage": round(100 * clipped / frames, 3),
-        # A simple amplitude check is not a signal classifier. It is only an
-        # invitation to listen to the WAV, never evidence of Hindi quality.
-        "signal_review_required": quiet or possible_clipping,
+        # Report the *longest internal* quiet span only. Leading and trailing
+        # silence may be deliberate and are excluded; locations are seconds
+        # into the local WAV rather than private source or filesystem paths.
+        "longest_internal_quiet_span_seconds": round(
+            longest_internal_pause_frames / rate, 3,
+        ),
+        "longest_internal_quiet_span_start_seconds": (
+            round(longest_internal_pause_start / rate, 3)
+            if longest_internal_pause_start is not None else None
+        ),
+        "long_internal_pause_hint": long_pause,
+        # These simple PCM statistics are never evidence of Hindi narration
+        # quality, even when every automated signal hint is false.
+        "signal_review_required": quiet or possible_clipping or long_pause,
     }
 
 
@@ -77,6 +96,13 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                 squared_sum = 0
                 peak = 0
                 clipped = 0
+                # Stream across block boundaries; do not retain audio arrays.
+                heard_signal = False
+                quiet_run = 0
+                quiet_start = 0
+                longest_internal_pause_frames = 0
+                longest_internal_pause_start: int | None = None
+                sample_position = 0
                 while True:
                     samples = wav.readframes(8192)
                     if not samples:
@@ -90,13 +116,32 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                     seen += len(pcm)
                     if seen > frames:
                         raise ValueError("WAV contains more frames than its declared data.")
-                    squared_sum += sum(value * value for value in pcm)
-                    peak = max(peak, max(abs(value) for value in pcm))
-                    clipped += sum(abs(value) >= 32767 for value in pcm)
+                    for value in pcm:
+                        amplitude = abs(value)
+                        squared_sum += value * value
+                        peak = max(peak, amplitude)
+                        if amplitude >= 32767:
+                            clipped += 1
+                        if amplitude <= NEAR_SILENCE_SAMPLE_MAX:
+                            if heard_signal:
+                                if quiet_run == 0:
+                                    quiet_start = sample_position
+                                quiet_run += 1
+                        else:
+                            # Record only quiet runs followed by another signal.
+                            # Trailing runs are intentionally never finalized.
+                            if quiet_run > longest_internal_pause_frames:
+                                longest_internal_pause_frames = quiet_run
+                                longest_internal_pause_start = quiet_start
+                            heard_signal = True
+                            quiet_run = 0
+                        sample_position += 1
                 if seen != frames:
                     raise ValueError("WAV audio is truncated or the frame count is incorrect.")
                 levels = _level_hints(
                     peak=peak, squared_sum=squared_sum, clipped=clipped, frames=seen,
+                    rate=rate, longest_internal_pause_frames=longest_internal_pause_frames,
+                    longest_internal_pause_start=longest_internal_pause_start,
                 )
         except wave.Error as exc:
             raise ValueError("WAV contains an unsupported or invalid PCM header.") from exc
