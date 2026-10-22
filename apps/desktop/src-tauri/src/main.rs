@@ -1712,11 +1712,13 @@ mod tests {
         double_data.extend_from_slice(b"data");
         double_data.extend_from_slice(&2_u32.to_le_bytes());
         double_data.extend_from_slice(&[0_u8; 2]);
-        double_data[4..8].copy_from_slice(&((double_data.len() - 8) as u32).to_le_bytes());
+        let length = (double_data.len() - 8) as u32;
+        double_data[4..8].copy_from_slice(&length.to_le_bytes());
         assert!(inspect_wav(&double_data).is_err());
         let mut double_fmt = original.clone();
         double_fmt.extend_from_slice(&original[12..36]);
-        double_fmt[4..8].copy_from_slice(&((double_fmt.len() - 8) as u32).to_le_bytes());
+        let length = (double_fmt.len() - 8) as u32;
+        double_fmt[4..8].copy_from_slice(&length.to_le_bytes());
         assert!(inspect_wav(&double_fmt).is_err());
         let mut empty_data = original;
         empty_data[40..44].copy_from_slice(&0_u32.to_le_bytes());
