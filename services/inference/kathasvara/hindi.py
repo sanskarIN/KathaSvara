@@ -9,6 +9,9 @@ import unicodedata
 
 MAX_STORY_LENGTH = 3000
 MAX_CHUNK_LENGTH = 280
+# Joiners and virama bind adjacent Indic characters into one written unit.
+_JOINERS = frozenset({"\u200c", "\u200d"})
+_DEVANAGARI_VIRAMA = "\u094d"
 
 
 def normalize_hindi(text: str) -> str:
@@ -36,6 +39,41 @@ def validate_story(text: str) -> str:
     return normalized
 
 
+
+def _continues_devanagari_cluster(word: str, at: int) -> bool:
+    """Whether a break before this index would separate a Hindi written unit.
+
+    This conservative boundary guard is not a general Unicode grapheme
+    segmenter. It covers combining marks, spacing vowel signs, Devanagari
+    virama/conjuncts, and explicit Indic zero-width joiners/non-joiners.
+    """
+    if at <= 0 or at >= len(word):
+        return False
+    following = word[at]
+    preceding = word[at - 1]
+    return (
+        unicodedata.category(following).startswith("M")
+        or following in _JOINERS
+        or preceding in _JOINERS
+        or preceding == _DEVANAGARI_VIRAMA
+    )
+
+
+def _split_long_word(word: str, limit: int) -> list[str]:
+    """Split long unspaced words without tearing Devanagari clusters apart."""
+    pieces: list[str] = []
+    start = 0
+    while start < len(word):
+        end = min(start + limit, len(word))
+        if end < len(word):
+            while end > start and _continues_devanagari_cluster(word, end):
+                end -= 1
+            if end == start:
+                raise ValueError("A written Hindi character exceeds the speech chunk limit.")
+        pieces.append(word[start:end])
+        start = end
+    return pieces
+
 def split_for_engine(text: str, limit: int = MAX_CHUNK_LENGTH) -> list[str]:
     """Split on sentence/word boundaries; never silently truncate content."""
     if limit < 20:
@@ -51,8 +89,7 @@ def split_for_engine(text: str, limit: int = MAX_CHUNK_LENGTH) -> list[str]:
                 if current:
                     chunks.append(current)
                     current = ""
-                for start in range(0, len(word), limit):
-                    chunks.append(word[start:start + limit])
+                chunks.extend(_split_long_word(word, limit))
                 continue
             combined = f"{current} {word}".strip()
             if len(combined) > limit:
