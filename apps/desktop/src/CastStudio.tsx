@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
 import { buildDialogueSrt } from "./lib/subtitles";
+import { parseWavQuality, qualityReviewHints, type WavQualityReport } from "./lib/wav_quality";
 import { resolveRenderSelection } from "./lib/render_selection";
 import { isCurrentExportSession, renderExportLabel, suggestedOutputFile, type AudioExportLabel } from "./lib/export_names";
 import {
@@ -65,6 +66,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const [audioExportLabel, setAudioExportLabel] = useState<AudioExportLabel | null>(null);
+  const [wavQa, setWavQa] = useState<{ audioId: string; report: WavQualityReport } | null>(null);
+  const [inspectingWav, setInspectingWav] = useState(false);
+  const qaEpoch = useRef(0);
+  function clearWavInspection() {
+    qaEpoch.current += 1;
+    setWavQa(null);
+    setInspectingWav(false);
+  }
   const audioEpoch = useRef(0);
   // Never persisted or transferred to the model: only manual QA for the current WAV.
   const [review, setReview] = useState<AudioReview | null>(null);
@@ -86,6 +95,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     audioEpoch.current += 1;
     setAudio(null);
+    clearWavInspection();
     setAudioExportLabel(null);
     setReview(null);
     setHistory(null);
@@ -106,6 +116,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     audioEpoch.current += 1;
     setAudio(null);
+    clearWavInspection();
     setAudioExportLabel(null);
     setReview(null);
     onChange(previous => update(previous));
@@ -166,6 +177,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setReview(null);
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     setAudio(null);
+    clearWavInspection();
     onMessage("Generating speech locally, with one model voice and per-character supported controls. Cancellation is cooperative.");
     try {
       const result = await invoke<AudioResult>("render_story_v2", {
@@ -347,6 +359,35 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
 
+  async function inspectGeneratedWav() {
+    if (!audio || inspectingWav) return;
+    const request = ++qaEpoch.current;
+    const revision = renderRevision.current;
+    const epoch = audioEpoch.current;
+    const id = audio.audio_id;
+    setWavQa(null);
+    setInspectingWav(true);
+    try {
+      const raw = await invoke<unknown>("inspect_generated_audio", { audioId: id });
+      const report = parseWavQuality(raw);
+      if (request !== qaEpoch.current || epoch !== audioEpoch.current ||
+          revision !== renderRevision.current) return;
+      if ((audio.file_bytes !== undefined && report.file_bytes !== audio.file_bytes) ||
+          Math.abs(report.duration_seconds - audio.duration_seconds) > 0.05) {
+        throw new Error("Generated WAV metadata changed; render or inspect again.");
+      }
+      setWavQa({ audioId: id, report });
+      onMessage("Local WAV structure and audio-level hints checked. These do not confirm Hindi voice quality; listen to the actual audio.");
+    } catch (error) {
+      if (request === qaEpoch.current && epoch === audioEpoch.current &&
+          revision === renderRevision.current) {
+        onMessage("WAV inspection failed: " + errorString(error));
+      }
+    } finally {
+      if (request === qaEpoch.current) setInspectingWav(false);
+    }
+  }
+
   async function exportAudio() {
     if (!audio || !audioExportLabel) return;
     const revision = renderRevision.current;
@@ -376,6 +417,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     const id = audio.audio_id;
     audioEpoch.current += 1;
     setAudio(null);
+    clearWavInspection();
     setAudioExportLabel(null);
     setReview(null);
     try {
@@ -408,6 +450,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       if (!response.ok) throw new Error("Dialogue parser returned an unsuccessful response.");
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
       setAudio(null);
+      clearWavInspection();
       renderRevision.current += 1;
       onChange({ ...response.result, pronunciation_glossary: document.pronunciation_glossary ?? [] });
       setUnresolved(response.unresolved);
@@ -446,6 +489,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
       audioEpoch.current += 1;
       setAudio(null);
+      clearWavInspection();
       setAudioExportLabel(null);
       setReview(null);
       onChange(loaded);
@@ -625,11 +669,39 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               Review Hindi punctuation and timing before adding them to a video.</p>
             <div className="cast-actions">
               <button className="secondary-button" onClick={() => void exportAudio()}>Export WAV</button>
+              <button className="secondary-button" disabled={inspectingWav}
+                onClick={() => void inspectGeneratedWav()}>
+                {inspectingWav ? "Inspecting WAV…" : "Inspect generated WAV (no model)"}
+              </button>
               <button className="secondary-button"
                 disabled={!audio.segment_timings?.length}
                 onClick={() => void exportSceneSubtitles()}>Export dialogue SRT</button>
               <button className="quiet-button" onClick={() => void clearAudio()}>Clear preview</button>
             </div>
+            {wavQa?.audioId === audio.audio_id && (
+              <section className="inspection-panel" aria-label="Generated WAV level and pause inspection">
+                <strong>Structural WAV inspection · human listening still required</strong>
+                <p>{wavQa.report.duration_seconds.toFixed(1)} seconds checked ·
+                  {" "}{(wavQa.report.file_bytes / (1024 * 1024)).toFixed(2)} MiB ·
+                  {" "}RMS {wavQa.report.level_hints.rms_dbfs?.toFixed(1) ?? "silent"} dBFS.
+                </p>
+                <ul>{qualityReviewHints(wavQa.report).map(hint => <li key={hint}>{hint}</li>)}</ul>
+                {wavQa.report.level_hints.long_internal_pause_hint &&
+                  audio.preview_available !== false && (
+                  <button type="button" className="quiet-button"
+                    onClick={() => {
+                      const start = wavQa.report.level_hints.longest_internal_quiet_span_start_seconds;
+                      if (audioRef.current && start !== null) {
+                        audioRef.current.currentTime = start;
+                      }
+                    }}>Jump to flagged quiet gap</button>
+                )}
+                <p className="helper">This no-model structural report is not a listening pass.
+                  Dramatic pauses can be intentional; a clean result cannot establish
+                  natural Hindi pronunciation, correct character voices or SRT accuracy.
+                  Your separate checklist remains entirely manual and unsaved.</p>
+              </section>
+            )}
             {activeReview && reviewState && (
               <section className="inspection-panel" aria-label="Manual narration quality checklist">
                 <strong>Human review for this WAV — {reviewState.completed} / {reviewState.total} marked</strong>
