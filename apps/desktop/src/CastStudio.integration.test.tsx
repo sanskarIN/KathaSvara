@@ -160,12 +160,18 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
       "inspect_generated_audio", { audioId: ID }));
     fireEvent.click(screen.getByRole("button", { name: "Clear preview" }));
-    const countBeforeLateResponse = onMessage.mock.calls.length;
     await act(async () => { finish(inspectedAudio()); });
     expect(screen.queryByRole("region", {
       name: "Generated WAV level and pause inspection",
     })).toBeNull();
-    expect(onMessage).toHaveBeenCalledTimes(countBeforeLateResponse);
+    // Clearing the preview may itself complete asynchronously and rightly
+    // emit a deletion message. Only the stale inspection's success/failure
+    // messages are forbidden after the audio identity has been invalidated.
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && (
+        message.includes("Local WAV structure and audio-level hints checked") ||
+        message.includes("WAV inspection failed")
+      ))).toBe(false);
   });
 
   it("refuses a WAV QA report whose size conflicts with current generated audio", async () => {
