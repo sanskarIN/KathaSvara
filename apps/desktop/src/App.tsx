@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
+import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
@@ -404,7 +405,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <span className="side-tag">LOCAL FIRST</span>
           <p>Your scripts stay on your machine. No account required.</p>
-          <small>v0.4.0 · Experimental developer preview</small>
+          <small>v{desktopVersion} · Experimental developer preview</small>
         </div>
       </aside>
 
