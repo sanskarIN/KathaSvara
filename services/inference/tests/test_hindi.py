@@ -1,4 +1,5 @@
 """Hindi normalization tests — no model downloads."""
+import itertools
 import unicodedata
 
 import pytest
@@ -60,7 +61,7 @@ def test_long_unicode_token_keeps_writing_units_intact(token: str) -> None:
     assert len(chunks) >= 2
     assert all(0 < len(chunk) <= 280 for chunk in chunks)
     assert "".join(chunks) == token
-    for left, right in zip(chunks, chunks[1:]):
+    for left, right in itertools.pairwise(chunks):
         assert not unicodedata.category(right[0]).startswith("M")
         assert right[0] not in {"\u200c", "\u200d"}
         assert left[-1] not in {"\u094d", "\u200c", "\u200d"}
