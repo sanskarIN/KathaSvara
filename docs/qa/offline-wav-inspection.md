@@ -48,6 +48,7 @@ Example report fields (values below are illustrative, not evidence of a real-mod
 - Absolute `.wav` path, non-symlink regular file, 44 bytes–512 MiB size bound.
 - PCM16 *uncompressed, mono* WAV, 8–192 kHz sample rate, nonzero duration no longer than 20 minutes.
 - Streamed frame reads to detect a truncated PCM data payload, using bounded chunks and a complete-file SHA-256 digest without holding the recording in RAM.
+- Reject files whose opened-file identity, byte size, modification time or metadata-change time differs between the initial inspection and the end of hashing. This catches common **same-size edits during inspection**, but cannot prove an immutable snapshot against deliberate timestamp restoration or edits after the final check. Access time is intentionally excluded because reads can change it.
 - Conservative `level_hints` computed from PCM amplitudes in the same bounded pass: peak and RMS dBFS (`null` for digital silence), percentage of samples at 16-bit full scale, `near_silence_hint` for RMS ≤ -60 dBFS, and `possible_clipping_hint` when at least 1% of samples reach ±32767/32768. Both hints are **advisory**. `signal_review_required` is true when either hint triggers; human review is **always** required even when both are false.
 - No script, text, character/scene names, local file paths, voices, downloaded checkpoints or hardware identifiers are placed in the success JSON.
 
