@@ -133,7 +133,10 @@ mod tests {
             "kathasvara-export-guard-{}.wav", uuid::Uuid::new_v4(),
         ));
         std::fs::write(&path, b"test-wave-bytes").unwrap();
-        let file = File::open(&path).unwrap();
+        // Windows requires write-attributes access for set_modified; keep
+        // the test deterministic without sleeping for filesystem clock ticks.
+        let file = std::fs::OpenOptions::new()
+            .read(true).write(true).open(&path).unwrap();
         let original = file.metadata().unwrap();
         assert!(wav_source_metadata_unchanged(&original, &file.metadata().unwrap()));
         file.set_modified(original.modified().unwrap() + std::time::Duration::from_secs(10))
@@ -141,6 +144,7 @@ mod tests {
         let edited = file.metadata().unwrap();
         assert_eq!(edited.len(), original.len());
         assert!(!wav_source_metadata_unchanged(&original, &edited));
+        drop(file);
         std::fs::remove_file(path).unwrap();
     }
 
