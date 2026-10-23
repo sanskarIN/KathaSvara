@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, legacyToStoryV2,
+  addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, duplicateScene, legacyToStoryV2,
   makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
   type StoryV2,
 } from "./story_v2";
@@ -169,5 +169,74 @@ describe("v0.5.3 in-scene narration ordering", () => {
       doc.scenes[0], { ...doc.scenes[1], segments: [{ ...doc.scenes[0].segments[0] }] },
     ] };
     expect(() => moveSegmentWithinScene(duplicate, "seg1", 1)).toThrow("exactly once");
+  });
+});
+
+
+describe("v0.5.3 safe scene duplication", () => {
+  function makeIds(...ids: string[]) {
+    let index = 0;
+    return () => ids[index++] ?? "no-more-ids";
+  }
+  it("duplicates immediately after its source with new scene and line identities", () => {
+    const doc = fixture();
+    const source = doc.scenes[0].segments[0];
+    const result = duplicateScene(doc, "s1", makeIds("copied-scene", "copied-seg"));
+    expect(result.scenes.map(scene => scene.id)).toEqual(["s1", "copied-scene", "s2"]);
+    expect(result.scenes[1].title).toBe("दरबार (copy)");
+    expect(result.scenes[1].segments[0]).toEqual({
+      ...source, id: "copied-seg", status: "pending",
+      audio_ref: null, duration_seconds: null,
+    });
+    expect(result.scenes[1].segments[0].speaker_id).toBe("raja");
+    expect(result.scenes[1].segments[0].original_text).toBe("नमस्कार");
+    expect(result.scenes[1].segments[0].spoken_text).toBe("नमस्कार");
+    expect(result.text).toBe(doc.text);
+    expect(doc.scenes.map(scene => scene.id)).toEqual(["s1", "s2"]);
+    expect(doc.scenes[0].segments[0].audio_ref).toBe("cached-audio");
+  });
+  it("preserves unspoken stage directions but removes any stale audio metadata", () => {
+    const doc = fixture();
+    doc.scenes[0].segments.push({
+      ...doc.scenes[0].segments[0], id: "direction", kind: "direction",
+      original_text: "[पर्दा गिरता है]", spoken_text: "", speaker_id: null,
+    });
+    const result = duplicateScene(doc, "s1", makeIds("scene-copy", "speech-copy", "direction-copy"));
+    expect(result.scenes[1].segments.map(s => s.id)).toEqual(["speech-copy", "direction-copy"]);
+    expect(result.scenes[1].segments[1].kind).toBe("direction");
+    expect(result.scenes[1].segments[1].original_text).toBe("[पर्दा गिरता है]");
+    expect(result.scenes[1].segments[1].audio_ref).toBeNull();
+    expect(result.scenes[1].segments[1].status).toBe("pending");
+    expect(doc.scenes[0].segments[1].audio_ref).toBe("cached-audio");
+  });
+  it("assigns a bounded, distinguishable copied title for existing and long names", () => {
+    const doc = fixture();
+    doc.scenes.push({ id: "another", title: "दरबार (copy)", notes: "", segments: [] });
+    const first = duplicateScene(doc, "s1", makeIds("copied-scene", "copied-seg"));
+    expect(first.scenes[1].title).toBe("दरबार (copy 2)");
+    const longDoc = fixture();
+    longDoc.scenes[0].title = "द".repeat(120);
+    const long = duplicateScene(longDoc, "s1", makeIds("long-copy", "long-seg"));
+    expect(long.scenes[1].title.length).toBeLessThanOrEqual(120);
+    expect(long.scenes[1].title).toContain("(copy)");
+  });
+  it("fails closed on missing scene, duplicate IDs and excessive scene count", () => {
+    const doc = fixture();
+    expect(() => duplicateScene(doc, "unknown", makeIds("new", "line"))).toThrow("not found");
+    expect(() => duplicateScene(doc, "s1", makeIds("s1", "line"))).toThrow("duplicate");
+    expect(() => duplicateScene(doc, "s1", makeIds("fresh-scene", "seg1"))).toThrow("duplicate");
+    expect(() => duplicateScene(doc, "s1", makeIds("same", "same"))).toThrow("duplicate");
+    const full: StoryV2 = { ...doc, scenes: Array.from({ length: 200 }, (_, i) => ({
+      id: "scene-" + i, title: "शीर्षक", notes: "", segments: [],
+    })) };
+    expect(() => duplicateScene(full, "scene-0", makeIds("additional"))).toThrow("Maximum 200");
+  });
+  it("refuses a cloned scene that would exceed the supported 256-line render budget", () => {
+    const doc = fixture();
+    doc.scenes[0].segments = Array.from({ length: 130 }, (_, i) => ({
+      ...doc.scenes[0].segments[0], id: "segment-" + i,
+    }));
+    expect(() => duplicateScene(doc, "s1")).toThrow("exceed 256");
+    expect(doc.scenes).toHaveLength(2);
   });
 });
