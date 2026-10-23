@@ -155,6 +155,60 @@ export function addScene(project: StoryV2, title: string, id: string = crypto.ra
   }] };
 }
 
+/** Duplicate a scene as a fresh, unsynthesized narrative branch.
+ * The original Hindi source/review and speaker mapping are preserved, while
+ * every copied segment gets a new identity and loses stale audio metadata.
+ * The optional ID factory allows deterministic no-model regression tests.
+ */
+export function duplicateScene(
+  project: StoryV2, sceneId: string,
+  makeId: () => string = () => crypto.randomUUID(),
+): StoryV2 {
+  const index = project.scenes.findIndex(scene => scene.id === sceneId);
+  if (index < 0) throw new Error("Scene to duplicate was not found.");
+  if (project.scenes.filter(scene => scene.id === sceneId).length !== 1) {
+    throw new Error("Scene identifiers must be unique.");
+  }
+  if (project.scenes.length >= 200) throw new Error("Maximum 200 scenes.");
+  const source = project.scenes[index];
+  // The current renderer and SRT pipeline support a maximum of 256 dialogue cues.
+  const spoken = project.scenes.reduce((total, scene) =>
+    total + scene.segments.filter(segment => segment.kind === "speech").length, 0);
+  const additional = source.segments.filter(segment => segment.kind === "speech").length;
+  if (spoken + additional > 256) {
+    throw new Error("Duplicating this scene would exceed 256 spoken lines.");
+  }
+  const usedIds = new Set([
+    ...project.scenes.map(scene => scene.id),
+    ...project.scenes.flatMap(scene => scene.segments.map(segment => segment.id)),
+  ]);
+  const uniqueId = (): string => {
+    const id = makeId();
+    if (!id || usedIds.has(id)) throw new Error("Generated duplicate scene/line identity.");
+    usedIds.add(id);
+    return id;
+  };
+  const copiedSceneId = uniqueId();
+  let number = 1;
+  const labels = new Set(project.scenes.map(scene => scene.title.toLocaleLowerCase()));
+  let title = "";
+  do {
+    const suffix = number === 1 ? " (copy)" : ` (copy ${number})`;
+    title = source.title.slice(0, 120 - suffix.length).trimEnd() + suffix;
+    number += 1;
+  } while (labels.has(title.toLocaleLowerCase()));
+  const duplicated: SceneV2 = {
+    ...source, id: copiedSceneId, title,
+    segments: source.segments.map(segment => ({
+      ...segment, id: uniqueId(), status: "pending",
+      audio_ref: null, duration_seconds: null,
+    })),
+  };
+  const scenes = [...project.scenes];
+  scenes.splice(index + 1, 0, duplicated);
+  return { ...project, scenes };
+}
+
 export function moveSegment(project: StoryV2, segmentId: string, destinationSceneId: string): StoryV2 {
   if (!project.scenes.some(scene => scene.id === destinationSceneId)) {
     throw new Error("Destination scene does not exist.");
