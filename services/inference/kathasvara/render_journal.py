@@ -25,7 +25,10 @@ def safe_error_type(error_type: type[BaseException] | None) -> str | None:
         return None
     if error_type.__name__ == "RenderCancelled":
         return "RenderCancelled"
-    for category in (PermissionError, FileNotFoundError, MemoryError, OSError, ValueError, RuntimeError):
+    for category in (
+        PermissionError, FileNotFoundError, MemoryError,
+        OSError, ValueError, RuntimeError,
+    ):
         if issubclass(error_type, category):
             return category.__name__
     return "OtherError"
@@ -128,7 +131,5 @@ class RenderJournal:
             failure = "RenderCancelled"
         else:
             state = "failed"
-            failure = error_type.__name__
-        self._commit({**self.document, "state": state, "error_type": (
-            safe_error_type(error_type) if error_type is not None else failure
-        )})
+            failure = safe_error_type(error_type)
+        self._commit({**self.document, "state": state, "error_type": failure})
