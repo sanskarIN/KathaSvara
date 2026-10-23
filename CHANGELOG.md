@@ -2,6 +2,8 @@
 
 ## Unreleased — v0.5.2 experimental developer pre-release candidate (not published)
 
+- Read inline WAV previews through the **same opened and RIFF-validated file handle**, rather than reopening the pathname after inspection; cap bytes to the 25 MiB WebView preview budget and compare opened-file metadata before/after reading. Refuse truncated, grown or modified preview sources. Add Rust regressions for exact payload, forged lengths and mutation. This is best-effort file consistency, not an immutable snapshot or real Hindi voice acceptance.
+
 - Compare worker-reported sample rate and duration with the **actual opened PCM16 WAV header and frame count** before returning audio preview/export metadata. Preserve bounded RIFF validation and reject contradictory worker metadata instead of accepting an otherwise well-formed WAV with incorrect timestamps. Add Rust frame-derived-duration and falsified-metadata regressions; these do not prove natural Hindi audio.
 
 - Tighten Rust-side measured subtitle timeline validation before any results reach the desktop: reject duplicate segment IDs, cues that become zero-duration or overlap after SRT millisecond rounding, unwanted control characters and overlong individual Hindi captions. Preserve legitimate multiline Hindi formatting and add native Rust regressions. Structural correctness is not human listening or word-level alignment.

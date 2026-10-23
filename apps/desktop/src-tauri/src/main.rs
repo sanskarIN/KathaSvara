@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     fs,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Mutex, OnceLock},
@@ -1086,6 +1086,43 @@ fn cancel_story_render(app: tauri::AppHandle, job_id: String) -> Result<(), Stri
     write_cancel_marker(&folder.join(format!("{job_id}.cancel")))
 }
 
+// The inline player must consume the *same opened handle* that passed RIFF
+// validation. Reopening an output path could read a different file after a
+// replacement or symlink change between inspection and preview creation.
+fn read_validated_wav_preview(
+    source: &mut fs::File,
+    originally_opened: &fs::Metadata,
+    expected_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    const INVALID: &str = "Generated WAV changed during preview loading; render again.";
+    if !(44..=MAX_GENERATED_WAV).contains(&expected_bytes) {
+        return Err("Generated WAV exceeds the inline preview size limit.".into());
+    }
+    let capacity = usize::try_from(expected_bytes)
+        .map_err(|_| "Generated WAV preview is too large.".to_string())?;
+    let before = source.metadata().map_err(|_| INVALID)?;
+    if before.len() != expected_bytes ||
+        !wav_source_metadata_unchanged(originally_opened, &before)
+    {
+        return Err(INVALID.into());
+    }
+    source.rewind().map_err(|_| INVALID)?;
+    let mut bytes = Vec::with_capacity(capacity);
+    // A file that grew while being read must not extend the WebView payload.
+    {
+        let mut limited = (&mut *source).take(expected_bytes + 1);
+        limited.read_to_end(&mut bytes).map_err(|_| INVALID)?;
+    }
+    // Recheck the already-open source after the bounded reader releases it.
+    let after = source.metadata().map_err(|_| INVALID)?;
+    if bytes.len() != capacity ||
+        !wav_source_metadata_unchanged(originally_opened, &after)
+    {
+        return Err(INVALID.into());
+    }
+    Ok(bytes)
+}
+
 fn finalize_rendered_story_wav(
     output: &Path,
     job_id: String,
@@ -1095,6 +1132,8 @@ fn finalize_rendered_story_wav(
     // cannot carry its full 25 MiB+ content in a base64 data URL.
     let mut source = fs::File::open(output)
         .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
+    let opened_metadata = source.metadata()
+        .map_err(|_| "The generated WAV could not be inspected.".to_string())?;
     let actual_wav = inspect_wav_details(&mut source)?;
     let size = actual_wav.file_bytes;
     let metadata = data.get("result").ok_or("Missing render metadata.")?;
@@ -1118,7 +1157,7 @@ fn finalize_rendered_story_wav(
     }
     let preview_available = size <= MAX_GENERATED_WAV;
     let data_url = if preview_available {
-        let bytes = fs::read(output).map_err(|e| e.to_string())?;
+        let bytes = read_validated_wav_preview(&mut source, &opened_metadata, size)?;
         format!("data:audio/wav;base64,{}", STANDARD.encode(bytes))
     } else {
         String::new()
@@ -1878,6 +1917,80 @@ mod tests {
         for text in invalid {
             assert!(validate_srt_content(text).is_err(), "Invalid SRT unexpectedly passed.");
         }
+    }
+
+    #[test]
+    fn wav_inline_preview_uses_inspected_open_handle_with_bounded_bytes() {
+        let path = std::env::temp_dir().join(format!("kathasvara-preview-{}.wav", Uuid::new_v4()));
+        let samples = vec![0_u8; 400];
+        let mut data = Vec::new();
+        data.extend_from_slice(b"RIFF");
+        data.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(b"WAVEfmt ");
+        data.extend_from_slice(&16_u32.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&24_000_u32.to_le_bytes());
+        data.extend_from_slice(&48_000_u32.to_le_bytes());
+        data.extend_from_slice(&2_u16.to_le_bytes());
+        data.extend_from_slice(&16_u16.to_le_bytes());
+        data.extend_from_slice(b"data");
+        data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(&samples);
+        fs::write(&path, &data).unwrap();
+        let mut source = fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let originally_opened = source.metadata().unwrap();
+        assert_eq!(inspect_wav_details(&mut source).unwrap().file_bytes, data.len() as u64);
+        assert_eq!(
+            read_validated_wav_preview(&mut source, &originally_opened, data.len() as u64).unwrap(),
+            data,
+        );
+        // Reject a forged preview size even when the source itself is valid.
+        assert!(read_validated_wav_preview(
+            &mut source, &originally_opened, data.len() as u64 + 1,
+        ).is_err());
+        // The same file handle cannot be trusted after truncation.
+        source.set_len(data.len() as u64 - 2).unwrap();
+        assert!(read_validated_wav_preview(
+            &mut source, &originally_opened, data.len() as u64,
+        ).is_err());
+        drop(source);
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn tiny_generated_pcm_preview_contains_verified_render_bytes() {
+        let path = std::env::temp_dir().join(format!("kathasvara-preview-{}.wav", Uuid::new_v4()));
+        let samples = vec![0_u8; 480];
+        let mut data = Vec::new();
+        data.extend_from_slice(b"RIFF");
+        data.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(b"WAVEfmt ");
+        data.extend_from_slice(&16_u32.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&24_000_u32.to_le_bytes());
+        data.extend_from_slice(&48_000_u32.to_le_bytes());
+        data.extend_from_slice(&2_u16.to_le_bytes());
+        data.extend_from_slice(&16_u16.to_le_bytes());
+        data.extend_from_slice(b"data");
+        data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(&samples);
+        fs::write(&path, &data).unwrap();
+        let response = json!({"result": {
+            "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
+            "segments": [{
+                "segment_id": "narrator", "start_seconds": 0.0,
+                "end_seconds": 0.01, "effective_text": "नमस्कार।"
+            }]
+        }});
+        let result = finalize_rendered_story_wav(
+            &path, Uuid::new_v4().to_string(), &response,
+        ).unwrap();
+        assert!(result.preview_available);
+        assert_eq!(result.file_bytes, data.len() as u64);
+        assert_eq!(result.data_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
