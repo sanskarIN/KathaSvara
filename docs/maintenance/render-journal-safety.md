@@ -34,6 +34,8 @@ The native desktop recovery-history reader performs a bounded scan of up to **20
 
 **Recovery JSON reads are bounded twice.** The Windows desktop checks that each journal is a regular file no larger than **64 KiB** (and progress files no larger than **1 KiB**) before opening it, rechecks the opened file's metadata, and uses a capped stream read of at most one byte beyond the limit. A file which grows after its metadata check cannot cause an unbounded allocation. Oversized, malformed, or symlinked journal data is excluded from history; a manual forget refuses it without deleting the record. Missing progress sidecars still display zero progress, whereas malformed present sidecars produce an error. This protects ordinary local file races; it does not make a directory writable by malicious external processes safe against every path-swap attack.
 
+The React recovery panel also keeps a request-generation marker. When the creator edits or switches the story, begins a new render, or forgets a journal, previously requested history responses cannot repopulate an obsolete list or report misleading success. Late render-progress polling responses are ignored when the tracked job changes or the panel unmounts. These are client display guards, not cancellation guarantees for already dispatched filesystem actions.
+
 The desktop's **Retry current full story** action starts a separate new job
 against the current document. It does not automatically resume a previous
 partial synthesis, reconstitute original selections, or overwrite an existing
