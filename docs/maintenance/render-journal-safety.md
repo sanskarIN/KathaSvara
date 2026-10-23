@@ -30,6 +30,8 @@ uncoordinated file creation. It does **not** protect later replacement from a
 malicious worker that can change the journal folder, guarantee durability
 across a sudden power loss, or constitute an OS-level immutable snapshot.
 
+The native desktop recovery-history reader performs a bounded scan of up to **20,000 directory entries** (including unrelated filenames), and shows at most 20 valid recent journal records for the selected story. If the folder exceeds the scan limit, it returns an error instead of silently hiding old matching stories or sorting an unbounded directory. History also refuses malformed `completed` entries where the recorded `done` count is less than `total`. These protections do not delete any files, resume jobs or prove speech quality.
+
 The desktop's **Retry current full story** action starts a separate new job
 against the current document. It does not automatically resume a previous
 partial synthesis, reconstitute original selections, or overwrite an existing

@@ -850,9 +850,21 @@ struct RenderHistoryEntry {
 
 // Keep the history reader independent of Tauri to test filtering and
 // interrupt classification on a temporary folder without model weights.
+// Return an explicit error rather than silently dropping older matching
+// stories when a damaged/abused directory exceeds a bounded full scan.
+const MAX_RENDER_HISTORY_SCAN_ENTRIES: usize = 20_000;
+
 fn read_render_history(
     folder: &Path,
     story_filter: Option<&str>,
+) -> Result<Vec<RenderHistoryEntry>, String> {
+    read_render_history_bounded(folder, story_filter, MAX_RENDER_HISTORY_SCAN_ENTRIES)
+}
+
+fn read_render_history_bounded(
+    folder: &Path,
+    story_filter: Option<&str>,
+    scan_limit: usize,
 ) -> Result<Vec<RenderHistoryEntry>, String> {
     if story_filter.is_some_and(|id| id.is_empty() || id.len() > 80) {
         return Err("Invalid story history filter.".into());
@@ -861,7 +873,14 @@ fn read_render_history(
         return Ok(Vec::new());
     }
     let mut entries = Vec::new();
+    let mut scanned = 0usize;
     for result in fs::read_dir(folder).map_err(|e| e.to_string())? {
+        // Count *all* directory entries, not just well-formed journals. A
+        // flood of irrelevant files must not keep history loading unbounded.
+        scanned += 1;
+        if scanned > scan_limit {
+            return Err("Render history has too many entries to inspect safely.".into());
+        }
         let entry = result.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
@@ -883,6 +902,7 @@ fn read_render_history(
         ) else { continue; };
         if data["schema_version"] != 1 || story_id.is_empty() || story_id.len() > 80 ||
             updated_at.len() > 64 || total == 0 || total > 256 || done > total ||
+            (state == "completed" && done != total) ||
             !matches!(state, "running" | "cancelled" | "failed" | "completed") {
             continue;
         }
@@ -1420,6 +1440,63 @@ mod tests {
         assert!(other.exists());
         assert!(!folder.join(format!("{original_job}.manifest.json")).exists());
         assert_eq!(read_render_history(&folder, Some(&story_a)).unwrap().len(), 0);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn history_scan_limit_refuses_partial_results_without_touching_files() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-history-limit-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4().to_string();
+        let journal = folder.join(format!("{id}.manifest.json"));
+        fs::write(&journal, json!({
+            "schema_version": 1, "story_id": story,
+            "state": "failed", "done": 1, "total": 2,
+            "updated_at": "2026-10-20T10:01:00+00:00",
+        }).to_string()).unwrap();
+        // Irrelevant directory entries must count towards the bounded scan.
+        fs::write(folder.join("notes.txt"), b"keep").unwrap();
+        fs::write(folder.join("other.partial.json"), b"keep").unwrap();
+
+        let error = read_render_history_bounded(&folder, Some(&story), 2).unwrap_err();
+        assert!(error.contains("too many entries"), "{error}");
+        assert!(journal.exists(), "A read-only scan cannot remove recovery metadata.");
+        let valid = read_render_history_bounded(&folder, Some(&story), 3).unwrap();
+        assert_eq!(valid.len(), 1);
+        assert_eq!(valid[0].job_id, id);
+        assert_eq!(valid[0].state, "failed");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn history_rejects_completed_state_with_incomplete_progress() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-bad-completion-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{id}.manifest.json"));
+        let mut record = json!({
+            "schema_version": 1, "story_id": story,
+            "state": "completed", "done": 1, "total": 2,
+            "updated_at": "2026-10-20T10:01:00+00:00",
+        });
+        fs::write(&path, record.to_string()).unwrap();
+        assert!(read_render_history(&folder, Some(&story)).unwrap().is_empty());
+
+        record["state"] = json!("failed");
+        fs::write(&path, record.to_string()).unwrap();
+        let failed = read_render_history(&folder, Some(&story)).unwrap();
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].state, "failed");
+        record["state"] = json!("completed");
+        record["done"] = json!(2);
+        fs::write(&path, record.to_string()).unwrap();
+        let completed = read_render_history(&folder, Some(&story)).unwrap();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].state, "completed");
         fs::remove_dir_all(folder).unwrap();
     }
 
