@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — post-v0.5.1 development
+
+- Add privacy-preserving recovery diagnostics: Python limits persisted exception labels to fixed categories rather than custom class names; the native history API exposes only a fixed, allowlisted failure code; React presents safe, actionable suggestions for interrupted, cancelled, incomplete, storage, validation and runtime failures. Legacy/unknown values are never rendered verbatim. Add Python, Windows Rust and React unit/integration regressions. Source-only; published v0.5.1 assets unchanged.
+
 ## v0.5.1 — experimental recovery and cache maintenance pre-release
 
 This section documents source changes prepared for the gated v0.5.1 developer pre-release. It does not certify natural Hindi speech, clean Windows operation or a complete installer. The GitHub release is published only after exact-commit gates pass.
