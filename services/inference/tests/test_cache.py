@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from kathasvara import cache
 from kathasvara.cache import CACHE_GRACE_SECONDS, inspect_cache, prune_cache
 
 
@@ -83,3 +84,51 @@ def test_cache_root_symlink_is_rejected(tmp_path: Path) -> None:
 def test_invalid_budgets_are_rejected(tmp_path: Path, budget: object) -> None:
     with pytest.raises(ValueError, match="budget"):
         prune_cache(tmp_path, max_bytes=budget)
+
+
+
+def test_cache_scan_limit_counts_unrelated_entries_and_refuses_partial_pruning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    folder = tmp_path / "segment-cache"
+    folder.mkdir()
+    old = named_cache_file(folder, "a", 20, 3600)
+    (folder / "notes.txt").write_text("do not touch", encoding="utf-8")
+    monkeypatch.setattr(cache, "MAX_SCANNED_CACHE_ENTRIES", 2)
+    assert inspect_cache(folder) == {"files": 1, "bytes": 20, "ignored_entries": 1}
+    # An extra *irrelevant* entry must fail both read-only and destructive
+    # operations without deleting the cache file or unrelated data.
+    (folder / "unrelated.tmp").write_bytes(b"keep")
+    with pytest.raises(ValueError, match="Too many cache directory entries"):
+        inspect_cache(folder)
+    with pytest.raises(ValueError, match="Too many cache directory entries"):
+        prune_cache(folder, max_bytes=0, dry_run=True, now=1_700_000_000)
+    with pytest.raises(ValueError, match="Too many cache directory entries"):
+        prune_cache(folder, max_bytes=0, dry_run=False, now=1_700_000_000)
+    assert old.read_bytes() == b"x" * 20
+    assert (folder / "notes.txt").read_text(encoding="utf-8") == "do not touch"
+    assert (folder / "unrelated.tmp").read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize("clock", [
+    float("nan"), float("inf"), float("-inf"), 0, -1,
+    10**12, True, "2026-10-23",
+])
+def test_invalid_clock_fails_closed_before_deletion(tmp_path: Path, clock: object) -> None:
+    folder = tmp_path / "segment-cache"
+    folder.mkdir()
+    recent = named_cache_file(folder, "a", 32, 10)
+    with pytest.raises(ValueError, match="Invalid cache maintenance clock"):
+        prune_cache(folder, max_bytes=0, dry_run=False, now=clock)
+    assert recent.read_bytes() == b"x" * 32
+
+
+def test_recent_cache_grace_is_preserved_with_explicit_valid_clock(tmp_path: Path) -> None:
+    folder = tmp_path / "segment-cache"
+    folder.mkdir()
+    recent = named_cache_file(folder, "a", 32, 10)
+    old = named_cache_file(folder, "b", 32, CACHE_GRACE_SECONDS + 1)
+    result = prune_cache(folder, max_bytes=0, dry_run=False, now=1_700_000_000)
+    assert result["bytes_reclaimable"] == 32
+    assert recent.exists()
+    assert not old.exists()
