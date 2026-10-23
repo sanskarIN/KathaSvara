@@ -16,7 +16,7 @@ import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
-  renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
+  removeScene, renameScene, reviewSpokenText, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
 type RenderPlan = {
@@ -190,6 +190,24 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       edit(() => cloned);
       setSelectedScene(copyId);
       onMessage("Copied this scene with new line IDs. Old generated audio was not copied; save the story and review any new narration.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function deleteCurrentScene(sceneId: string, title: string) {
+    if (busy || rendering) return;
+    if (!window.confirm(
+      `Remove scene "${title}" and all its parsed dialogue lines from this edited version? `
+      + "The original script text and other scenes are kept. This change is not saved until you choose Save."
+    )) return;
+    try {
+      const index = document.scenes.findIndex(scene => scene.id === sceneId);
+      if (index < 0) throw new Error("Scene to remove was not found.");
+      const remaining = document.scenes.filter(scene => scene.id !== sceneId);
+      // Select the next visible scene, otherwise the previous one.
+      setSelectedScene(remaining[Math.min(index, remaining.length - 1)]?.id ?? null);
+      edit(previous => removeScene(previous, sceneId));
+      onMessage("Scene removed from this unsaved project. Original script text remains unchanged.");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -945,7 +963,31 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                 onClick={() => duplicateCurrentScene(activeScene.id)}>
                 Duplicate scene (fresh audio)
               </button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering}
+                onClick={() => deleteCurrentScene(activeScene.id, activeScene.title)}>
+                Delete scene (keep original script)
+              </button>
             </div>
+            <label className="reviewed-dialogue-label">
+              Production notes for this scene (not spoken)
+              <textarea lang="hi" rows={3} maxLength={4000}
+                aria-label="Scene production notes (not spoken)"
+                value={activeScene.notes}
+                disabled={busy || rendering}
+                placeholder="Optional staging or editing notes. Never synthesized as speech."
+                onChange={event => {
+                  const next = event.target.value;
+                  if (next === activeScene.notes) return;
+                  try {
+                    updateSceneNotes(document, activeScene.id, next);
+                    edit(previous => updateSceneNotes(previous, activeScene.id, next));
+                  } catch (error) {
+                    onMessage(errorString(error));
+                  }
+                }} />
+            </label>
+            <p className="helper">Production notes are stored with this scene, not read aloud, and do not alter the original script or dialogue text.</p>
             <ol className="scene-segments">
               {activeScene.segments.map((segment, index) => (
                 <li key={segment.id}>
