@@ -389,6 +389,97 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
       })));
   });
 
+  it("does not resurrect old history after switching stories while the IPC read is pending", async () => {
+    let finishHistory: (records: unknown) => void = () => { throw new Error("History not requested"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "story_render_history") {
+        return new Promise(resolve => { finishHistory = resolve; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "story_render_history", { storyId: ID },
+    ));
+    expect(screen.getByRole("button", { name: "Reading history…" })).toBeTruthy();
+    rerender(<CastStudio document={{ ...doc, id: "new-story", title: "New story" }}
+      onChange={onChange} onMessage={onMessage} />);
+    expect(screen.getByRole("button", { name: "Recent render history" })).toBeTruthy();
+    await act(async () => {
+      finishHistory([{
+        job_id: "previous-job", story_id: ID, state: "failed", done: 1, total: 2,
+        updated_at: "2026-10-21T00:00:00Z",
+      }]);
+    });
+    expect(screen.queryByRole("button", { name: "Forget record" })).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("Local history loaded"))).toBe(false);
+  });
+
+  it("does not restore an old history response after beginning a new narration", async () => {
+    let finishHistory: (records: unknown) => void = () => { throw new Error("History not requested"); };
+    let finishRender: (audio: unknown) => void = () => { throw new Error("Render not requested"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "story_render_history") {
+        return new Promise(resolve => { finishHistory = resolve; });
+      }
+      if (command === "render_story_v2") {
+        return new Promise(resolve => { finishRender = resolve; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "story_render_history", { storyId: ID },
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await waitFor(() => expect(mocks.invoke.mock.calls.some(([command]) =>
+      command === "render_story_v2")).toBe(true));
+    await act(async () => {
+      finishHistory([{
+        job_id: "old-job", story_id: ID, state: "interrupted", done: 1, total: 2,
+        updated_at: "2026-10-21T00:00:00Z",
+      }]);
+    });
+    expect(screen.queryByRole("button", { name: "Retry current full story" })).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("Local history loaded"))).toBe(false);
+    await act(async () => { finishRender(generatedAudio()); });
+  });
+
+  it("does not show a stale forget response after switching to another story", async () => {
+    let finishForget: () => void = () => { throw new Error("Forget not requested"); };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "story_render_history") return Promise.resolve([{
+        job_id: "old-job", story_id: ID, state: "failed", done: 1, total: 2,
+        updated_at: "2026-10-21T00:00:00Z",
+      }]);
+      if (command === "forget_render_journal") {
+        return new Promise<void>(resolve => { finishForget = resolve; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    await screen.findByRole("button", { name: "Forget record" });
+    fireEvent.click(screen.getByRole("button", { name: "Forget record" }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "forget_render_journal", { jobId: "old-job", storyId: ID },
+    ));
+    rerender(<CastStudio document={{ ...doc, id: "next-story" }}
+      onChange={onChange} onMessage={onMessage} />);
+    await act(async () => { finishForget(); });
+    expect(screen.queryByRole("button", { name: "Forget record" })).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("bookkeeping markers removed"))).toBe(false);
+  });
+
   it("ignores a late audit response when the document changes", async () => {
     let finishAudit: (result: unknown) => void = () => { throw new Error("Audit not invoked"); };
     mocks.invoke.mockImplementation((command: string) => {
