@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Align the Python read-only WAV inspector with native Rust RIFF/PCM16 header checks: verify complete RIFF and chunk lengths, PCM byte-rate/block alignment, reject duplicate fmt/data chunks and excessive metadata, while allowing bounded padded non-audio chunks. Add no-model malformed-container regression tests. Source only; v0.5.0 prerelease unchanged.
+
 - Tighten native WAV preview/export header consistency: verify PCM16 byte rate equals sample rate × two bytes, reject ambiguous duplicate fmt/data chunks in the small in-memory preview validator, bound metadata-chunk count and reject recordings beyond 20 minutes. Add Rust tests using correctly sized but malformed headers. No new model, changed audio output, or published release assets.
 
 - Suppress stale WAV and dialogue SRT export **success/error UI feedback** if a creator clears, replaces or edits the active audio while native export is still running. Keep subtitle manual-review eligibility scoped to the current audio. Add mocked desktop race regressions for delayed WAV/SRT success and errors. A completed old export may still exist at its explicit destination, but it must not be attributed to the new preview.
