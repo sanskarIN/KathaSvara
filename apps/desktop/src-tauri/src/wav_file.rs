@@ -20,7 +20,16 @@ pub fn wav_source_metadata_unchanged(before: &Metadata, after: &Metadata) -> boo
             .is_some_and(|(first, last)| first == last)
 }
 
-pub fn inspect_wav_file(source: &mut File) -> Result<u64, String> {
+/// Authoritative media details derived from the opened RIFF file, not from the
+/// worker's JSON response or the currently displayed browser audio metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WavHeader {
+    pub file_bytes: u64,
+    pub sample_rate_hz: u32,
+    pub frames: u64,
+}
+
+pub fn inspect_wav_details(source: &mut File) -> Result<WavHeader, String> {
     const INVALID: &str = "Stored audio is not a valid mono 16-bit PCM WAV.";
     let length = source.metadata().map_err(|_| INVALID)?.len();
     if !(44..=MAX_STORED_WAV).contains(&length) {
@@ -89,7 +98,16 @@ pub fn inspect_wav_file(source: &mut File) -> Result<u64, String> {
         return Err("Stored WAV exceeds the 20-minute narration limit.".into());
     }
     source.rewind().map_err(|_| INVALID)?;
-    Ok(length)
+    Ok(WavHeader {
+        file_bytes: length,
+        sample_rate_hz: sample_rate,
+        frames,
+    })
+}
+
+/// Existing export/inspection callers need just the bounded byte length.
+pub fn inspect_wav_file(source: &mut File) -> Result<u64, String> {
+    Ok(inspect_wav_details(source)?.file_bytes)
 }
 
 #[cfg(test)]
@@ -117,8 +135,12 @@ mod tests {
         data.extend_from_slice(&samples);
         std::fs::write(&file, &data).unwrap();
         let mut reader = File::open(&file).unwrap();
-        assert_eq!(inspect_wav_file(&mut reader).unwrap(), data.len() as u64);
+        let inspected = inspect_wav_details(&mut reader).unwrap();
+        assert_eq!(inspected.file_bytes, data.len() as u64);
+        assert_eq!(inspected.sample_rate_hz, 24_000);
+        assert_eq!(inspected.frames, 200);
         assert_eq!(reader.stream_position().unwrap(), 0);
+        assert_eq!(inspect_wav_file(&mut reader).unwrap(), data.len() as u64);
         drop(reader);
         data[4] ^= 0x01;
         std::fs::write(&file, data).unwrap();

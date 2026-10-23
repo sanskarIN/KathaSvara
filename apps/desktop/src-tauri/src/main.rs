@@ -21,7 +21,7 @@ use uuid::Uuid;
 mod wav_file;
 mod production_manifest;
 use production_manifest::write_production_manifest;
-use wav_file::{inspect_wav_file, wav_source_metadata_unchanged};
+use wav_file::{inspect_wav_details, inspect_wav_file, wav_source_metadata_unchanged};
 
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
@@ -1095,7 +1095,8 @@ fn finalize_rendered_story_wav(
     // cannot carry its full 25 MiB+ content in a base64 data URL.
     let mut source = fs::File::open(output)
         .map_err(|_| "The batch renderer did not produce a WAV.".to_string())?;
-    let size = inspect_wav_file(&mut source)?;
+    let actual_wav = inspect_wav_details(&mut source)?;
+    let size = actual_wav.file_bytes;
     let metadata = data.get("result").ok_or("Missing render metadata.")?;
     let timings = parse_segment_timings(metadata)?;
     let duration = metadata["duration_seconds"].as_f64()
@@ -1104,9 +1105,14 @@ fn finalize_rendered_story_wav(
         .ok_or("Missing reported sample rate.")?;
     let chunks = metadata["chunks"].as_u64()
         .ok_or("Missing synthesis chunk count.")?;
+    // Do not trust the worker's self-reported sample rate or duration without
+    // checking the actual, already-open PCM16 RIFF header and frame count.
+    let actual_duration = actual_wav.frames as f64 / f64::from(actual_wav.sample_rate_hz);
     if !duration.is_finite() || duration <= 0.0 || duration > 1200.0 ||
         !(8_000..=192_000).contains(&rate) || !(1..=500).contains(&chunks) ||
-        timings.last().is_some_and(|cue| cue.end_seconds > duration + 0.005)
+        rate != u64::from(actual_wav.sample_rate_hz) ||
+        (duration - actual_duration).abs() > 0.005 ||
+        timings.last().is_some_and(|cue| cue.end_seconds > actual_duration + 0.005)
     {
         return Err("Render metadata has inconsistent audio duration or chunk counts.".into());
     }
@@ -1901,8 +1907,12 @@ mod tests {
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
         assert!(copy_validated_wav(&source, &exported).is_err());
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
+        // PCM-frame duration is authoritative. Previously this fixture used
+        // 568.0 seconds, which disagreed with the WAV header by ~21ms.
+        let measured_seconds = f64::from(sample_bytes) / 2.0 / 24_000.0;
+        let rounded_seconds = (measured_seconds * 1000.0).round() / 1000.0;
         let response = json!({"result": {
-            "duration_seconds": 568.0,
+            "duration_seconds": rounded_seconds,
             "sample_rate": 24000,
             "chunks": 1,
             "segments": [{
@@ -1917,6 +1927,18 @@ mod tests {
         assert!(metadata.data_url.is_empty());
         assert_eq!(metadata.file_bytes, 44 + u64::from(sample_bytes));
         assert!(source.exists());
+
+        // Valid PCM with contradictory worker metadata must not be accepted.
+        let mut wrong_rate = response.clone();
+        wrong_rate["result"]["sample_rate"] = json!(44_100);
+        assert!(finalize_rendered_story_wav(
+            &source, Uuid::new_v4().to_string(), &wrong_rate,
+        ).is_err());
+        let mut wrong_duration = response.clone();
+        wrong_duration["result"]["duration_seconds"] = json!(rounded_seconds + 1.0);
+        assert!(finalize_rendered_story_wav(
+            &source, Uuid::new_v4().to_string(), &wrong_duration,
+        ).is_err());
         // A WAV with missing/invalid worker metadata must not accumulate in
         // app data even when its audio samples pass structural validation.
         let orphan = folder.join("orphan.wav");
