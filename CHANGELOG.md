@@ -2,6 +2,8 @@
 
 ## Unreleased — v0.5.2 experimental developer pre-release candidate (not published)
 
+- Compare worker-reported sample rate and duration with the **actual opened PCM16 WAV header and frame count** before returning audio preview/export metadata. Preserve bounded RIFF validation and reject contradictory worker metadata instead of accepting an otherwise well-formed WAV with incorrect timestamps. Add Rust frame-derived-duration and falsified-metadata regressions; these do not prove natural Hindi audio.
+
 - Tighten Rust-side measured subtitle timeline validation before any results reach the desktop: reject duplicate segment IDs, cues that become zero-duration or overlap after SRT millisecond rounding, unwanted control characters and overlong individual Hindi captions. Preserve legitimate multiline Hindi formatting and add native Rust regressions. Structural correctness is not human listening or word-level alignment.
 
 - Harden rendered Hindi caption previews and SRT export against unknown story-segment identities or cue endpoints past the actual WAV duration, including valid rounding tolerances. Add a local-only, bounded text search over already validated cues that resets pagination without changing the exported SRT or QA checklist. Add component and unit regressions; no model loading, released binaries or publication changes. See [v0.5.2 development](docs/releases/v0.5.2-development.md).
