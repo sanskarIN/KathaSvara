@@ -376,22 +376,30 @@ fn parse_segment_timings(metadata: &Value) -> Result<Vec<SegmentTiming>, String>
         return Err("Invalid number of generated subtitle cues.".into());
     }
     let mut result = Vec::with_capacity(times.len());
-    let mut previous_end = 0.0;
+    let mut previous_end_ms = 0_i64;
     let mut text_chars = 0_usize;
+    let mut segment_ids = HashSet::with_capacity(times.len());
     for value in times {
         let timing: SegmentTiming = serde_json::from_value(value.clone())
             .map_err(|_| "Malformed measured subtitle cue.".to_string())?;
-        text_chars += timing.effective_text.chars().count();
+        let cue_chars = timing.effective_text.chars().count();
+        text_chars += cue_chars;
+        // SRT timestamps have millisecond precision. Validate the *rounded*
+        // positions that the React preview and native SRT exporter will use.
+        // A tiny raw float overlap can become a real invalid cue after rounding.
+        let start_ms = (timing.start_seconds * 1000.0).round() as i64;
+        let end_ms = (timing.end_seconds * 1000.0).round() as i64;
         if timing.segment_id.is_empty() || timing.segment_id.len() > 80 ||
-            timing.effective_text.trim().is_empty() || text_chars > 100_000 ||
-            timing.effective_text.chars().any(|ch| ch == '\0') ||
+            !segment_ids.insert(timing.segment_id.clone()) ||
+            timing.effective_text.trim().is_empty() || cue_chars > 3000 ||
+            text_chars > 100_000 ||
+            timing.effective_text.chars().any(|ch| ch.is_control() && !matches!(ch, '\t' | '\n' | '\r')) ||
             !timing.start_seconds.is_finite() || !timing.end_seconds.is_finite() ||
-            timing.start_seconds + 0.002 < previous_end ||
-            timing.start_seconds < 0.0 || timing.end_seconds <= timing.start_seconds ||
-            timing.end_seconds > 1200.1 {
+            timing.start_seconds < 0.0 || start_ms < previous_end_ms ||
+            end_ms <= start_ms || end_ms > 1_200_000 {
             return Err("Invalid generated segment timeline.".into());
         }
-        previous_end = timing.end_seconds;
+        previous_end_ms = end_ms;
         result.push(timing);
     }
     Ok(result)
@@ -1935,6 +1943,56 @@ mod tests {
         ]});
         assert!(parse_segment_timings(&bad).is_err());
         assert!(parse_segment_timings(&json!({"segments":[]})).is_err());
+    }
+
+    #[test]
+    fn native_cues_reject_duplicate_ids_and_rounded_overlap() {
+        let duplicated = json!({"segments": [
+            {"segment_id": "line-one", "start_seconds": 0.0,
+             "end_seconds": 1.0, "effective_text": "नमस्कार"},
+            {"segment_id": "line-one", "start_seconds": 1.14,
+             "end_seconds": 2.0, "effective_text": "फिर मिलेंगे"}
+        ]});
+        assert!(parse_segment_timings(&duplicated).is_err());
+
+        // Raw endpoints appear only ~0.0011 seconds apart but collide in
+        // millisecond-rounded SubRip times; the native bridge must reject them.
+        let rounded_overlap = json!({"segments": [
+            {"segment_id": "line-one", "start_seconds": 0.0,
+             "end_seconds": 1.0014, "effective_text": "राजा भोज"},
+            {"segment_id": "line-two", "start_seconds": 1.0003,
+             "end_seconds": 2.0, "effective_text": "मंत्री जी"}
+        ]});
+        assert!(parse_segment_timings(&rounded_overlap).is_err());
+
+        let submillisecond = json!({"segments": [
+            {"segment_id": "line-one", "start_seconds": 0.0001,
+             "end_seconds": 0.0003, "effective_text": "नमस्कार"}
+        ]});
+        assert!(parse_segment_timings(&submillisecond).is_err());
+    }
+
+    #[test]
+    fn native_cues_reject_control_characters_and_overlong_hindi_text() {
+        let bad_control = json!({"segments": [{
+            "segment_id": "line-one", "start_seconds": 0.0,
+            "end_seconds": 1.0, "effective_text": "गोपनीय\u{0000}नमस्कार"
+        }]});
+        assert!(parse_segment_timings(&bad_control).is_err());
+
+        let oversized = json!({"segments": [{
+            "segment_id": "line-one", "start_seconds": 0.0,
+            "end_seconds": 1.0, "effective_text": "ह".repeat(3001)
+        }]});
+        assert!(parse_segment_timings(&oversized).is_err());
+
+        // Newlines and tabs in real dialogue are normalized by the SRT
+        // serializer; rejecting them here would break legitimate Hindi text.
+        let formatted = json!({"segments": [{
+            "segment_id": "line-one", "start_seconds": 0.0,
+            "end_seconds": 1.001, "effective_text": "नमस्कार!\nकैसे हैं?\tधन्यवाद।"
+        }]});
+        assert_eq!(parse_segment_timings(&formatted).unwrap().len(), 1);
     }
 
     #[test]
