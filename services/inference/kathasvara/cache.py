@@ -79,8 +79,8 @@ def prune_cache(
     # Reject non-finite / implausible caller clocks *before* considering
     # eligibility: NaN would otherwise defeat the recent-file grace window.
     current = time.time() if now is None else now
-    if (type(current) not in (int, float) or not math.isfinite(current)
-        or not 0 < current < 10**12):
+    if (type(current) not in (int, float) or not 0 < current < 10**12
+        or not math.isfinite(current)):
         raise ValueError("Invalid cache maintenance clock.")
     # A real delete must exclude other render/prune workers across app processes.
     # Dry-run only observes cached entries, so it does not require the lock.
