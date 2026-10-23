@@ -1919,6 +1919,80 @@ mod tests {
     }
 
     #[test]
+    fn wav_inline_preview_uses_inspected_open_handle_with_bounded_bytes() {
+        let path = std::env::temp_dir().join(format!("kathasvara-preview-{}.wav", Uuid::new_v4()));
+        let samples = vec![0_u8; 400];
+        let mut data = Vec::new();
+        data.extend_from_slice(b"RIFF");
+        data.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(b"WAVEfmt ");
+        data.extend_from_slice(&16_u32.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&24_000_u32.to_le_bytes());
+        data.extend_from_slice(&48_000_u32.to_le_bytes());
+        data.extend_from_slice(&2_u16.to_le_bytes());
+        data.extend_from_slice(&16_u16.to_le_bytes());
+        data.extend_from_slice(b"data");
+        data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(&samples);
+        fs::write(&path, &data).unwrap();
+        let mut source = fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let originally_opened = source.metadata().unwrap();
+        assert_eq!(inspect_wav_details(&mut source).unwrap().file_bytes, data.len() as u64);
+        assert_eq!(
+            read_validated_wav_preview(&mut source, &originally_opened, data.len() as u64).unwrap(),
+            data,
+        );
+        // Reject a forged preview size even when the source itself is valid.
+        assert!(read_validated_wav_preview(
+            &mut source, &originally_opened, data.len() as u64 + 1,
+        ).is_err());
+        // The same file handle cannot be trusted after truncation.
+        source.set_len(data.len() as u64 - 2).unwrap();
+        assert!(read_validated_wav_preview(
+            &mut source, &originally_opened, data.len() as u64,
+        ).is_err());
+        drop(source);
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn tiny_generated_pcm_preview_contains_verified_render_bytes() {
+        let path = std::env::temp_dir().join(format!("kathasvara-preview-{}.wav", Uuid::new_v4()));
+        let samples = vec![0_u8; 480];
+        let mut data = Vec::new();
+        data.extend_from_slice(b"RIFF");
+        data.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(b"WAVEfmt ");
+        data.extend_from_slice(&16_u32.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&1_u16.to_le_bytes());
+        data.extend_from_slice(&24_000_u32.to_le_bytes());
+        data.extend_from_slice(&48_000_u32.to_le_bytes());
+        data.extend_from_slice(&2_u16.to_le_bytes());
+        data.extend_from_slice(&16_u16.to_le_bytes());
+        data.extend_from_slice(b"data");
+        data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        data.extend_from_slice(&samples);
+        fs::write(&path, &data).unwrap();
+        let response = json!({"result": {
+            "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
+            "segments": [{
+                "segment_id": "narrator", "start_seconds": 0.0,
+                "end_seconds": 0.01, "effective_text": "नमस्कार।"
+            }]
+        }});
+        let result = finalize_rendered_story_wav(
+            &path, Uuid::new_v4().to_string(), &response,
+        ).unwrap();
+        assert!(result.preview_available);
+        assert_eq!(result.file_bytes, data.len() as u64);
+        assert_eq!(result.data_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn large_pcm_wav_can_be_streamed_to_export_without_overwriting() {
         let folder = std::env::temp_dir().join(format!("kathasvara-long-wav-{}", Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
