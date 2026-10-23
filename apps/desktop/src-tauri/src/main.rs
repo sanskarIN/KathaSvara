@@ -812,6 +812,38 @@ async fn synthesize(
     }).await.map_err(|e| e.to_string())?
 }
 
+// Validate the path and the opened handle, then cap the *actual read*, not
+// merely a potentially stale length returned by filesystem metadata.
+// These are local recovery sidecars, not arbitrary user-selected documents.
+const MAX_RENDER_JOURNAL_BYTES: u64 = 65_536;
+const MAX_RENDER_PROGRESS_BYTES: u64 = 1_024;
+
+fn parse_bounded_recovery_json<R: Read>(source: &mut R, max_bytes: u64) -> Result<Value, String> {
+    let mut bytes = Vec::new();
+    source.take(max_bytes + 1).read_to_end(&mut bytes)
+        .map_err(|_| "Cannot read recovery metadata.".to_string())?;
+    if bytes.len() as u64 > max_bytes {
+        return Err("Recovery metadata exceeds its size limit.".into());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| "Recovery metadata is unreadable JSON.".into())
+}
+
+fn read_bounded_recovery_json(path: &Path, max_bytes: u64) -> Result<Value, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "Recovery metadata is unavailable.".to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() > max_bytes {
+        return Err("Recovery metadata is not a bounded regular file.".into());
+    }
+    let mut file = fs::File::open(path)
+        .map_err(|_| "Cannot open recovery metadata.".to_string())?;
+    let opened = file.metadata()
+        .map_err(|_| "Cannot inspect recovery metadata.".to_string())?;
+    if !opened.is_file() || opened.len() > max_bytes {
+        return Err("Recovery metadata is not a bounded regular file.".into());
+    }
+    parse_bounded_recovery_json(&mut file, max_bytes)
+}
+
 #[derive(Debug, Serialize)]
 struct RenderProgress {
     done: u32,
@@ -822,20 +854,21 @@ struct RenderProgress {
 fn story_render_progress(app: tauri::AppHandle, job_id: String) -> Result<RenderProgress, String> {
     Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
     let path = app_dir(&app)?.join("jobs").join(format!("{job_id}.progress.json"));
-    match fs::read(&path) {
-        Ok(bytes) => {
-            if bytes.len() > 1024 { return Err("Invalid render progress.".into()); }
-            let data: Value = serde_json::from_slice(&bytes)
-                .map_err(|_| "Render progress is unreadable.".to_string())?;
-            let done = data["done"].as_u64().ok_or("Missing completed counter.")?;
-            let total = data["total"].as_u64().ok_or("Missing total counter.")?;
-            if total > 256 || done > total { return Err("Render counters are invalid.".into()); }
-            Ok(RenderProgress { done: done as u32, total: total as u32 })
-        }
+    read_render_progress_file(&path)
+}
+
+fn read_render_progress_file(path: &Path) -> Result<RenderProgress, String> {
+    match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
-            Ok(RenderProgress { done: 0, total: 0 }),
-        Err(error) => Err(format!("Progress unavailable: {error}")),
+            return Ok(RenderProgress { done: 0, total: 0 }),
+        Err(error) => return Err(format!("Progress unavailable: {error}")),
+        Ok(_) => {}
     }
+    let data = read_bounded_recovery_json(path, MAX_RENDER_PROGRESS_BYTES)?;
+    let done = data["done"].as_u64().ok_or("Missing completed counter.")?;
+    let total = data["total"].as_u64().ok_or("Missing total counter.")?;
+    if total > 256 || done > total { return Err("Render counters are invalid.".into()); }
+    Ok(RenderProgress { done: done as u32, total: total as u32 })
 }
 
 #[derive(Debug, Serialize)]
@@ -893,8 +926,9 @@ fn read_render_history_bounded(
     entries.sort_by_key(|item| std::cmp::Reverse(item.0));
     let mut reports = Vec::new();
     for (_, job_id, path) in entries {
-        let Ok(bytes) = fs::read(path) else { continue; };
-        let Ok(data) = serde_json::from_slice::<Value>(&bytes) else { continue; };
+        let Ok(data) = read_bounded_recovery_json(&path, MAX_RENDER_JOURNAL_BYTES) else {
+            continue;
+        };
         let (Some(story_id), Some(state), Some(done), Some(total), Some(updated_at)) = (
             data["story_id"].as_str(), data["state"].as_str(),
             data["done"].as_u64(), data["total"].as_u64(),
@@ -951,9 +985,8 @@ fn forget_render_journal_file(
     if !metadata.file_type().is_file() || metadata.len() > 65_536 {
         return Err("Render history record is not a regular bounded JSON file.".into());
     }
-    let data: Value = serde_json::from_slice(
-        &fs::read(&path).map_err(|_| "Cannot read render history.".to_string())?,
-    ).map_err(|_| "Render history is unreadable.".to_string())?;
+    let data = read_bounded_recovery_json(&path, MAX_RENDER_JOURNAL_BYTES)
+        .map_err(|_| "Render history is unreadable or changed.".to_string())?;
     if data["schema_version"] != 1 || data["story_id"].as_str() != Some(story_id) {
         return Err("The history record belongs to a different story.".into());
     }
