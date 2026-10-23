@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Fix stale unknown-speaker warnings: the banner now reflects active, unresolved scene lines instead of permanently showing the parser's earlier unknown-label list. Correcting a speaker clears the warning without synthesis.
+
 - Add 4000-character **production notes** for scenes, explicitly excluded from narration, with validation and unsaved-state tracking. Add a **confirmed Delete Scene** action that removes only the selected parsed scene, preserves the original script and other content, and falls back to a neighboring scene selection; cancellation leaves the story untouched. Cover controls and pure edit helpers with tests.
 
 - Support **Duplicate scene (fresh audio)** to copy reviewed Hindi dialogue, actor assignments and stage directions with new scene/line identities while explicitly clearing cached/generated audio metadata. Insert directly after its source with a distinguishable title. Enforce the 200-scene and 256-spoken-cue limits and reject ID conflicts. Add unit and React regressions without copying any model output.
