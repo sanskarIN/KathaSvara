@@ -15,6 +15,22 @@ from types import TracebackType
 from typing import Any, Self
 
 
+def safe_error_type(error_type: type[BaseException] | None) -> str | None:
+    """Return a fixed diagnostic category, never a user-controlled class name.
+
+    Exception names from dynamic/custom classes could otherwise embed sensitive
+    story text, paths or model details in a locally persisted recovery journal.
+    """
+    if error_type is None:
+        return None
+    if error_type.__name__ == "RenderCancelled":
+        return "RenderCancelled"
+    for category in (PermissionError, FileNotFoundError, MemoryError, OSError, ValueError, RuntimeError):
+        if issubclass(error_type, category):
+            return category.__name__
+    return "OtherError"
+
+
 class RenderJournal:
     def __init__(self, path: Path, story_id: str, total: int):
         if not path.is_absolute() or path.suffix != ".json":
@@ -113,4 +129,6 @@ class RenderJournal:
         else:
             state = "failed"
             failure = error_type.__name__
-        self._commit({**self.document, "state": state, "error_type": failure})
+        self._commit({**self.document, "state": state, "error_type": (
+            safe_error_type(error_type) if error_type is not None else failure
+        )})
