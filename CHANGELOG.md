@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Cap **actual** native recovery JSON reads, not just pre-read filesystem sizes: read at most 65,537 bytes for journal histories and 1,025 bytes for progress files, validate regular files and their opened handles, and refuse oversize/malformed data. Apply the same bounded parser to manual journal forgetting and keep existing story/identity safety checks. Add Windows Rust regressions for growing streams, symlinks, oversized histories and progress counters. Source-only; v0.5.0 prerelease unchanged.
+
 - Bound the native Windows recovery-history directory scan to 20,000 entries including non-journal files; fail clearly instead of sorting an unbounded folder or silently hiding older matching stories. Ignore inconsistent `completed` records whose `done` count is below `total`. Add model-free Rust regression tests for limit boundaries, filtering and terminal progress validity. Source-only; the existing v0.5.0 developer release stays unchanged.
 
 - Harden initial render-journal publication against a concurrent destination-file or symlink creation: create a complete temporary JSON snapshot, use atomic no-overwrite hard-link publication for the first write, and fail closed if linking is unavailable. Keep later atomic journal updates and privacy-minimal metadata unchanged. Add no-model race regressions and a dedicated native-Windows Python test gate. [Journal safety contract](docs/maintenance/render-journal-safety.md). Source only; published v0.5.0 assets remain unchanged.
