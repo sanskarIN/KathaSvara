@@ -813,4 +813,43 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
   });
 
+
+  it("duplicates the selected Hindi scene with new line identities and pending audio", () => {
+    const doc = story();
+    doc.scenes[0].segments[0].audio_ref = "completed-audio-placeholder";
+    doc.scenes[0].segments[0].status = "completed";
+    doc.scenes[0].segments[0].duration_seconds = 1.25;
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate scene (fresh audio)" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const update = onChange.mock.calls[0][0] as (old: StoryV2) => StoryV2;
+    const result = update(doc);
+    expect(result.scenes).toHaveLength(2);
+    expect(result.scenes[1].title).toBe("प्रथम दृश्य (copy)");
+    expect(result.scenes[1].id).not.toBe(doc.scenes[0].id);
+    expect(result.scenes[1].segments[0].id).not.toBe(doc.scenes[0].segments[0].id);
+    expect(result.scenes[1].segments[0].spoken_text).toBe("नमस्कार।");
+    expect(result.scenes[1].segments[0].speaker_id).toBe("narrator");
+    expect(result.scenes[1].segments[0].audio_ref).toBeNull();
+    expect(result.scenes[1].segments[0].duration_seconds).toBeNull();
+    expect(result.scenes[1].segments[0].status).toBe("pending");
+    expect(result.text).toBe(doc.text);
+    expect(doc.scenes[0].segments[0].audio_ref).toBe("completed-audio-placeholder");
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("new line IDs"));
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+  it("does not edit or claim success when cloning would exceed the 200-scene limit", () => {
+    const doc = story();
+    doc.scenes = Array.from({ length: 200 }, (_, i) => ({
+      id: "scene-" + i, title: "दृश्य " + i, notes: "",
+      segments: i === 0 ? [doc.scenes[0].segments[0]] : [],
+    }));
+    const { onChange } = mount(doc);
+    expect((screen.getByRole("button", {
+      name: "Duplicate scene (fresh audio)",
+    }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
 });
