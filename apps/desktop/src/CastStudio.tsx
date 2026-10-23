@@ -227,7 +227,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         ? "Full-length WAV generated on disk. Inline preview is unavailable above 25 MiB; export the WAV to listen and review."
         : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
     } catch (error) {
-      onMessage("Scene render stopped or failed: " + errorString(error));
+      if (revision === renderRevision.current) {
+        onMessage("Scene render stopped or failed: " + errorString(error));
+      }
     } finally {
       setJobId(null);
       setRendering(false);
@@ -297,9 +299,13 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         return;
       }
       await invoke("export_production_manifest", { destination, content });
-      onMessage("Private-text-free production report exported. It does not prove voice quality or model readiness.");
+      if (revision === renderRevision.current) {
+        onMessage("Private-text-free production report exported. It does not prove voice quality or model readiness.");
+      }
     } catch (error) {
-      onMessage("Cannot export production report: " + errorString(error));
+      if (revision === renderRevision.current) {
+        onMessage("Cannot export production report: " + errorString(error));
+      }
     }
   }
 
@@ -505,6 +511,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         !window.confirm("Reparsing replaces reviewed spoken text and speaker corrections. Original script and pronunciation glossary stay intact. Continue?")) {
       return;
     }
+    const revision = renderRevision.current;
     setBusy(true);
     try {
       const response = await invoke<DialogueParseResponse>("parse_dialogue", {
@@ -512,6 +519,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         characters: document.characters,
         scriptId: document.id || null,
       });
+      // The user may edit or switch stories while Python is still parsing.
+      // A late result must never replace a newer document or its audio.
+      if (revision !== renderRevision.current) return;
       if (!response.ok) throw new Error("Dialogue parser returned an unsuccessful response.");
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
       setAudio(null);
@@ -525,31 +535,41 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         ? `Parsed with ${response.unresolved.length} unknown speaker label(s). Assign them manually before generating.`
         : `Parsed ${response.result.scenes.length} scene(s). Save the v2 story to preserve character assignments.`);
     } catch (error) {
-      onMessage("Dialogue parsing failed: " + errorString(error));
+      if (revision === renderRevision.current) {
+        onMessage("Dialogue parsing failed: " + errorString(error));
+      }
     } finally {
       setBusy(false);
     }
   }
   async function saveDocument() {
+    const revision = renderRevision.current;
     setBusy(true);
     try {
       const saved = await invoke<StoryV2>("save_story_v2", {
         project: { ...document, id: document.id || crypto.randomUUID() },
       });
+      // A completed filesystem write does not authorize switching the UI back
+      // to an older story after an intervening edit or parent document change.
+      if (revision !== renderRevision.current) return;
       onChange(saved);
       setDirty(false);
       onMessage("Version 2 story and voice profiles saved atomically in local app data.");
     } catch (error) {
-      onMessage("Unable to save version 2 story: " + errorString(error));
+      if (revision === renderRevision.current) {
+        onMessage("Unable to save version 2 story: " + errorString(error));
+      }
     } finally {
       setBusy(false);
     }
   }
   async function loadDocument() {
     if (dirty && !window.confirm("Discard current unsaved cast/scenes and load a saved v2 version?")) return;
+    const revision = renderRevision.current;
     setBusy(true);
     try {
       const loaded = await invoke<StoryV2>("load_story_v2", { id: document.id });
+      if (revision !== renderRevision.current) return;
       renderRevision.current += 1;
       if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
       audioEpoch.current += 1;
@@ -562,7 +582,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       setDirty(false);
       onMessage("Saved v2 story loaded. Legacy v0.1.x stories remain in their original folder.");
     } catch (error) {
-      onMessage("No saved v2 story for this ID: " + errorString(error));
+      if (revision === renderRevision.current) {
+        onMessage("No saved v2 story for this ID: " + errorString(error));
+      }
     } finally {
       setBusy(false);
     }
