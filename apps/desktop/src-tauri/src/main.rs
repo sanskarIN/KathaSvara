@@ -1048,7 +1048,8 @@ fn write_cancel_marker(path: &Path) -> Result<(), String> {
     match fs::OpenOptions::new().write(true).create_new(true).open(path) {
         Ok(mut file) => {
             if let Err(error) = file.write_all(b"cancel") {
-                let _ = fs::remove_file(path);
+                // Do not remove by path here: another process may have replaced
+                // this directory entry while the original file handle was open.
                 return Err(format!("Cannot publish cancellation marker: {error}"));
             }
             Ok(())
@@ -1451,6 +1452,48 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    #[test]
+    fn cancel_marker_is_exclusive_and_second_request_is_idempotent() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-cancel-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("render.cancel");
+
+        write_cancel_marker(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"cancel");
+        write_cancel_marker(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"cancel");
+
+        let unrelated = folder.join("other.cancel");
+        fs::write(&unrelated, b"DO NOT TRUNCATE").unwrap();
+        assert!(write_cancel_marker(&unrelated).is_err());
+        assert_eq!(fs::read(&unrelated).unwrap(), b"DO NOT TRUNCATE");
+
+        let invalid = folder.join("invalid.cancel");
+        fs::write(&invalid, b"").unwrap();
+        assert!(write_cancel_marker(&invalid).is_err());
+        assert!(fs::read(&invalid).unwrap().is_empty());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn cancel_marker_refuses_symlink_without_modifying_private_target() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-cancel-link-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let private = folder.join("private.txt");
+        let path = folder.join("render.cancel");
+        fs::write(&private, b"KEEP PRIVATE").unwrap();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&private, &path).is_ok();
+        #[cfg(not(windows))]
+        let linked = std::os::unix::fs::symlink(&private, &path).is_ok();
+        if linked {
+            assert!(write_cancel_marker(&path).is_err());
+            assert_eq!(fs::read(&private).unwrap(), b"KEEP PRIVATE");
+            assert!(fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+        }
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]
