@@ -735,4 +735,47 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(onChange).not.toHaveBeenCalled();
   });
 
+
+  it("lets a new story parse start immediately and prevents an older completion unlocking it", async () => {
+    const finish: Array<(result: unknown) => void> = [];
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "parse_dialogue") {
+        return new Promise(resolve => { finish.push(resolve); });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Parse labeled Hindi script" }));
+    await waitFor(() => expect(finish).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "Processing…" })).toBeTruthy();
+
+    const next = { ...doc, id: "second-story", title: "नई कहानी" };
+    rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
+    expect(screen.getByRole("button", { name: "Parse labeled Hindi script" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Parse labeled Hindi script" }));
+    await waitFor(() => expect(finish).toHaveLength(2));
+    await act(async () => {
+      finish[0]({
+        ok: true, result: { ...doc, title: "stale story" },
+        unresolved: [], distinct_voices_verified: false,
+      });
+    });
+    expect(screen.getByRole("button", { name: "Processing…" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("stale story"))).toBe(false);
+
+    await act(async () => {
+      finish[1]({
+        ok: true, result: { ...next, title: "अभी की कहानी" },
+        unresolved: [], distinct_voices_verified: false,
+      });
+    });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      id: "second-story", title: "अभी की कहानी",
+    }));
+    expect(screen.getByRole("button", { name: "Parse labeled Hindi script" })).toBeTruthy();
+  });
+
 });
