@@ -61,6 +61,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newName, setNewName] = useState("");
   const [newSceneTitle, setNewSceneTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  // Only the current parse/save/load operation can own the busy flag.
+  const editorOperationEpoch = useRef(0);
   const [dirty, setDirty] = useState(true);
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
   const [unresolved, setUnresolved] = useState<string[]>([]);
@@ -110,6 +112,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   useEffect(() => {
     // Parent script/story switches are edits too; reject late renders of older documents.
     renderRevision.current += 1;
+    editorOperationEpoch.current += 1;
+    setBusy(false);
     historyEpoch.current += 1;
     setLoadingHistory(false);
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
@@ -137,6 +141,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }, [jobId]);
   function edit(update: (previous: StoryV2) => StoryV2) {
     renderRevision.current += 1;
+    editorOperationEpoch.current += 1;
+    setBusy(false);
     historyEpoch.current += 1;
     setHistory(null);
     setLoadingHistory(false);
@@ -499,6 +505,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function parse() {
+    if (busy) return;
     if (document.text.trim().length === 0) {
       onMessage("Enter a Hindi script before parsing dialogue.");
       return;
@@ -512,6 +519,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       return;
     }
     const revision = renderRevision.current;
+    const op = ++editorOperationEpoch.current;
     setBusy(true);
     try {
       const response = await invoke<DialogueParseResponse>("parse_dialogue", {
@@ -539,11 +547,13 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         onMessage("Dialogue parsing failed: " + errorString(error));
       }
     } finally {
-      setBusy(false);
+      if (op === editorOperationEpoch.current) setBusy(false);
     }
   }
   async function saveDocument() {
+    if (busy) return;
     const revision = renderRevision.current;
+    const op = ++editorOperationEpoch.current;
     setBusy(true);
     try {
       const saved = await invoke<StoryV2>("save_story_v2", {
@@ -560,12 +570,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         onMessage("Unable to save version 2 story: " + errorString(error));
       }
     } finally {
-      setBusy(false);
+      if (op === editorOperationEpoch.current) setBusy(false);
     }
   }
   async function loadDocument() {
+    if (busy) return;
     if (dirty && !window.confirm("Discard current unsaved cast/scenes and load a saved v2 version?")) return;
     const revision = renderRevision.current;
+    const op = ++editorOperationEpoch.current;
     setBusy(true);
     try {
       const loaded = await invoke<StoryV2>("load_story_v2", { id: document.id });
@@ -586,7 +598,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         onMessage("No saved v2 story for this ID: " + errorString(error));
       }
     } finally {
-      setBusy(false);
+      if (op === editorOperationEpoch.current) setBusy(false);
     }
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
