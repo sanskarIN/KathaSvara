@@ -112,7 +112,7 @@ def test_cache_scan_limit_counts_unrelated_entries_and_refuses_partial_pruning(
 
 @pytest.mark.parametrize("clock", [
     float("nan"), float("inf"), float("-inf"), 0, -1,
-    10**12, True, "2026-10-23",
+    10**12, 10**1000, True, "2026-10-23",
 ])
 def test_invalid_clock_fails_closed_before_deletion(tmp_path: Path, clock: object) -> None:
     folder = tmp_path / "segment-cache"
