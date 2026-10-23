@@ -65,6 +65,76 @@ def _level_hints(
     }
 
 
+def _validate_pcm16_riff(raw, file_bytes: int) -> tuple[int, int]:
+    """Stream-check every RIFF chunk before trusting wave's first data chunk.
+
+    wave.open accepts some extra/duplicate trailing chunks without inspecting
+    them. Match the desktop's bounded PCM16 container rules without reading
+    the audio payload into memory.
+    """
+    invalid = "WAV contains an unsupported or invalid PCM header."
+    raw.seek(0)
+    header = raw.read(12)
+    if len(header) != 12 or header[:4] != b"RIFF" or header[8:] != b"WAVE":
+        raise ValueError(invalid)
+    declared_length = int.from_bytes(header[4:8], "little") + 8
+    if declared_length > file_bytes:
+        raise ValueError("WAV audio is truncated or the frame count is incorrect.")
+    if declared_length != file_bytes:
+        raise ValueError(invalid)
+
+    cursor = 12
+    chunk_count = 0
+    sample_rate: int | None = None
+    frame_count: int | None = None
+    while cursor < file_bytes:
+        if file_bytes - cursor < 8:
+            raise ValueError(invalid)
+        raw.seek(cursor)
+        chunk_header = raw.read(8)
+        if len(chunk_header) != 8:
+            raise ValueError(invalid)
+        chunk_count += 1
+        if chunk_count > 4096:
+            raise ValueError("WAV contains too many metadata chunks.")
+
+        chunk_size = int.from_bytes(chunk_header[4:8], "little")
+        payload_start = cursor + 8
+        next_chunk = payload_start + chunk_size + (chunk_size % 2)
+        if next_chunk > file_bytes:
+            raise ValueError(invalid)
+        if chunk_header[:4] == b"fmt ":
+            if sample_rate is not None or chunk_size < 16:
+                raise ValueError(invalid)
+            fmt = raw.read(16)
+            if len(fmt) != 16:
+                raise ValueError(invalid)
+            codec = int.from_bytes(fmt[0:2], "little")
+            channels = int.from_bytes(fmt[2:4], "little")
+            rate = int.from_bytes(fmt[4:8], "little")
+            byte_rate = int.from_bytes(fmt[8:12], "little")
+            alignment = int.from_bytes(fmt[12:14], "little")
+            bit_depth = int.from_bytes(fmt[14:16], "little")
+            if (codec != 1 or channels != 1 or not 8000 <= rate <= 192000 or
+                alignment != 2 or bit_depth != 16):
+                raise ValueError("Expected mono PCM16 WAV of at most 20 minutes.")
+            if byte_rate != rate * 2:
+                raise ValueError(invalid)
+            sample_rate = rate
+        elif chunk_header[:4] == b"data":
+            if frame_count is not None or chunk_size < 2 or chunk_size % 2:
+                raise ValueError(invalid)
+            frame_count = chunk_size // 2
+        cursor = next_chunk
+
+    if sample_rate is None or frame_count is None:
+        raise ValueError(invalid)
+    if frame_count > MAX_SECONDS * sample_rate:
+        raise ValueError("Expected mono PCM16 WAV of at most 20 minutes.")
+    raw.seek(0)
+    return sample_rate, frame_count
+
+
 def inspect_wav_candidate(path: Path) -> dict[str, object]:
     """Validate actual PCM bytes and report structure without interpreting audio."""
     if not path.is_absolute() or path.suffix.lower() != ".wav":
@@ -83,11 +153,13 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
         if not stat.S_ISREG(info.st_mode) or not 44 <= info.st_size <= MAX_WAV_BYTES:
             raise ValueError("Candidate WAV is not a bounded regular audio file.")
         try:
+            expected_rate, expected_frames = _validate_pcm16_riff(raw, info.st_size)
             with wave.open(raw, "rb") as wav:
                 rate = wav.getframerate()
                 frames = wav.getnframes()
                 if (wav.getnchannels() != 1 or wav.getsampwidth() != 2 or
-                    wav.getcomptype() != "NONE" or not 8000 <= rate <= 192000 or
+                    wav.getcomptype() != "NONE" or rate != expected_rate or
+                    frames != expected_frames or
                     frames <= 0 or frames > MAX_SECONDS * rate):
                     raise ValueError("Expected mono PCM16 WAV of at most 20 minutes.")
                 # Header frame counts can lie when the file is truncated. Read

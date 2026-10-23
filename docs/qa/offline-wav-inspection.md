@@ -60,7 +60,7 @@ Example report fields (values below are illustrative, not evidence of a real-mod
 ## What the check actually establishes
 
 - Absolute `.wav` path, non-symlink regular file, 44 bytes–512 MiB size bound.
-- PCM16 *uncompressed, mono* WAV, 8–192 kHz sample rate, nonzero duration no longer than 20 minutes.
+- PCM16 *uncompressed, mono* WAV, 8–192 kHz sample rate, nonzero duration no longer than 20 minutes. **Unreleased source-only hardening:** scan the RIFF container in bounded reads before decoding, require the declared RIFF size to match the file, verify PCM byte-rate/block-alignment, reject duplicated `fmt `/`data` chunks, damaged/trailing chunks and more than 4096 total chunks. Correctly padded ancillary chunks remain supported. These checks align the Python inspector with the native Rust exporter; they do not validate spoken Hindi.
 - Streamed frame reads to detect a truncated PCM data payload, using bounded chunks and a complete-file SHA-256 digest without holding the recording in RAM.
 - Reject files whose opened-file identity, byte size, modification time or metadata-change time differs between the initial inspection and the end of hashing. This catches common **same-size edits during inspection**, but cannot prove an immutable snapshot against deliberate timestamp restoration or edits after the final check. Access time is intentionally excluded because reads can change it.
 - Conservative `level_hints` computed from PCM amplitudes in the same bounded pass: peak and RMS dBFS (`null` for digital silence), percentage of samples at 16-bit full scale, `near_silence_hint` for RMS ≤ -60 dBFS, and `possible_clipping_hint` when at least 1% of samples reach ±32767/32768. These hints are **advisory**, not automated audio acceptance.
