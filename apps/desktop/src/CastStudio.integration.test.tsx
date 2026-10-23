@@ -644,6 +644,8 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
 
 
   it("does not replace the current story with an obsolete dialogue parse response", async () => {
+    // The fixture already contains scenes; reparsing requires explicit consent.
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     let finishParse: (result: unknown) => void = () => { throw new Error("Parser not called"); };
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "parse_dialogue") {
@@ -715,6 +717,8 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
   });
 
   it("does not echo stale parse failures after switching stories", async () => {
+    // The fixture already contains scenes; reparsing requires explicit consent.
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     let failParse: (reason: Error) => void = () => { throw new Error("Parse not called"); };
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "parse_dialogue") {
@@ -737,6 +741,8 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
 
 
   it("lets a new story parse start immediately and prevents an older completion unlocking it", async () => {
+    // The fixture already contains scenes; reparsing requires explicit consent.
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     const finish: Array<(result: unknown) => void> = [];
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "parse_dialogue") {
