@@ -1109,10 +1109,11 @@ fn read_validated_wav_preview(
     source.rewind().map_err(|_| INVALID)?;
     let mut bytes = Vec::with_capacity(capacity);
     // A file that grew while being read must not extend the WebView payload.
-    let mut limited = (&mut *source).take(expected_bytes + 1);
-    limited.read_to_end(&mut bytes).map_err(|_| INVALID)?;
-    // Free the temporary borrow to inspect the very same opened source again.
-    drop(limited);
+    {
+        let mut limited = (&mut *source).take(expected_bytes + 1);
+        limited.read_to_end(&mut bytes).map_err(|_| INVALID)?;
+    }
+    // Recheck the already-open source after the bounded reader releases it.
     let after = source.metadata().map_err(|_| INVALID)?;
     if bytes.len() != capacity ||
         !wav_source_metadata_unchanged(originally_opened, &after)
