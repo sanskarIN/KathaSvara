@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.3 draft development (not merged or published)
+
+- Add in-scene ↑/↓ reordering controls for dialogue and stage directions without altering the original script, scene IDs, spoken Hindi text or actor assignments. Guard missing/duplicated segment identities, disable edge controls, preserve local data and reuse the existing editor's stale-WAV invalidation and unsaved-state tracking. Add unit and mocked-Tauri React tests. Source draft only; v0.5.2 publication and real Hindi/Windows manual acceptance remain separate. [Development notes](docs/releases/v0.5.3-development.md).
+
 ## Unreleased — v0.5.2 experimental developer pre-release candidate (not published)
 
 - Prevent delayed dialogue parsing, v2 story saves and stored-story loads from overwriting the **current** editor after a user changes documents or edits content. Ignore stale render failure notifications and audit-export completion messages, without claiming to cancel a filesystem write already in progress. Add mocked-Tauri React races and stale-error regressions; no speech model or published pre-release affected.
