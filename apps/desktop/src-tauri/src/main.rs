@@ -919,7 +919,7 @@ fn read_render_history_bounded(
         let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
         if Uuid::parse_str(id).is_err() { continue; }
         let metadata = fs::symlink_metadata(entry.path()).map_err(|e| e.to_string())?;
-        if !metadata.file_type().is_file() || metadata.len() > 65_536 { continue; }
+        if !metadata.file_type().is_file() || metadata.len() > MAX_RENDER_JOURNAL_BYTES { continue; }
         let updated = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         entries.push((updated, id.to_owned(), entry.path()));
     }
@@ -982,7 +982,7 @@ fn forget_render_journal_file(
     let path = folder.join(format!("{job_id}.manifest.json"));
     let metadata = fs::symlink_metadata(&path)
         .map_err(|_| "Render history record was not found.".to_string())?;
-    if !metadata.file_type().is_file() || metadata.len() > 65_536 {
+    if !metadata.file_type().is_file() || metadata.len() > MAX_RENDER_JOURNAL_BYTES {
         return Err("Render history record is not a regular bounded JSON file.".into());
     }
     let data = read_bounded_recovery_json(&path, MAX_RENDER_JOURNAL_BYTES)
