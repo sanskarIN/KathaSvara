@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Make the desktop model-free WAV review parser fail closed on contradictory inspection results: validate mono PCM16 sample rate/frame count, reported duration and minimum container size, sensible dBFS values and agreement between quality hints and the aggregate review flag. Allow rounding tolerance at precise advisory thresholds, without auto-approving Hindi speech. Add Vitest and mocked desktop IPC regression coverage. Source only; the v0.5.0 developer binary remains unchanged.
+
 - Align the Python read-only WAV inspector with native Rust RIFF/PCM16 header checks: verify complete RIFF and chunk lengths, PCM byte-rate/block alignment, reject duplicate fmt/data chunks and excessive metadata, while allowing bounded padded non-audio chunks. Add no-model malformed-container regression tests. Source only; v0.5.0 prerelease unchanged.
 
 - Tighten native WAV preview/export header consistency: verify PCM16 byte rate equals sample rate × two bytes, reject ambiguous duplicate fmt/data chunks in the small in-memory preview validator, bound metadata-chunk count and reject recordings beyond 20 minutes. Add Rust tests using correctly sized but malformed headers. No new model, changed audio output, or published release assets.
