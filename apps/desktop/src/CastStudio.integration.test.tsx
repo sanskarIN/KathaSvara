@@ -784,4 +784,33 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.getByRole("button", { name: "Parse labeled Hindi script" })).toBeTruthy();
   });
 
+
+  it("reorders scene dialogue and stage directions without regenerating audio or editing the original script", () => {
+    const doc = story();
+    const speech = doc.scenes[0].segments[0];
+    doc.scenes[0].segments = [
+      speech,
+      { ...speech, id: "direction-one", kind: "direction", speaker_id: null,
+        original_text: "[दरवाज़ा खुलता है]", spoken_text: "" },
+      { ...speech, id: "line-two", original_text: "दूसरा वाक्य।",
+        spoken_text: "दूसरा वाक्य।" },
+    ];
+    const { onChange } = mount(doc);
+    expect((screen.getByRole("button", { name: "Move line line-one up" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "Move line line-two down" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Move line line-two up" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const update = onChange.mock.calls[0][0] as (doc: StoryV2) => StoryV2;
+    const next = update(doc);
+    expect(next.scenes[0].segments.map(line => line.id))
+      .toEqual(["line-one", "line-two", "direction-one"]);
+    expect(next.scenes[0].segments[1].spoken_text).toBe("दूसरा वाक्य।");
+    expect(next.scenes[0].segments[0].speaker_id).toBe("narrator");
+    expect(next.text).toBe(doc.text);
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+
 });
