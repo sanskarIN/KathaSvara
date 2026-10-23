@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, legacyToStoryV2,
-  makeCharacter, moveScene, moveSegment, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
+  makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
   type StoryV2,
 } from "./story_v2";
 
@@ -120,5 +120,54 @@ describe("v0.2.1 non-destructive pronunciation authoring", () => {
     expect(doc.pronunciation_glossary).toEqual([]);
     expect(() => setGlossary(doc, [...rules, { ...rules[0], id: "b" }])).toThrow("unique");
     expect(() => setGlossary(doc, [{ ...rules[0], spoken: "" }])).toThrow("unique");
+  });
+});
+
+
+describe("v0.5.3 in-scene narration ordering", () => {
+  function orderedFixture(): StoryV2 {
+    const doc = fixture();
+    const first = doc.scenes[0].segments[0];
+    return {
+      ...doc, scenes: [{
+        ...doc.scenes[0], segments: [
+          first,
+          { ...first, id: "direction-1", kind: "direction", original_text: "[चुप्पी]",
+            spoken_text: "", speaker_id: null, audio_ref: null, duration_seconds: null },
+          { ...first, id: "line-2", original_text: "दूसरा संवाद", spoken_text: "दूसरा संवाद" },
+        ],
+      }, doc.scenes[1]],
+    };
+  }
+  it("moves a spoken line across a stage direction without changing the script or speaker data", () => {
+    const doc = orderedFixture();
+    const result = moveSegmentWithinScene(doc, "line-2", -1);
+    expect(result.scenes[0].segments.map(x => x.id)).toEqual(["seg1", "line-2", "direction-1"]);
+    expect(result.scenes[0].segments[1]).toEqual(doc.scenes[0].segments[2]);
+    expect(result.scenes[0].segments[1]).not.toBe(doc.scenes[0].segments[1]);
+    expect(doc.scenes[0].segments.map(x => x.id)).toEqual(["seg1", "direction-1", "line-2"]);
+    expect(result.text).toBe(doc.text);
+    expect(result.scenes[1]).toBe(doc.scenes[1]);
+  });
+  it("moves stage directions while keeping saved speech identity and cache metadata", () => {
+    const doc = orderedFixture();
+    const reordered = moveSegmentWithinScene(doc, "direction-1", -1);
+    expect(reordered.scenes[0].segments.map(x => x.id)).toEqual(["direction-1", "seg1", "line-2"]);
+    expect(reordered.scenes[0].segments[1].audio_ref).toBe("cached-audio");
+    expect(reordered.scenes[0].segments[1].speaker_id).toBe("raja");
+    expect(reordered.scenes[0].segments[1].duration_seconds).toBe(1.2);
+  });
+  it("keeps identity and avoids unnecessary edits at scene boundaries", () => {
+    const doc = orderedFixture();
+    expect(moveSegmentWithinScene(doc, "seg1", -1)).toBe(doc);
+    expect(moveSegmentWithinScene(doc, "line-2", 1)).toBe(doc);
+  });
+  it("fails closed on missing or duplicate segment identifiers across scenes", () => {
+    const doc = orderedFixture();
+    expect(() => moveSegmentWithinScene(doc, "unknown", 1)).toThrow("exactly once");
+    const duplicate: StoryV2 = { ...doc, scenes: [
+      doc.scenes[0], { ...doc.scenes[1], segments: [{ ...doc.scenes[0].segments[0] }] },
+    ] };
+    expect(() => moveSegmentWithinScene(duplicate, "seg1", 1)).toThrow("exactly once");
   });
 });
