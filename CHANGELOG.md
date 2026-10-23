@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Tighten native WAV preview/export header consistency: verify PCM16 byte rate equals sample rate × two bytes, reject ambiguous duplicate fmt/data chunks in the small in-memory preview validator, bound metadata-chunk count and reject recordings beyond 20 minutes. Add Rust tests using correctly sized but malformed headers. No new model, changed audio output, or published release assets.
+
 - Suppress stale WAV and dialogue SRT export **success/error UI feedback** if a creator clears, replaces or edits the active audio while native export is still running. Keep subtitle manual-review eligibility scoped to the current audio. Add mocked desktop race regressions for delayed WAV/SRT success and errors. A completed old export may still exist at its explicit destination, but it must not be attributed to the new preview.
 
 - Detect concurrent changes to locally generated WAV files during native streaming export even when their byte lengths stay unchanged. Compare opened-file modification timestamps and size before/after container validation and the output copy; remove the newly created destination if a change is detected. Add deterministic Rust metadata regression coverage. This is best-effort race detection, not a filesystem snapshot or human Hindi acceptance.

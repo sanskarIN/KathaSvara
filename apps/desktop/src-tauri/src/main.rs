@@ -699,9 +699,14 @@ fn inspect_wav(data: &[u8]) -> Result<(), String> {
         return Err("WAV RIFF length does not match its file size.".into());
     }
     let mut index = 12usize;
-    let mut found_format = false;
-    let mut found_samples = false;
+    let mut sample_rate_hz = None;
+    let mut data_frames = None;
+    let mut chunks = 0_u32;
     while index + 8 <= data.len() {
+        chunks += 1;
+        if chunks > 4096 {
+            return Err("Generated WAV has too many metadata chunks.".into());
+        }
         let marker = &data[index..index + 4];
         let size = u32::from_le_bytes(
             data[index + 4..index + 8].try_into().map_err(|_| INVALID)?
@@ -714,29 +719,38 @@ fn inspect_wav(data: &[u8]) -> Result<(), String> {
             return Err("WAV chunk extends beyond its file size.".into());
         }
         if marker == b"fmt " {
-            if size < 16 {
+            if sample_rate_hz.is_some() || size < 16 {
                 return Err(INVALID.into());
             }
             let fmt = &data[index + 8..index + 24];
             let codec = u16::from_le_bytes([fmt[0], fmt[1]]);
             let channels = u16::from_le_bytes([fmt[2], fmt[3]]);
             let sample_rate = u32::from_le_bytes(fmt[4..8].try_into().map_err(|_| INVALID)?);
+            let byte_rate = u32::from_le_bytes(fmt[8..12].try_into().map_err(|_| INVALID)?);
             let block_align = u16::from_le_bytes([fmt[12], fmt[13]]);
             let bits_per_sample = u16::from_le_bytes([fmt[14], fmt[15]]);
             if codec != 1 || channels != 1 || !(8_000..=192_000).contains(&sample_rate)
-                || block_align != 2 || bits_per_sample != 16
+                || byte_rate != sample_rate * 2 || block_align != 2 || bits_per_sample != 16
             {
                 return Err(INVALID.into());
             }
-            found_format = true;
+            sample_rate_hz = Some(sample_rate);
         }
-        if marker == b"data" && size >= 2 && size.is_multiple_of(2) {
-            found_samples = true;
+        if marker == b"data" {
+            if data_frames.is_some() || size < 2 || !size.is_multiple_of(2) {
+                return Err(INVALID.into());
+            }
+            data_frames = Some(size / 2);
         }
         index = next;
     }
-    if index != data.len() || !found_format || !found_samples {
+    if index != data.len() {
         return Err(INVALID.into());
+    }
+    let rate = sample_rate_hz.ok_or(INVALID)?;
+    let frames = data_frames.ok_or(INVALID)?;
+    if frames as u64 > u64::from(rate) * 1200 {
+        return Err("Generated WAV exceeds the 20-minute narration limit.".into());
     }
     Ok(())
 }
@@ -1679,6 +1693,36 @@ mod tests {
         let mut wav = minimal_pcm_wav();
         wav[40..44].copy_from_slice(&100u32.to_le_bytes());
         assert!(inspect_wav(&wav).is_err());
+    }
+
+    #[test]
+    fn wav_validation_rejects_wrong_byte_rate_without_truncation() {
+        let mut wav = minimal_pcm_wav();
+        wav[28..32].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(inspect_wav(&wav).is_err());
+        wav[28..32].copy_from_slice(&48_000_u32.to_le_bytes());
+        assert!(inspect_wav(&wav).is_ok());
+    }
+
+    #[test]
+    fn wav_validation_rejects_duplicate_pcm_chunks_and_empty_data_chunk() {
+        let original = minimal_pcm_wav();
+        // Append another data chunk. The file is well-sized but ambiguous.
+        let mut double_data = original.clone();
+        double_data.extend_from_slice(b"data");
+        double_data.extend_from_slice(&2_u32.to_le_bytes());
+        double_data.extend_from_slice(&[0_u8; 2]);
+        let length = (double_data.len() - 8) as u32;
+        double_data[4..8].copy_from_slice(&length.to_le_bytes());
+        assert!(inspect_wav(&double_data).is_err());
+        let mut double_fmt = original.clone();
+        double_fmt.extend_from_slice(&original[12..36]);
+        let length = (double_fmt.len() - 8) as u32;
+        double_fmt[4..8].copy_from_slice(&length.to_le_bytes());
+        assert!(inspect_wav(&double_fmt).is_err());
+        let mut empty_data = original;
+        empty_data[40..44].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(inspect_wav(&empty_data).is_err());
     }
 
     #[test]
