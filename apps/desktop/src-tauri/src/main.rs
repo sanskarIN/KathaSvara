@@ -812,6 +812,38 @@ async fn synthesize(
     }).await.map_err(|e| e.to_string())?
 }
 
+// Validate the path and the opened handle, then cap the *actual read*, not
+// merely a potentially stale length returned by filesystem metadata.
+// These are local recovery sidecars, not arbitrary user-selected documents.
+const MAX_RENDER_JOURNAL_BYTES: u64 = 65_536;
+const MAX_RENDER_PROGRESS_BYTES: u64 = 1_024;
+
+fn parse_bounded_recovery_json<R: Read>(source: &mut R, max_bytes: u64) -> Result<Value, String> {
+    let mut bytes = Vec::new();
+    source.take(max_bytes + 1).read_to_end(&mut bytes)
+        .map_err(|_| "Cannot read recovery metadata.".to_string())?;
+    if bytes.len() as u64 > max_bytes {
+        return Err("Recovery metadata exceeds its size limit.".into());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| "Recovery metadata is unreadable JSON.".into())
+}
+
+fn read_bounded_recovery_json(path: &Path, max_bytes: u64) -> Result<Value, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "Recovery metadata is unavailable.".to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() > max_bytes {
+        return Err("Recovery metadata is not a bounded regular file.".into());
+    }
+    let mut file = fs::File::open(path)
+        .map_err(|_| "Cannot open recovery metadata.".to_string())?;
+    let opened = file.metadata()
+        .map_err(|_| "Cannot inspect recovery metadata.".to_string())?;
+    if !opened.is_file() || opened.len() > max_bytes {
+        return Err("Recovery metadata is not a bounded regular file.".into());
+    }
+    parse_bounded_recovery_json(&mut file, max_bytes)
+}
+
 #[derive(Debug, Serialize)]
 struct RenderProgress {
     done: u32,
@@ -822,20 +854,21 @@ struct RenderProgress {
 fn story_render_progress(app: tauri::AppHandle, job_id: String) -> Result<RenderProgress, String> {
     Uuid::parse_str(&job_id).map_err(|_| "Invalid job identifier.")?;
     let path = app_dir(&app)?.join("jobs").join(format!("{job_id}.progress.json"));
-    match fs::read(&path) {
-        Ok(bytes) => {
-            if bytes.len() > 1024 { return Err("Invalid render progress.".into()); }
-            let data: Value = serde_json::from_slice(&bytes)
-                .map_err(|_| "Render progress is unreadable.".to_string())?;
-            let done = data["done"].as_u64().ok_or("Missing completed counter.")?;
-            let total = data["total"].as_u64().ok_or("Missing total counter.")?;
-            if total > 256 || done > total { return Err("Render counters are invalid.".into()); }
-            Ok(RenderProgress { done: done as u32, total: total as u32 })
-        }
+    read_render_progress_file(&path)
+}
+
+fn read_render_progress_file(path: &Path) -> Result<RenderProgress, String> {
+    match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
-            Ok(RenderProgress { done: 0, total: 0 }),
-        Err(error) => Err(format!("Progress unavailable: {error}")),
+            return Ok(RenderProgress { done: 0, total: 0 }),
+        Err(error) => return Err(format!("Progress unavailable: {error}")),
+        Ok(_) => {}
     }
+    let data = read_bounded_recovery_json(path, MAX_RENDER_PROGRESS_BYTES)?;
+    let done = data["done"].as_u64().ok_or("Missing completed counter.")?;
+    let total = data["total"].as_u64().ok_or("Missing total counter.")?;
+    if total > 256 || done > total { return Err("Render counters are invalid.".into()); }
+    Ok(RenderProgress { done: done as u32, total: total as u32 })
 }
 
 #[derive(Debug, Serialize)]
@@ -886,15 +919,16 @@ fn read_render_history_bounded(
         let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
         if Uuid::parse_str(id).is_err() { continue; }
         let metadata = fs::symlink_metadata(entry.path()).map_err(|e| e.to_string())?;
-        if !metadata.file_type().is_file() || metadata.len() > 65_536 { continue; }
+        if !metadata.file_type().is_file() || metadata.len() > MAX_RENDER_JOURNAL_BYTES { continue; }
         let updated = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
         entries.push((updated, id.to_owned(), entry.path()));
     }
     entries.sort_by_key(|item| std::cmp::Reverse(item.0));
     let mut reports = Vec::new();
     for (_, job_id, path) in entries {
-        let Ok(bytes) = fs::read(path) else { continue; };
-        let Ok(data) = serde_json::from_slice::<Value>(&bytes) else { continue; };
+        let Ok(data) = read_bounded_recovery_json(&path, MAX_RENDER_JOURNAL_BYTES) else {
+            continue;
+        };
         let (Some(story_id), Some(state), Some(done), Some(total), Some(updated_at)) = (
             data["story_id"].as_str(), data["state"].as_str(),
             data["done"].as_u64(), data["total"].as_u64(),
@@ -948,12 +982,11 @@ fn forget_render_journal_file(
     let path = folder.join(format!("{job_id}.manifest.json"));
     let metadata = fs::symlink_metadata(&path)
         .map_err(|_| "Render history record was not found.".to_string())?;
-    if !metadata.file_type().is_file() || metadata.len() > 65_536 {
+    if !metadata.file_type().is_file() || metadata.len() > MAX_RENDER_JOURNAL_BYTES {
         return Err("Render history record is not a regular bounded JSON file.".into());
     }
-    let data: Value = serde_json::from_slice(
-        &fs::read(&path).map_err(|_| "Cannot read render history.".to_string())?,
-    ).map_err(|_| "Render history is unreadable.".to_string())?;
+    let data = read_bounded_recovery_json(&path, MAX_RENDER_JOURNAL_BYTES)
+        .map_err(|_| "Render history is unreadable or changed.".to_string())?;
     if data["schema_version"] != 1 || data["story_id"].as_str() != Some(story_id) {
         return Err("The history record belongs to a different story.".into());
     }
@@ -1497,6 +1530,71 @@ mod tests {
         let completed = read_render_history(&folder, Some(&story)).unwrap();
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].state, "completed");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn bounded_recovery_parser_stops_reading_at_limit_even_if_stream_grows() {
+        let mut grown_file = std::io::Cursor::new(vec![b' '; 1024 * 1024]);
+        let error = parse_bounded_recovery_json(&mut grown_file, 1024).unwrap_err();
+        assert!(error.contains("size limit"), "{error}");
+        assert_eq!(grown_file.position(), 1025, "Do not buffer the rest of a raced file.");
+
+        let mut valid = std::io::Cursor::new(br#"{"done":1,"total":2}"#);
+        let data = parse_bounded_recovery_json(&mut valid, 1024).unwrap();
+        assert_eq!(data["done"], 1);
+    }
+
+    #[test]
+    fn progress_reader_rejects_oversize_and_invalid_counters() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-progress-bound-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("progress.json");
+        let missing = read_render_progress_file(&path).unwrap();
+        assert_eq!((missing.done, missing.total), (0, 0));
+
+        fs::write(&path, vec![b' '; 1025]).unwrap();
+        assert!(read_render_progress_file(&path).is_err());
+        fs::write(&path, br#"{"done":3,"total":2}"#).unwrap();
+        assert!(read_render_progress_file(&path).is_err());
+        fs::write(&path, br#"{"done":1,"total":2}"#).unwrap();
+        let valid = read_render_progress_file(&path).unwrap();
+        assert_eq!((valid.done, valid.total), (1, 2));
+
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn history_and_forget_reject_oversized_journal_without_mutation() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-bounded-journal-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story_id = Uuid::new_v4().to_string();
+        let job_id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{job_id}.manifest.json"));
+        fs::write(&path, vec![b'x'; (MAX_RENDER_JOURNAL_BYTES + 1) as usize]).unwrap();
+        assert!(read_render_history(&folder, Some(&story_id)).unwrap().is_empty());
+        assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
+        assert_eq!(fs::metadata(&path).unwrap().len(), MAX_RENDER_JOURNAL_BYTES + 1);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn bounded_recovery_reader_refuses_symlinks_without_opening_private_file() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-recovery-link-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let private = folder.join("secret.json");
+        let alias = folder.join("progress.json");
+        fs::write(&private, br#"{"done":1,"total":2}"#).unwrap();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&private, &alias).is_ok();
+        #[cfg(not(windows))]
+        let linked = std::os::unix::fs::symlink(&private, &alias).is_ok();
+        if linked {
+            assert!(read_render_progress_file(&alias).is_err());
+            assert!(read_bounded_recovery_json(&alias, MAX_RENDER_PROGRESS_BYTES).is_err());
+            assert_eq!(fs::read(&private).unwrap(), br#"{"done":1,"total":2}"#);
+        }
         fs::remove_dir_all(folder).unwrap();
     }
 

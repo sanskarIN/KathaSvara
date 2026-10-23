@@ -32,6 +32,8 @@ across a sudden power loss, or constitute an OS-level immutable snapshot.
 
 The native desktop recovery-history reader performs a bounded scan of up to **20,000 directory entries** (including unrelated filenames), and shows at most 20 valid recent journal records for the selected story. If the folder exceeds the scan limit, it returns an error instead of silently hiding old matching stories or sorting an unbounded directory. History also refuses malformed `completed` entries where the recorded `done` count is less than `total`. These protections do not delete any files, resume jobs or prove speech quality.
 
+**Recovery JSON reads are bounded twice.** The Windows desktop checks that each journal is a regular file no larger than **64 KiB** (and progress files no larger than **1 KiB**) before opening it, rechecks the opened file's metadata, and uses a capped stream read of at most one byte beyond the limit. A file which grows after its metadata check cannot cause an unbounded allocation. Oversized, malformed, or symlinked journal data is excluded from history; a manual forget refuses it without deleting the record. Missing progress sidecars still display zero progress, whereas malformed present sidecars produce an error. This protects ordinary local file races; it does not make a directory writable by malicious external processes safe against every path-swap attack.
+
 The desktop's **Retry current full story** action starts a separate new job
 against the current document. It does not automatically resume a previous
 partial synthesis, reconstitute original selections, or overwrite an existing
