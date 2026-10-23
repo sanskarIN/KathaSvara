@@ -62,28 +62,55 @@ class RenderJournal:
         self._persist(initial=True)
         return self
 
+    def _commit(self, next_document: dict[str, Any]) -> None:
+        """Only retain in-memory progress after the next journal is published.
+
+        If the atomic filesystem replacement fails, a later terminal-state
+        write must not accidentally report a segment that was never journaled.
+        """
+        previous = self.document
+        self.document = next_document
+        try:
+            self._persist()
+        except BaseException:
+            self.document = previous
+            raise
+
     def record(self, segment: dict[str, Any]) -> None:
         if self.document["state"] != "running":
             raise RuntimeError("Cannot extend a completed render journal.")
-        self.document["segments"].append({
-            "segment_id": segment["segment_id"],
-            "speaker_id": segment["speaker_id"],
-            "cache_key": segment["cache_key"],
-            "cached": segment["cached"],
-            "duration_seconds": segment["duration_seconds"],
+        if self.document["done"] >= self.document["total"]:
+            raise RuntimeError("Cannot record more segments than the render plan.")
+        # Construct the next snapshot before publishing it. Neither the
+        # original list nor its counters change on a failed disk write.
+        self._commit({
+            **self.document,
+            "segments": [*self.document["segments"], {
+                "segment_id": segment["segment_id"],
+                "speaker_id": segment["speaker_id"],
+                "cache_key": segment["cache_key"],
+                "cached": segment["cached"],
+                "duration_seconds": segment["duration_seconds"],
+            }],
+            "done": self.document["done"] + 1,
         })
-        self.document["done"] += 1
-        self._persist()
 
     def __exit__(
         self, error_type: type[BaseException] | None, error: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        if error_type is None:
-            self.document["state"] = "completed"
+        if error_type is None and self.document["done"] == self.document["total"]:
+            state = "completed"
+            failure = None
+        elif error_type is None:
+            # It is never correct to publish completed when fewer lines were
+            # durably recorded than promised by the render plan.
+            state = "failed"
+            failure = "IncompleteRender"
         elif error_type.__name__ == "RenderCancelled":
-            self.document["state"] = "cancelled"
+            state = "cancelled"
+            failure = "RenderCancelled"
         else:
-            self.document["state"] = "failed"
-        self.document["error_type"] = error_type.__name__ if error_type else None
-        self._persist()
+            state = "failed"
+            failure = error_type.__name__
+        self._commit({**self.document, "state": state, "error_type": failure})
