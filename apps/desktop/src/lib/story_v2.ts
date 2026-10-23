@@ -172,6 +172,33 @@ export function moveSegment(project: StoryV2, segmentId: string, destinationScen
   return { ...project, scenes };
 }
 
+/** Reorder exactly one spoken line or direction inside its existing scene.
+ * This edits the narrative order only. Source text, speaker assignments and
+ * per-segment cached metadata stay attached to their original segment IDs.
+ */
+export function moveSegmentWithinScene(
+  project: StoryV2, segmentId: string, offset: -1 | 1,
+): StoryV2 {
+  const matchingScenes = project.scenes.filter(scene =>
+    scene.segments.some(segment => segment.id === segmentId));
+  const matchCount = project.scenes.reduce((count, scene) =>
+    count + scene.segments.filter(segment => segment.id === segmentId).length, 0);
+  if (matchCount !== 1 || matchingScenes.length !== 1) {
+    throw new Error("Dialogue segment must exist exactly once.");
+  }
+  const scene = matchingScenes[0];
+  const index = scene.segments.findIndex(segment => segment.id === segmentId);
+  const next = index + offset;
+  if (next < 0 || next >= scene.segments.length) return project;
+  const reordered = [...scene.segments];
+  [reordered[index], reordered[next]] = [reordered[next], reordered[index]];
+  return {
+    ...project,
+    scenes: project.scenes.map(item => item.id === scene.id
+      ? { ...item, segments: reordered } : item),
+  };
+}
+
 export function duplicateCharacter(project: StoryV2, id: string, newId: string = crypto.randomUUID()): StoryV2 {
   const source = project.characters.find(item => item.id === id);
   if (!source) throw new Error("Original character not found.");
