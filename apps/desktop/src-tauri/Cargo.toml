@@ -1,6 +1,6 @@
 [package]
 name = "kathasvara"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 description = "KathaSvara local-first Hindi storytelling desktop bridge"
 license = "MPL-2.0"
