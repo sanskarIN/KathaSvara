@@ -896,4 +896,26 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
   });
 
+
+  it("clears stale unknown-speaker alert when its dialogue is reassigned", () => {
+    const doc = story();
+    doc.scenes[0].segments[0].speaker_id = null;
+    doc.scenes[0].segments[0].source_label = "अज्ञात पात्र";
+    const { rerender, onChange, onMessage } = mount(doc);
+    expect(screen.getByRole("alert").textContent).toContain("अज्ञात पात्र");
+    expect(screen.getByText(/1 unresolved speech segments/)).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: /Speaker for नमस्कार/ }), {
+      target: { value: "narrator" },
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const resolved = updater(doc);
+    expect(resolved.scenes[0].segments[0].speaker_id).toBe("narrator");
+    expect(resolved.scenes[0].segments[0].source_label).toBeNull();
+    rerender(<CastStudio document={resolved} onChange={onChange} onMessage={onMessage} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(/0 unresolved speech segments/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+
 });
