@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Bound local segment-cache inventory to **20,000 directory entries** (including irrelevant files and symlinks); inspection and explicitly requested pruning now fail before any deletion if the directory exceeds the limit. Reject NaN/infinite, boolean, negative and implausible caller clocks so the ten-minute cache grace window cannot be bypassed. Add model-free regression tests and maintenance guidance. Source-only; published v0.5.0 pre-release unchanged.
+
 - Keep Python render journal progress transactional: if a disk write fails, restore the prior in-memory progress and terminal state so a subsequent failure record cannot falsely include an uncommitted dialogue segment. Prevent writes beyond the planned segment count, and report an incomplete normal exit as `IncompleteRender` rather than `completed`. Add model-free disk-failure and interruption regressions. No audio or model behavior changed; v0.5.0 remains the published pre-release.
 
 - Protect the desktop recovery panel from stale asynchronous results: invalidate pending history loads on edits, document switches and fresh narration; ignore late deletion feedback for an obsolete story; prevent completed progress polls from a previous job from repainting the current job. Add mocked Tauri React integration regressions. No model is loaded, and the published v0.5.0 pre-release remains unchanged.

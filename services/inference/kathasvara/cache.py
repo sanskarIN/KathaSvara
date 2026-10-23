@@ -6,6 +6,7 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+import math
 import re
 import stat
 import time
@@ -17,6 +18,7 @@ from .cache_lock import exclusive_cache_access
 CACHE_BUDGET_BYTES = 512 * 1024 * 1024
 MAX_CACHE_BUDGET_BYTES = 50 * 1024 * 1024 * 1024
 CACHE_GRACE_SECONDS = 600
+MAX_SCANNED_CACHE_ENTRIES = 20_000
 _CACHE_FILE = re.compile(r"[0-9a-f]{64}\.wav\Z")
 
 
@@ -27,9 +29,15 @@ def _cache_entries(cache_dir: Path) -> tuple[list[tuple[Path, int, float, int, i
         return [], 0
     if not cache_dir.is_dir():
         raise ValueError("Cache path is not a directory.")
-    entries: list[tuple[Path, int, float, int, int]] = []
+    entries: list[tuple[Path, int, float, int, int, int]] = []
     ignored = 0
+    scanned = 0
     for entry in cache_dir.iterdir():
+        # Count irrelevant names and symlinks too: a junk-filled directory
+        # must not make inspection or deletion planning unbounded.
+        scanned += 1
+        if scanned > MAX_SCANNED_CACHE_ENTRIES:
+            raise ValueError("Too many cache directory entries; inspection is bounded.")
         if not _CACHE_FILE.fullmatch(entry.name) or entry.is_symlink():
             ignored += 1
             continue
@@ -68,10 +76,16 @@ def prune_cache(
         raise ValueError("Cache budget must be between 0 and 50 GiB.")
     if type(dry_run) is not bool:
         raise ValueError("dry_run must be a boolean.")
+    # Reject non-finite / implausible caller clocks *before* considering
+    # eligibility: NaN would otherwise defeat the recent-file grace window.
+    current = time.time() if now is None else now
+    if (type(current) not in (int, float) or not 0 < current < 10**12
+        or not math.isfinite(current)):
+        raise ValueError("Invalid cache maintenance clock.")
     # A real delete must exclude other render/prune workers across app processes.
     # Dry-run only observes cached entries, so it does not require the lock.
     with exclusive_cache_access(cache_dir) if not dry_run else nullcontext():
-        current = time.time() if now is None else now
+        # Complete the bounded scan before even considering unlink().
         entries, ignored = _cache_entries(cache_dir)
         total = sum(item[1] for item in entries)
         # Prefer newest files; all files in the grace window must remain untouched.
