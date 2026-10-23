@@ -96,3 +96,7 @@ def test_v052_publication_requires_manual_intent() -> None:
     assert "git/ref/tags/v0.5.2" in workflow
     assert "gh release view v0.5.2" in workflow
     assert "test \"$main_sha\" = \"$RELEASE_SHA\"" in workflow
+    publish = workflow.partition("\n  publish:")[2]
+    assert publish, "The release must retain its gated publication job"
+    assert 'current_main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main"' in publish
+    assert 'test "$current_main_sha" = "$RELEASE_SHA"' in publish
