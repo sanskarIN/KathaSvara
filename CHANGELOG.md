@@ -2,6 +2,8 @@
 
 ## Unreleased — v0.5.2 experimental developer pre-release candidate (not published)
 
+- Cross-check the Python worker's claimed sample rate and narration duration against the **opened WAV's actual PCM16 RIFF sample rate and frame count** before showing or exporting generated output. Keep the existing bounded streaming export validator, and fail closed when an otherwise valid WAV carries inconsistent metadata. Add native regression cases for forged rate/duration and authoritative frame counts; this does not verify Hindi pronunciation.
+
 - Harden rendered Hindi caption previews and SRT export against unknown story-segment identities or cue endpoints past the actual WAV duration, including valid rounding tolerances. Add a local-only, bounded text search over already validated cues that resets pagination without changing the exported SRT or QA checklist. Add component and unit regressions; no model loading, released binaries or publication changes. See [v0.5.2 development](docs/releases/v0.5.2-development.md).
 
 - Add a **local Hindi dialogue subtitle cue preview** before exporting SRT: reuse the complete rounded-millisecond SRT validation path, reject duplicate segment IDs and control characters, paginate 10 cues at a time, and seek inline WAV audio to individual cues. A preview does not export a file or mark the human QA checklist. Add React integration and Vitest coverage; published v0.5.1 assets and metadata unchanged. See [v0.5.2 development notes](docs/releases/v0.5.2-development.md).
