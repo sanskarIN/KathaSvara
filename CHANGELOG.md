@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.0 development and maintenance
 
+- Bound the native Windows recovery-history directory scan to 20,000 entries including non-journal files; fail clearly instead of sorting an unbounded folder or silently hiding older matching stories. Ignore inconsistent `completed` records whose `done` count is below `total`. Add model-free Rust regression tests for limit boundaries, filtering and terminal progress validity. Source-only; the existing v0.5.0 developer release stays unchanged.
+
 - Harden initial render-journal publication against a concurrent destination-file or symlink creation: create a complete temporary JSON snapshot, use atomic no-overwrite hard-link publication for the first write, and fail closed if linking is unavailable. Keep later atomic journal updates and privacy-minimal metadata unchanged. Add no-model race regressions and a dedicated native-Windows Python test gate. [Journal safety contract](docs/maintenance/render-journal-safety.md). Source only; published v0.5.0 assets remain unchanged.
 
 - Make the desktop model-free WAV review parser fail closed on contradictory inspection results: validate mono PCM16 sample rate/frame count, reported duration and minimum container size, sensible dBFS values and agreement between quality hints and the aggregate review flag. Allow rounding tolerance at precise advisory thresholds, without auto-approving Hindi speech. Add Vitest and mocked desktop IPC regression coverage. Source only; the v0.5.0 developer binary remains unchanged.
