@@ -10,6 +10,8 @@ import tomllib
 from pathlib import Path
 
 VERSION = "0.5.2"
+# Public landing page intentionally advertises only releases actually published.
+PUBLISHED_VERSION = "0.5.1"
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -70,10 +72,10 @@ def test_prerelease_disclosures_remain_explicit() -> None:
 
 def test_public_site_uses_latest_published_prerelease_without_stable_claims() -> None:
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
-    latest = f"https://github.com/sanskarIN/KathaSvara/releases/tag/v{VERSION}"
+    latest = f"https://github.com/sanskarIN/KathaSvara/releases/tag/v{PUBLISHED_VERSION}"
     assert site.count(latest) >= 2
-    assert f"v{VERSION} · Latest experimental pre-release" in site
-    assert f">v{VERSION} pre-release ↗" in site
+    assert f"v{PUBLISHED_VERSION} · Latest experimental pre-release" in site
+    assert f">v{PUBLISHED_VERSION} pre-release ↗" in site
     assert "not a self-contained installer" in site
     assert "Real Hindi listening" in site
     assert "remain unverified" in site
