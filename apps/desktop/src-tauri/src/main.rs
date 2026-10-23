@@ -1946,6 +1946,56 @@ mod tests {
     }
 
     #[test]
+    fn native_cues_reject_duplicate_ids_and_rounded_overlap() {
+        let duplicated = json!({"segments": [
+            {"segment_id": "line-one", "start_seconds": 0.0,
+             "end_seconds": 1.0, "effective_text": "नमस्कार"},
+            {"segment_id": "line-one", "start_seconds": 1.14,
+             "end_seconds": 2.0, "effective_text": "फिर मिलेंगे"}
+        ]});
+        assert!(parse_segment_timings(&duplicated).is_err());
+
+        // Raw endpoints appear only ~0.0011 seconds apart but collide in
+        // millisecond-rounded SubRip times; the native bridge must reject them.
+        let rounded_overlap = json!({"segments": [
+            {"segment_id": "line-one", "start_seconds": 0.0,
+             "end_seconds": 1.0014, "effective_text": "राजा भोज"},
+            {"segment_id": "line-two", "start_seconds": 1.0003,
+             "end_seconds": 2.0, "effective_text": "मंत्री जी"}
+        ]});
+        assert!(parse_segment_timings(&rounded_overlap).is_err());
+
+        let submillisecond = json!({"segments": [
+            {"segment_id": "line-one", "start_seconds": 0.0001,
+             "end_seconds": 0.0003, "effective_text": "नमस्कार"}
+        ]});
+        assert!(parse_segment_timings(&submillisecond).is_err());
+    }
+
+    #[test]
+    fn native_cues_reject_control_characters_and_overlong_hindi_text() {
+        let bad_control = json!({"segments": [{
+            "segment_id": "line-one", "start_seconds": 0.0,
+            "end_seconds": 1.0, "effective_text": "गोपनीय\u{0000}नमस्कार"
+        }]});
+        assert!(parse_segment_timings(&bad_control).is_err());
+
+        let oversized = json!({"segments": [{
+            "segment_id": "line-one", "start_seconds": 0.0,
+            "end_seconds": 1.0, "effective_text": "ह".repeat(3001)
+        }]});
+        assert!(parse_segment_timings(&oversized).is_err());
+
+        // Newlines and tabs in real dialogue are normalized by the SRT
+        // serializer; rejecting them here would break legitimate Hindi text.
+        let formatted = json!({"segments": [{
+            "segment_id": "line-one", "start_seconds": 0.0,
+            "end_seconds": 1.001, "effective_text": "नमस्कार!\nकैसे हैं?\tधन्यवाद।"
+        }]});
+        assert_eq!(parse_segment_timings(&formatted).unwrap().len(), 1);
+    }
+
+    #[test]
     fn cache_budget_rejects_excessive_requests() {
         assert_eq!(cache_budget_bytes(512).unwrap(), 512 * 1024 * 1024);
         assert!(cache_budget_bytes(0).is_err());
