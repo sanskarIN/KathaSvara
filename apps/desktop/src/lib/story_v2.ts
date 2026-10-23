@@ -155,6 +155,28 @@ export function addScene(project: StoryV2, title: string, id: string = crypto.ra
   }] };
 }
 
+/** Scene production notes are editorial context and never alter spoken dialogue. */
+export function updateSceneNotes(project: StoryV2, sceneId: string, notes: string): StoryV2 {
+  if (notes.length > 4000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(notes)) {
+    throw new Error("Scene production notes must be 4000 characters or fewer, without control characters.");
+  }
+  const matches = project.scenes.filter(scene => scene.id === sceneId);
+  if (matches.length !== 1) throw new Error("Scene to edit must exist exactly once.");
+  if (matches[0].notes === notes) return project;
+  return {
+    ...project,
+    scenes: project.scenes.map(scene => scene.id === sceneId ? { ...scene, notes } : scene),
+  };
+}
+
+/** Remove a reviewed scene only after the caller confirms. Never delete the source script. */
+export function removeScene(project: StoryV2, sceneId: string): StoryV2 {
+  if (project.scenes.filter(scene => scene.id === sceneId).length !== 1) {
+    throw new Error("Scene to remove must exist exactly once.");
+  }
+  return { ...project, scenes: project.scenes.filter(scene => scene.id !== sceneId) };
+}
+
 /** Duplicate a scene as a fresh, unsynthesized narrative branch.
  * The original Hindi source/review and speaker mapping are preserved, while
  * every copied segment gets a new identity and loses stale audio metadata.
