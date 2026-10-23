@@ -1,14 +1,8 @@
 name: Publish KathaSvara v0.5.1 experimental maintenance prerelease
 
 on:
-  # One-time publication on merging this exact guarded workflow into main.
-  # The prepare job checks tip-of-main, unused tag and exact SHA; all build
-  # gates and SHA256 companion verification must pass before publishing.
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/release-v0.5.1.yml"
-  # Manual fallback for an initial build infrastructure failure; no retags.
+  # v0.5.1 is already published. Never auto-run its publication workflow again.
+  # Manual dispatch remains guarded by a non-existent tag and the exact main SHA.
   workflow_dispatch:
     inputs:
       release_sha:
