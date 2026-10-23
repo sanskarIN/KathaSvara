@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // SPDX-License-Identifier: MPL-2.0
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CastStudio from "./CastStudio";
 import { defaultVoice, type StoryV2 } from "./lib/story_v2";
@@ -529,4 +529,52 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     });
     expect(screen.queryByRole("region", { name: "Production readiness audit" })).toBeNull();
   });
+
+  it("shows exact generated Hindi subtitle cues and seeks locally without exporting or approving review", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return generatedAudio();
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Preview dialogue cues" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview dialogue cues" }));
+    const panel = screen.getByRole("region", { name: "Dialogue subtitle cue preview" });
+    expect(within(panel).getByText("नमस्कार।")).toBeTruthy();
+    expect(within(panel).getByText("0.000s → 1.250s")).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Jump to cue 1" }));
+    expect((screen.getByLabelText("Generated dialogue preview") as HTMLAudioElement).currentTime)
+      .toBe(0);
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "export_subtitles")).toBe(false);
+    expect((screen.getByRole("checkbox", {
+      name: "I reviewed exported SRT wording and cue timing",
+    }) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Clear preview" }));
+    expect(screen.queryByRole("region", { name: "Dialogue subtitle cue preview" })).toBeNull();
+  });
+
+  it("rejects invalid duplicate generated cue identities instead of showing false captions", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") {
+        const current = generatedAudio();
+        return { ...current, segment_timings: [
+          ...current.segment_timings,
+          { segment_id: "line-one", start_seconds: 1.5, end_seconds: 2,
+            effective_text: "दूसरा वाक्य" },
+        ] };
+      }
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Preview dialogue cues" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview dialogue cues" }));
+    expect(screen.queryByRole("region", { name: "Dialogue subtitle cue preview" })).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("invalid generated subtitle timings"))).toBe(true);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
 });

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
-import { buildDialogueSrt } from "./lib/subtitles";
+import { buildDialogueCues, buildDialogueSrt, type DialogueCue } from "./lib/subtitles";
 import { parseWavQuality, qualityReviewHints, type WavQualityReport } from "./lib/wav_quality";
 import { resolveRenderSelection } from "./lib/render_selection";
 import { isCurrentExportSession, renderExportLabel, suggestedOutputFile, type AudioExportLabel } from "./lib/export_names";
@@ -50,6 +50,13 @@ function errorString(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function spokenSubtitleLines(doc: StoryV2) {
+  return doc.scenes.flatMap(scene =>
+    scene.segments.filter(segment => segment.kind === "speech")
+      .map(segment => ({ segment_id: segment.id, text: segment.spoken_text })),
+  );
+}
+
 export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newName, setNewName] = useState("");
   const [newSceneTitle, setNewSceneTitle] = useState("");
@@ -69,12 +76,17 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const [audioExportLabel, setAudioExportLabel] = useState<AudioExportLabel | null>(null);
   const [wavQa, setWavQa] = useState<{ audioId: string; report: WavQualityReport } | null>(null);
+  // Preview stays in memory only and never marks the separate human QA checklist.
+  const [subtitlePreview, setSubtitlePreview] = useState<{ audioId: string; cues: DialogueCue[] } | null>(null);
+  const [subtitlePage, setSubtitlePage] = useState(0);
   const [inspectingWav, setInspectingWav] = useState(false);
   const qaEpoch = useRef(0);
   function clearWavInspection() {
     qaEpoch.current += 1;
     setWavQa(null);
     setInspectingWav(false);
+    setSubtitlePreview(null);
+    setSubtitlePage(0);
   }
   const audioEpoch = useRef(0);
   // Never persisted or transferred to the model: only manual QA for the current WAV.
@@ -347,6 +359,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       }
     }
   }
+  function previewDialogueSubtitles() {
+    if (!audio?.segment_timings?.length) return;
+    try {
+      // Validate ALL cues, not just the first visible page; no filesystem I/O.
+      const cues = buildDialogueCues(audio.segment_timings, spokenSubtitleLines(document));
+      setSubtitlePreview({ audioId: audio.audio_id, cues });
+      setSubtitlePage(0);
+      onMessage("Dialogue cues ready for local preview. Listen and compare before exporting; no human QA step was marked.");
+    } catch (error) {
+      setSubtitlePreview(null);
+      onMessage("Cannot preview dialogue subtitles: " + errorString(error));
+    }
+  }
+
   async function exportSceneSubtitles() {
     if (!audio?.segment_timings?.length || !audioExportLabel) return;
     const revision = renderRevision.current;
@@ -354,12 +380,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     const label = audioExportLabel;
     const audioId = audio.audio_id;
     try {
-      const lines = document.scenes.flatMap(scene =>
-        scene.segments.filter(segment => segment.kind === "speech")
-          .map(segment => ({ segment_id: segment.id, text: segment.spoken_text })),
-      );
       // Timings are derived from actual rendered PCM frames, not reading-speed estimates.
-      const content = buildDialogueSrt(audio.segment_timings, lines);
+      // The same complete validation is used by the optional in-app preview.
+      const content = buildDialogueSrt(audio.segment_timings, spokenSubtitleLines(document));
       const destination = await save({
         title: "Export segment-timed Hindi SubRip subtitles",
         defaultPath: suggestedOutputFile(label, "srt"),
@@ -539,6 +562,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
   const unresolvedNow = unresolvedSpeech(document);
+  const activeSubtitlePreview = audio && subtitlePreview?.audioId === audio.audio_id
+    ? subtitlePreview : null;
+  const subtitlePageSize = 10;
+  const subtitlePages = activeSubtitlePreview
+    ? Math.ceil(activeSubtitlePreview.cues.length / subtitlePageSize) : 0;
   const activeReview = audio ? reviewForAudio(review, audio.audio_id) : null;
   const reviewState = audio ? reviewProgress(activeReview, audio.audio_id) : null;
   const reviewPrompts: Array<{ step: ReviewStep; label: string }> = [
@@ -711,9 +739,52 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               </button>
               <button className="secondary-button"
                 disabled={!audio.segment_timings?.length}
+                onClick={() => previewDialogueSubtitles()}>Preview dialogue cues</button>
+              <button className="secondary-button"
+                disabled={!audio.segment_timings?.length}
                 onClick={() => void exportSceneSubtitles()}>Export dialogue SRT</button>
               <button className="quiet-button" onClick={() => void clearAudio()}>Clear preview</button>
             </div>
+            {activeSubtitlePreview && (
+              <section className="inspection-panel" aria-label="Dialogue subtitle cue preview">
+                <strong>Measured dialogue captions · {activeSubtitlePreview.cues.length} cues</strong>
+                <p>Local preview only; all cues were checked for valid timeline ordering.
+                  These captions are timed per dialogue, not word-aligned. No SRT has been
+                  exported and no listening or subtitle review is automatically completed.</p>
+                <ol className="subtitle-cues" start={subtitlePage * subtitlePageSize + 1}>
+                  {activeSubtitlePreview.cues
+                    .slice(subtitlePage * subtitlePageSize, (subtitlePage + 1) * subtitlePageSize)
+                    .map(cue => (
+                      <li key={cue.number}>
+                        <small>{cue.start_seconds.toFixed(3)}s → {cue.end_seconds.toFixed(3)}s</small>
+                        <p lang="hi">{cue.text}</p>
+                        {audio.preview_available !== false && (
+                          <button type="button" className="quiet-button"
+                            aria-label={"Jump to cue " + cue.number}
+                            onClick={() => {
+                              if (audioRef.current) audioRef.current.currentTime = cue.start_seconds;
+                            }}>Jump to cue</button>
+                        )}
+                      </li>
+                    ))}
+                </ol>
+                {subtitlePages > 1 && (
+                  <div className="cast-actions" aria-label="Subtitle cue pages">
+                    <button type="button" className="quiet-button"
+                      disabled={subtitlePage === 0}
+                      onClick={() => setSubtitlePage(page => Math.max(0, page - 1))}>
+                      Previous cues
+                    </button>
+                    <span>Page {subtitlePage + 1} / {subtitlePages}</span>
+                    <button type="button" className="quiet-button"
+                      disabled={subtitlePage + 1 >= subtitlePages}
+                      onClick={() => setSubtitlePage(page => Math.min(subtitlePages - 1, page + 1))}>
+                      Next cues
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
             {wavQa?.audioId === audio.audio_id && (
               <section className="inspection-panel" aria-label="Generated WAV level and pause inspection">
                 <strong>Structural WAV inspection · human listening still required</strong>
