@@ -15,7 +15,7 @@ import { serializeProductionManifest, type ProductionAudit } from "./lib/product
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
 import {
-  addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
+  addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
@@ -927,7 +927,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
             </div>
             <ol className="scene-segments">
-              {activeScene.segments.map(segment => (
+              {activeScene.segments.map((segment, index) => (
                 <li key={segment.id}>
                   <div className="segment-header">
                     <span>{segment.kind === "direction" ? "Stage direction (not spoken)" : "Spoken segment"}</span>
@@ -961,6 +961,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                          }
                        }} />
                    </label>}
+                  <div className="cast-actions" aria-label={"Order controls for " + segment.id}>
+                    <button type="button" className="quiet-button"
+                      aria-label={"Move line " + segment.id + " up"}
+                      disabled={busy || rendering || index === 0}
+                      onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, -1))}>
+                      ↑ Line up
+                    </button>
+                    <button type="button" className="quiet-button"
+                      aria-label={"Move line " + segment.id + " down"}
+                      disabled={busy || rendering || index === activeScene.segments.length - 1}
+                      onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, 1))}>
+                      ↓ Line down
+                    </button>
+                  </div>
                   <label className="move-segment-label">Move line to scene
                     <select aria-label={"Move line " + segment.id} value={activeScene.id}
                       onChange={event => {
