@@ -65,7 +65,6 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const editorOperationEpoch = useRef(0);
   const [dirty, setDirty] = useState(true);
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
-  const [unresolved, setUnresolved] = useState<string[]>([]);
   const [rendering, setRendering] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -569,7 +568,6 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       clearWavInspection();
       renderRevision.current += 1;
       onChange({ ...response.result, pronunciation_glossary: document.pronunciation_glossary ?? [] });
-      setUnresolved(response.unresolved);
       setSelectedScene(response.result.scenes[0]?.id ?? null);
       setDirty(true);
       onMessage(response.unresolved.length
@@ -636,6 +634,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
   const unresolvedNow = unresolvedSpeech(document);
+  // Derive the alert from the active document, not the one-time parse response:
+  // assigning a previously unknown actor must immediately clear stale warnings.
+  const unknownSpeakerLabels = Array.from(new Set(unresolvedNow.map(segment =>
+    segment.source_label?.trim() || "Unlabeled dialogue")));
   const activeSubtitlePreview = audio && subtitlePreview?.audioId === audio.audio_id
     ? subtitlePreview : null;
   const subtitlePageSize = 10;
@@ -934,7 +936,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           </>}
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
-        {unresolved.length > 0 && <p role="alert">{unresolved.length} unknown speaker label(s): {unresolved.join(", ")}</p>}
+        {unresolvedNow.length > 0 && <p role="alert">{unresolvedNow.length} unknown speaker label(s): {unknownSpeakerLabels.join(", ")}</p>}
         <div className="cast-add">
           <input placeholder="New scene title / नया दृश्य" aria-label="New scene title" value={newSceneTitle}
             maxLength={120} onChange={event => setNewSceneTitle(event.target.value)} />
