@@ -23,6 +23,8 @@ paths, or generated voice recordings.
 5. Later updates use an atomic sibling-file replacement to preserve a complete
    JSON document during normal progress and terminal-state transitions.
 
+**Progress publication is transactional.** The Python journal builds the next snapshot without changing the last committed in-memory state, then publishes it. If publication fails (for example, a full disk), the writer retains the last persisted counters instead of accidentally including an unrecorded segment in a later failure snapshot. Recording more than the planned segment count is rejected. A normal context exit with fewer recorded segments is explicitly marked `failed` with `IncompleteRender`, never `completed`. The journal cannot guarantee that an OS crash preserves the latest snapshot or that cached audio itself is human-approved.
+
 **Important:** The per-cache cross-process lock already prevents cooperating
 KathaSvara workers from concurrently rendering into the same cache. The
 no-overwrite publication also protects the journal's first-write race against
