@@ -179,6 +179,7 @@ export function duplicateScene(
     throw new Error("Duplicating this scene would exceed 256 spoken lines.");
   }
   const usedIds = new Set([
+    project.id,
     ...project.scenes.map(scene => scene.id),
     ...project.scenes.flatMap(scene => scene.segments.map(segment => segment.id)),
   ]);
