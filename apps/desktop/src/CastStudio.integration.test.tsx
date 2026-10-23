@@ -855,4 +855,45 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(onChange).not.toHaveBeenCalled();
   });
 
+
+  it("edits nonspoken production notes without modifying the source script or invoking synthesis", () => {
+    const doc = story();
+    const { onChange, onMessage } = mount(doc);
+    const field = screen.getByRole("textbox", { name: "Scene production notes (not spoken)" });
+    expect((field as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(field, { target: { value: "रोशनी कम।\nचुपचाप।" } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const next = updater(doc);
+    expect(next.scenes[0].notes).toBe("रोशनी कम।\nचुपचाप।");
+    expect(next.scenes[0].segments).toBe(doc.scenes[0].segments);
+    expect(next.text).toBe(doc.text);
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps a scene when deletion is cancelled and removes only that scene on confirmation", () => {
+    const doc = story();
+    doc.scenes.push({ id: "scene-two", title: "दूसरा दृश्य", notes: "not spoken",
+      segments: [] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { onChange, onMessage } = mount(doc);
+    const action = screen.getByRole("button", { name: "Delete scene (keep original script)" });
+    fireEvent.click(action);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("original script text"));
+    expect(onChange).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(action);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const next = updater(doc);
+    expect(next.scenes.map(scene => scene.id)).toEqual(["scene-two"]);
+    expect(next.scenes[0].notes).toBe("not spoken");
+    expect(next.text).toBe(doc.text);
+    expect(doc.scenes).toHaveLength(2);
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("Original script text remains unchanged"));
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+
 });
