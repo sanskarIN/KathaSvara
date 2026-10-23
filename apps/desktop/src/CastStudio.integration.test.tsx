@@ -54,7 +54,9 @@ function generatedAudio() {
 function inspectedAudio() {
   return {
     format: "kathasvara-wav-structural-inspection", schema_version: 1,
-    structure_valid: true, duration_seconds: 1.25, file_bytes: 60200,
+    structure_valid: true, codec: "pcm_s16le", channels: 1,
+    sample_rate_hz: 24_000, frames: 30_000,
+    duration_seconds: 1.25, file_bytes: 60200,
     sha256: "a".repeat(64), model_loaded: false, hindi_listening_verified: false,
     distinct_voices_verified: false, human_review_required: true,
     level_hints: {
@@ -141,6 +143,32 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
       !(element as HTMLInputElement).checked)).toBe(true);
     expect(mocks.invoke.mock.calls.filter(([name]) => name === "inspect_generated_audio"))
       .toHaveLength(1);
+  });
+
+
+  it("refuses contradictory model-free IPC hints without presenting a clean inspection", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return generatedAudio();
+      if (command === "inspect_generated_audio") return {
+        ...inspectedAudio(),
+        level_hints: {
+          ...inspectedAudio().level_hints,
+          near_silence_hint: true, signal_review_required: false,
+        },
+      };
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Inspect generated WAV (no model)" });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect generated WAV (no model)" }));
+    await waitFor(() => expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("WAV inspection failed")
+    )).toBe(true));
+    expect(screen.queryByRole("region", {
+      name: "Generated WAV level and pause inspection",
+    })).toBeNull();
+    expect(screen.getByText(/Human review incomplete/)).toBeTruthy();
   });
 
   it("ignores delayed WAV QA inspection after the preview was discarded", async () => {
