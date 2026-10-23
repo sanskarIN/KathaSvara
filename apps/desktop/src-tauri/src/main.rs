@@ -1524,6 +1524,44 @@ mod tests {
     }
 
     #[test]
+    fn recovery_failure_codes_are_fixed_and_do_not_expose_private_exception_text() {
+        assert_eq!(render_failure_code("failed", Some("IncompleteRender")), "incomplete");
+        assert_eq!(render_failure_code("failed", Some("ValueError")), "validation");
+        assert_eq!(render_failure_code("failed", Some("PermissionError")), "storage");
+        assert_eq!(render_failure_code("failed", Some("FileNotFoundError")), "storage");
+        assert_eq!(render_failure_code("failed", Some("OSError")), "storage");
+        assert_eq!(render_failure_code("failed", Some("MemoryError")), "resources");
+        assert_eq!(render_failure_code("failed", Some("RuntimeError")), "runtime");
+        assert_eq!(render_failure_code("failed", None), "unknown");
+        assert_eq!(render_failure_code("interrupted", Some("RuntimeError")), "interrupted");
+        assert_eq!(render_failure_code("cancelled", None), "cancelled");
+        assert_eq!(render_failure_code("running", Some("ValueError")), "none");
+        assert_eq!(render_failure_code("completed", Some("OSError")), "none");
+        assert_eq!(render_failure_code("failed", Some("secret /home/me निजी कथा")), "unknown");
+
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-safe-hints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{id}.manifest.json"));
+        fs::write(&path, json!({
+            "schema_version": 1, "story_id": story,
+            "state": "failed", "done": 1, "total": 2,
+            "error_type": "secret /home/me निजी कथा",
+            "updated_at": "2026-10-20T10:01:00+00:00",
+        }).to_string()).unwrap();
+        let history = read_render_history(&folder, Some(&story)).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].failure_code, "unknown");
+        let exposed = serde_json::to_string(&history).unwrap();
+        assert!(!exposed.contains("secret"));
+        assert!(!exposed.contains("/home/me"));
+        assert!(!exposed.contains("निजी"));
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn history_rejects_completed_state_with_incomplete_progress() {
         let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
         let folder = std::env::temp_dir().join(format!("kathasvara-bad-completion-{}", Uuid::new_v4()));
