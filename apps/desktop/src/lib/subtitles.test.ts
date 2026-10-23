@@ -115,8 +115,60 @@ describe("pre-export dialogue cue review", () => {
       segment_id: String(index), start_seconds: index, end_seconds: index + 0.5,
       effective_text: "नमस्कार।",
     }));
-    expect(buildDialogueCues(timings, []).length).toBe(256);
+    const lines = timings.map(timing => ({ segment_id: timing.segment_id, text: "नमस्कार।" }));
+    expect(buildDialogueCues(timings, lines).length).toBe(256);
     timings[255].start_seconds = 0;
-    expect(() => buildDialogueCues(timings, [])).toThrow("invalid");
+    expect(() => buildDialogueCues(timings, lines)).toThrow("invalid");
+  });
+});
+
+
+describe("render-to-story and WAV integrity checks", () => {
+  const lines = [{ segment_id: "narrator-line", text: "पुराना संवाद।" }];
+  const timings = [{
+    segment_id: "narrator-line", start_seconds: 0,
+    end_seconds: 1.2503, effective_text: "नया उच्चारण।",
+  }];
+  const wav = { duration_seconds: 1.25, sample_rate: 24_000 };
+
+  it("accepts rounded frame-derived cues with render-time Hindi text", () => {
+    expect(buildDialogueCues(timings, lines, wav)[0].text).toBe("नया उच्चारण।");
+    expect(buildDialogueSrt(timings, lines, wav)).toContain("नया उच्चारण।");
+    expect(buildDialogueSrt(timings, lines, wav)).not.toContain("पुराना संवाद");
+  });
+
+  it("refuses unknown story segments even when a forged cue supplies effective_text", () => {
+    const unknown = [{ ...timings[0], segment_id: "not-from-current-story" }];
+    expect(() => buildDialogueCues(unknown, lines, wav)).toThrow("invalid");
+    expect(() => buildDialogueSrt(unknown, lines, wav)).toThrow("invalid");
+  });
+
+  it.each([
+    [{ duration_seconds: 0, sample_rate: 24_000 }],
+    [{ duration_seconds: Infinity, sample_rate: 24_000 }],
+    [{ duration_seconds: 1.25, sample_rate: NaN }],
+    [{ duration_seconds: 1.25, sample_rate: 7_999 }],
+  ])("rejects invalid generated WAV bounds %j", bounds => {
+    expect(() => buildDialogueCues(timings, lines, bounds)).toThrow("Invalid generated WAV");
+  });
+
+  it("rejects cues whose endpoint exceeds the actual WAV, including on the last preview page", () => {
+    const longCue = [{ ...timings[0], end_seconds: 1.265 }];
+    expect(() => buildDialogueCues(longCue, lines, wav)).toThrow("invalid");
+    expect(() => buildDialogueSrt(longCue, lines, wav)).toThrow("invalid");
+    // The metadata can legitimately be rounded from PCM frames by a fraction of a ms.
+    expect(buildDialogueCues([{ ...timings[0], end_seconds: 1.253 }], lines, wav)).toHaveLength(1);
+
+    const manyLines = Array.from({ length: 20 }, (_, i) => ({
+      segment_id: String(i), text: "हिंदी कथा।",
+    }));
+    const manyCues = manyLines.map((line, i) => ({
+      segment_id: line.segment_id, start_seconds: i, end_seconds: i + 0.8,
+      effective_text: "हिंदी कथा।",
+    }));
+    manyCues[19].end_seconds = 20.2;
+    expect(() => buildDialogueCues(manyCues, manyLines, {
+      duration_seconds: 20, sample_rate: 24_000,
+    })).toThrow("invalid");
   });
 });
