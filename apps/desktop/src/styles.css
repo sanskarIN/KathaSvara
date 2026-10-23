@@ -198,3 +198,11 @@ audio { display: block; width: 100%; margin: 13px 0; }
 }
 .review-checklist label:has(input:disabled) { color: var(--muted); }
 .review-checklist input[type="checkbox"]:disabled { cursor: not-allowed; }
+
+
+/* In-app dialogue cue review stays scrollable and readable with long Hindi text. */
+.subtitle-cues { max-height: 350px; overflow: auto; padding: 0 8px 0 32px; }
+.subtitle-cues li { padding: 12px 6px; border-bottom: 1px solid var(--border); }
+.subtitle-cues li:last-child { border-bottom: 0; }
+.subtitle-cues p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 9px; color: var(--text); }
+.subtitle-cues small { color: var(--muted); font-variant-numeric: tabular-nums; }
