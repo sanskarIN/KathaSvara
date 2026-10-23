@@ -50,10 +50,10 @@ jobs:
           python-version: "3.11"
       - name: Install minimal test runner
         run: python -m pip install pytest
-      - name: Verify exclusive journal publication on NTFS
+      - name: Verify exclusive journals and safe progress publication on NTFS
         env:
           PYTHONPATH: ${{ github.workspace }}/services/inference
-        run: python -m pytest -q services/inference/tests/test_render_journal_atomicity.py
+        run: python -m pytest -q services/inference/tests/test_render_journal_atomicity.py services/inference/tests/test_progress_sidecars.py
 
   frontend:
     name: React build and tests
