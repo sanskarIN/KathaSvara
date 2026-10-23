@@ -815,6 +815,9 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
 
 
   it("duplicates the selected Hindi scene with new line identities and pending audio", () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("550e8400-e29b-41d4-a716-446655440001")
+      .mockReturnValueOnce("550e8400-e29b-41d4-a716-446655440002") });
     const doc = story();
     doc.scenes[0].segments[0].audio_ref = "completed-audio-placeholder";
     doc.scenes[0].segments[0].status = "completed";
