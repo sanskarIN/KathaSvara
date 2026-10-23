@@ -8,7 +8,7 @@
 
 ## Post-v0.5.1 development — subtitle cue review (not released)
 
-Source development now adds **Preview dialogue cues** to the Character and Scene Studio after a generated WAV becomes available. It displays validated, glossary-adjusted Hindi captions and rounded timestamps ten at a time, lets the creator seek the inline WAV to a caption, and refuses duplicate or inconsistent timing metadata. Preview is local-only: **it does not export an SRT, claim a listening pass, or unlock the manual subtitle checklist**. Export dialogue SRT remains an explicit separate action. See [v0.5.2 development notes](docs/releases/v0.5.2-development.md); the latest published build is still v0.5.1, and [manual acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3) remains open.
+Source development now adds **Preview dialogue cues** to the Character and Scene Studio after a generated WAV becomes available. It displays validated, glossary-adjusted Hindi captions and rounded timestamps ten at a time, lets the creator search captions locally and seek the inline WAV to a cue, and refuses duplicate, unknown-story, out-of-WAV or otherwise inconsistent timing metadata. Preview is local-only: **it does not export an SRT, claim a listening pass, or unlock the manual subtitle checklist**. Export dialogue SRT remains an explicit separate action. See [v0.5.2 development notes](docs/releases/v0.5.2-development.md); the latest published build is still v0.5.1, and [manual acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3) remains open.
 
 ## Post-v0.5.0 development (not a new release)
 

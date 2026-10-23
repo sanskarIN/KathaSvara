@@ -577,4 +577,69 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(mocks.save).not.toHaveBeenCalled();
   });
 
+
+  it("searches and pages a 12-line Hindi cue sequence without changing export or human review", async () => {
+    const doc = story();
+    const seed = doc.scenes[0].segments[0];
+    doc.scenes[0].segments = Array.from({ length: 12 }, (_, i) => ({
+      ...seed, id: "line-" + i, spoken_text: i === 11 ? "विशेष अंतिम संवाद।" : "सामान्य संवाद।",
+    }));
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return {
+        ...generatedAudio(), duration_seconds: 12.5,
+        segment_timings: doc.scenes[0].segments.map((segment, i) => ({
+          segment_id: segment.id, start_seconds: i,
+          end_seconds: i + 0.5, effective_text: segment.spoken_text,
+        })),
+      };
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Preview dialogue cues" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview dialogue cues" }));
+    const panel = screen.getByRole("region", { name: "Dialogue subtitle cue preview" });
+    expect(within(panel).getByRole("button", { name: "Jump to cue 10" })).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: "Jump to cue 12" })).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: "Next cues" }));
+    expect(within(panel).getByRole("button", { name: "Jump to cue 12" })).toBeTruthy();
+    const search = within(panel).getByRole("searchbox", { name: "Find dialogue cue text" });
+    fireEvent.change(search, { target: { value: "विशेष" } });
+    expect(within(panel).getByText("विशेष अंतिम संवाद।")).toBeTruthy();
+    expect(within(panel).getByText(/1 of 12 cues shown/)).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: "Next cues" })).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: "Jump to cue 12" }));
+    expect((screen.getByLabelText("Generated dialogue preview") as HTMLAudioElement).currentTime)
+      .toBe(11);
+    fireEvent.change(search, { target: { value: "no matching words" } });
+    expect(within(panel).getByText(/No matching dialogue cues/)).toBeTruthy();
+    fireEvent.change(search, { target: { value: "" } });
+    expect(within(panel).getByText(/12 of 12 cues shown/)).toBeTruthy();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect((screen.getByRole("checkbox", {
+      name: "I reviewed exported SRT wording and cue timing",
+    }) as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("refuses an SRT export if an apparently valid last cue exceeds generated WAV duration", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return {
+        ...generatedAudio(),
+        segment_timings: [{
+          segment_id: "line-one", start_seconds: 0, end_seconds: 1.35,
+          effective_text: "नमस्कार।",
+        }],
+      };
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await screen.findByRole("button", { name: "Export dialogue SRT" });
+    fireEvent.click(screen.getByRole("button", { name: "Export dialogue SRT" }));
+    await waitFor(() => expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("invalid generated subtitle timings"))).toBe(true));
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "export_subtitles")).toBe(false);
+  });
+
 });

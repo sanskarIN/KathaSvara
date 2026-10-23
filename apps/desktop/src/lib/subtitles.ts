@@ -32,12 +32,29 @@ function srtTime(seconds: number): string {
     + "," + String(millis).padStart(3, "0");
 }
 
-/** Validate the complete generated cue set, including cues outside the preview page.
- * Captions remain tied to the exact reviewed, glossary-adjusted render text.
+/** When supplied by the desktop, compare cues to the exact generated WAV metadata.
+ * These are consistency checks, not claims about spoken Hindi or audio quality.
  */
-export function buildDialogueCues(timings: SegmentTiming[], lines: SubtitleLine[]): DialogueCue[] {
+export interface RenderedWavBounds {
+  duration_seconds: number;
+  sample_rate: number;
+}
+
+/** Validate the complete generated cue set, including cues outside the preview page.
+ * Captions stay attached to a known spoken segment from the active story, and
+ * use that segment's exact glossary-adjusted render text where available.
+ */
+export function buildDialogueCues(
+  timings: SegmentTiming[], lines: SubtitleLine[], wav?: RenderedWavBounds,
+): DialogueCue[] {
   if (timings.length === 0 || timings.length > 256) {
     throw new Error("Subtitle export requires 1–256 generated dialogue timings.");
+  }
+  if (wav && (!Number.isFinite(wav.duration_seconds) ||
+      wav.duration_seconds <= 0 || wav.duration_seconds > 1200 ||
+      !Number.isSafeInteger(wav.sample_rate) ||
+      wav.sample_rate < 8000 || wav.sample_rate > 192000)) {
+    throw new Error("Invalid generated WAV duration or sample rate.");
   }
   const scripts = new Map(lines.map(line => [line.segment_id, line.text]));
   const seen = new Set<string>();
@@ -49,10 +66,12 @@ export function buildDialogueCues(timings: SegmentTiming[], lines: SubtitleLine[
       ?.replace(/\s+/gu, " ").trim();
     const startMs = Math.round(start * 1000);
     const endMs = Math.round(end * 1000);
-    if (!timing.segment_id || seen.has(timing.segment_id) ||
+    if (!timing.segment_id || !scripts.has(timing.segment_id) ||
+        seen.has(timing.segment_id) ||
         !content || !Number.isFinite(start) || !Number.isFinite(end) ||
         start < 0 || startMs < 0 || endMs <= startMs ||
         startMs < previousEndMs || endMs > 1_200_000 ||
+        (wav && endMs > Math.round(wav.duration_seconds * 1000) + 5) ||
         /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(content)) {
       throw new Error("Missing dialogue or invalid generated subtitle timings.");
     }
@@ -74,8 +93,10 @@ export function buildDialogueCues(timings: SegmentTiming[], lines: SubtitleLine[
 /** Export Hindi-readable story text at actual generated segment boundaries.
  * The in-app cue preview and SRT export share this one validation path.
  */
-export function buildDialogueSrt(timings: SegmentTiming[], lines: SubtitleLine[]): string {
-  return buildDialogueCues(timings, lines).map(cue =>
+export function buildDialogueSrt(
+  timings: SegmentTiming[], lines: SubtitleLine[], wav?: RenderedWavBounds,
+): string {
+  return buildDialogueCues(timings, lines, wav).map(cue =>
     String(cue.number) + "\n" + srtTime(cue.start_seconds) +
     " --> " + srtTime(cue.end_seconds) + "\n" + cue.text,
   ).join("\n\n") + "\n";
