@@ -850,9 +850,21 @@ struct RenderHistoryEntry {
 
 // Keep the history reader independent of Tauri to test filtering and
 // interrupt classification on a temporary folder without model weights.
+// Return an explicit error rather than silently dropping older matching
+// stories when a damaged/abused directory exceeds a bounded full scan.
+const MAX_RENDER_HISTORY_SCAN_ENTRIES: usize = 20_000;
+
 fn read_render_history(
     folder: &Path,
     story_filter: Option<&str>,
+) -> Result<Vec<RenderHistoryEntry>, String> {
+    read_render_history_bounded(folder, story_filter, MAX_RENDER_HISTORY_SCAN_ENTRIES)
+}
+
+fn read_render_history_bounded(
+    folder: &Path,
+    story_filter: Option<&str>,
+    scan_limit: usize,
 ) -> Result<Vec<RenderHistoryEntry>, String> {
     if story_filter.is_some_and(|id| id.is_empty() || id.len() > 80) {
         return Err("Invalid story history filter.".into());
@@ -861,7 +873,14 @@ fn read_render_history(
         return Ok(Vec::new());
     }
     let mut entries = Vec::new();
+    let mut scanned = 0usize;
     for result in fs::read_dir(folder).map_err(|e| e.to_string())? {
+        // Count *all* directory entries, not just well-formed journals. A
+        // flood of irrelevant files must not keep history loading unbounded.
+        scanned += 1;
+        if scanned > scan_limit {
+            return Err("Render history has too many entries to inspect safely.".into());
+        }
         let entry = result.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(id) = name.strip_suffix(".manifest.json") else { continue; };
@@ -883,6 +902,7 @@ fn read_render_history(
         ) else { continue; };
         if data["schema_version"] != 1 || story_id.is_empty() || story_id.len() > 80 ||
             updated_at.len() > 64 || total == 0 || total > 256 || done > total ||
+            (state == "completed" && done != total) ||
             !matches!(state, "running" | "cancelled" | "failed" | "completed") {
             continue;
         }
