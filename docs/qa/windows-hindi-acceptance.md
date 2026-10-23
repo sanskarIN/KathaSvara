@@ -61,6 +61,8 @@ Before listening, run the [offline WAV inspector](offline-wav-inspection.md) on 
 
 ## 4. Real Hindi listening acceptance — human only
 
+Use the [reproducible two-scene Hindi test fixture and private evidence log](hindi-manual-listening-fixture.md) when possible. Its six scripted speech lines, unvoiced stage direction, optional pronunciation variant, and unfilled pass/fail results help reviewers compare actual WAV/SRT output without relying on synthetic timestamps or simulated voices. No result is pre-approved.
+
 Use an original, authorized 30–60-second narration sample with a narrator, Raja Bhoj, a farmer and a short quoted village reply; include punctuation, a number and one Hindi-English mixed phrase. The script is test data, not proof of a historical event. Obtain rights/consent for any reference clips; do not add real people's private voice recordings to public issues.
 
 Listen to an independently generated WAV on actual hardware (headphones and speakers if available) and check all these aspects **by ear**:
