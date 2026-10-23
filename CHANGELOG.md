@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Fix deferred React editor updates by capturing speaker, destination scene, character name and voice-slider input values immediately rather than later reading a mutable browser event object. Add a queued scene-move regression and resolved-speaker integration coverage.
+
 - Fix stale unknown-speaker warnings: the banner now reflects active, unresolved scene lines instead of permanently showing the parser's earlier unknown-label list. Correcting a speaker clears the warning without synthesis.
 
 - Add 4000-character **production notes** for scenes, explicitly excluded from narration, with validation and unsaved-state tracking. Add a **confirmed Delete Scene** action that removes only the selected parsed scene, preserves the original script and other content, and falls back to a neighboring scene selection; cancellation leaves the story untouched. Cover controls and pure edit helpers with tests.
