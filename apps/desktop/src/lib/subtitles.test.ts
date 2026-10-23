@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
-import { buildDialogueSrt } from "./subtitles";
+import { buildDialogueCues, buildDialogueSrt } from "./subtitles";
 
 describe("Hindi per-dialogue SRT export", () => {
   it("uses measured cue offsets with readable Hindi and Unicode", () => {
@@ -67,5 +67,56 @@ describe("Hindi per-dialogue SRT export", () => {
       [{ segment_id: "a", start_seconds: 0, end_seconds: 1 }],
       [{ segment_id: "a", text: "अ".repeat(3001) }],
     )).toThrow("3000");
+  });
+});
+
+
+describe("pre-export dialogue cue review", () => {
+  it("previews the same rounded Hindi and glossary text that the SRT will export", () => {
+    const timings = [
+      { segment_id: "one", start_seconds: 0.0004, end_seconds: 1.2344,
+        effective_text: "  राजा   भोज की जय! " },
+      { segment_id: "two", start_seconds: 1.5, end_seconds: 2.25,
+        effective_text: "सुनिए! नया उच्चारण।" },
+    ];
+    const lines = [
+      { segment_id: "one", text: "old source before pronunciation rules" },
+      { segment_id: "two", text: "पुराना पाठ" },
+    ];
+    const cues = buildDialogueCues(timings, lines);
+    expect(cues).toEqual([
+      { number: 1, start_seconds: 0, end_seconds: 1.234, text: "राजा भोज की जय!" },
+      { number: 2, start_seconds: 1.5, end_seconds: 2.25,
+        text: "सुनिए! नया उच्चारण।" },
+    ]);
+    const srt = buildDialogueSrt(timings, lines);
+    expect(srt).toContain("00:00:00,000 --> 00:00:01,234\nराजा भोज की जय!");
+    expect(srt).toContain("00:00:01,500 --> 00:00:02,250\nसुनिए! नया उच्चारण।");
+    expect(srt).not.toContain("old source");
+  });
+
+  it("rejects duplicate segment IDs and non-printing controls rather than previewing misleading captions", () => {
+    const timings = [
+      { segment_id: "same", start_seconds: 0, end_seconds: 1 },
+      { segment_id: "same", start_seconds: 1.1, end_seconds: 2 },
+    ];
+    expect(() => buildDialogueCues(timings, [{ segment_id: "same", text: "पहली पंक्ति" }]))
+      .toThrow("invalid");
+    expect(() => buildDialogueSrt(timings, [{ segment_id: "same", text: "पहली पंक्ति" }]))
+      .toThrow("invalid");
+    expect(() => buildDialogueCues(
+      [{ segment_id: "a", start_seconds: 0, end_seconds: 1 }],
+      [{ segment_id: "a", text: "नमस्कार\u0000 गलत" }],
+    )).toThrow("invalid");
+  });
+
+  it("checks the entire 256-cue timeline and does not silently skip later invalid cues", () => {
+    const timings = Array.from({ length: 256 }, (_, index) => ({
+      segment_id: String(index), start_seconds: index, end_seconds: index + 0.5,
+      effective_text: "नमस्कार।",
+    }));
+    expect(buildDialogueCues(timings, []).length).toBe(256);
+    timings[255].start_seconds = 0;
+    expect(() => buildDialogueCues(timings, [])).toThrow("invalid");
   });
 });
