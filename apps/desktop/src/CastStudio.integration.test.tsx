@@ -206,7 +206,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     mocks.invoke.mockImplementation(async (command: string) => {
       if (command === "render_story_v2") return generatedAudio();
       if (command === "inspect_generated_audio") return {
-        ...inspectedAudio(), file_bytes: 60000,
+        ...inspectedAudio(), file_bytes: 60046,
       };
       throw new Error("Unexpected Tauri command: " + command);
     });
