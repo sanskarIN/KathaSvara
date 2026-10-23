@@ -918,4 +918,22 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
   });
 
+
+  it("captures destination scene selection before a deferred React updater executes", () => {
+    const doc = story();
+    doc.scenes.push({ id: "scene-two", title: "अगला दृश्य", notes: "", segments: [] });
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.change(screen.getByRole("combobox", { name: "Move line line-one" }), {
+      target: { value: "scene-two" },
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const moved = updater(doc);
+    expect(moved.scenes[0].segments).toHaveLength(0);
+    expect(moved.scenes[1].segments.map(s => s.id)).toEqual(["line-one"]);
+    expect(moved.scenes[1].segments[0].spoken_text).toBe("नमस्कार।");
+    expect(moved.text).toBe(doc.text);
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
 });
