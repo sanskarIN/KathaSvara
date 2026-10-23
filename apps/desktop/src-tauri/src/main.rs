@@ -1534,6 +1534,71 @@ mod tests {
     }
 
     #[test]
+    fn bounded_recovery_parser_stops_reading_at_limit_even_if_stream_grows() {
+        let mut grown_file = std::io::Cursor::new(vec![b' '; 1024 * 1024]);
+        let error = parse_bounded_recovery_json(&mut grown_file, 1024).unwrap_err();
+        assert!(error.contains("size limit"), "{error}");
+        assert_eq!(grown_file.position(), 1025, "Do not buffer the rest of a raced file.");
+
+        let mut valid = std::io::Cursor::new(br#"{"done":1,"total":2}"#);
+        let data = parse_bounded_recovery_json(&mut valid, 1024).unwrap();
+        assert_eq!(data["done"], 1);
+    }
+
+    #[test]
+    fn progress_reader_rejects_oversize_and_invalid_counters() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-progress-bound-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("progress.json");
+        let missing = read_render_progress_file(&path).unwrap();
+        assert_eq!((missing.done, missing.total), (0, 0));
+
+        fs::write(&path, vec![b' '; 1025]).unwrap();
+        assert!(read_render_progress_file(&path).is_err());
+        fs::write(&path, br#"{"done":3,"total":2}"#).unwrap();
+        assert!(read_render_progress_file(&path).is_err());
+        fs::write(&path, br#"{"done":1,"total":2}"#).unwrap();
+        let valid = read_render_progress_file(&path).unwrap();
+        assert_eq!((valid.done, valid.total), (1, 2));
+
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn history_and_forget_reject_oversized_journal_without_mutation() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-bounded-journal-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story_id = Uuid::new_v4().to_string();
+        let job_id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{job_id}.manifest.json"));
+        fs::write(&path, vec![b'x'; (MAX_RENDER_JOURNAL_BYTES + 1) as usize]).unwrap();
+        assert!(read_render_history(&folder, Some(&story_id)).unwrap().is_empty());
+        assert!(forget_render_journal_file(&folder, &job_id, &story_id).is_err());
+        assert_eq!(fs::metadata(&path).unwrap().len(), MAX_RENDER_JOURNAL_BYTES + 1);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn bounded_recovery_reader_refuses_symlinks_without_opening_private_file() {
+        let folder = std::env::temp_dir().join(format!("kathasvara-recovery-link-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let private = folder.join("secret.json");
+        let alias = folder.join("progress.json");
+        fs::write(&private, br#"{"done":1,"total":2}"#).unwrap();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&private, &alias).is_ok();
+        #[cfg(not(windows))]
+        let linked = std::os::unix::fs::symlink(&private, &alias).is_ok();
+        if linked {
+            assert!(read_render_progress_file(&alias).is_err());
+            assert!(read_bounded_recovery_json(&alias, MAX_RENDER_PROGRESS_BYTES).is_err());
+            assert_eq!(fs::read(&private).unwrap(), br#"{"done":1,"total":2}"#);
+        }
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn journal_forget_rejects_malformed_json_without_deleting() {
         let folder = std::env::temp_dir().join(format!("kathasvara-bad-journal-{}", Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
