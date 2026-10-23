@@ -184,3 +184,40 @@ def test_failed_record_does_not_mutate_progress_even_on_keyboard_interrupt(
         assert journal.document["done"] == 0
         assert journal.document["segments"] == []
     assert json.loads(destination.read_text(encoding="utf-8"))["state"] == "failed"
+
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (RuntimeError("synthesis stopped"), "RuntimeError"),
+        (ValueError("invalid audio"), "ValueError"),
+        (PermissionError("private path"), "PermissionError"),
+        (MemoryError("out of memory"), "MemoryError"),
+        (KeyError("secret segment"), "OtherError"),
+    ],
+)
+def test_journal_failure_categories_never_include_exception_details(
+    tmp_path: Path, error: Exception, expected: str,
+) -> None:
+    destination = tmp_path / "jobs" / "failed.manifest.json"
+    with pytest.raises(type(error)), RenderJournal(destination, "story", 1):
+        raise error
+    saved = json.loads(destination.read_text(encoding="utf-8"))
+    assert saved["state"] == "failed"
+    assert saved["error_type"] == expected
+    assert "private path" not in destination.read_text(encoding="utf-8")
+    assert "secret segment" not in destination.read_text(encoding="utf-8")
+
+
+def test_custom_exception_type_name_cannot_persist_story_or_path_details(tmp_path: Path) -> None:
+    # Dynamic exception classes can have arbitrary and sensitive __name__ values.
+    secret = "PRIVATE STORY /home/person/models/chatterbox नमस्कार"
+    custom_error = type(secret, (Exception,), {})
+    destination = tmp_path / "jobs" / "failed.manifest.json"
+    with pytest.raises(custom_error), RenderJournal(destination, "story", 1):
+        raise custom_error("not for a recovery file")
+    saved = json.loads(destination.read_text(encoding="utf-8"))
+    assert saved["error_type"] == "OtherError"
+    assert secret not in destination.read_text(encoding="utf-8")
+    assert "not for a recovery file" not in destination.read_text(encoding="utf-8")
