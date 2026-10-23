@@ -102,6 +102,80 @@ def test_rejects_truncated_pcm_data_without_structural_pass(tmp_path: Path) -> N
         inspect_wav_candidate(path)
 
 
+def _append_riff_chunk(original: bytes, marker: bytes, payload: bytes) -> bytes:
+    """Append a properly padded RIFF chunk with a corrected container length."""
+    assert len(marker) == 4
+    body = (original + marker + len(payload).to_bytes(4, "little") +
+            payload + (b"\x00" if len(payload) % 2 else b""))
+    return body[:4] + (len(body) - 8).to_bytes(4, "little") + body[8:]
+
+
+def test_rejects_forged_pcm16_byte_rate(tmp_path: Path) -> None:
+    path = wav_file(tmp_path / "bad-rate.wav")
+    forged = bytearray(path.read_bytes())
+    # The header's declared 24 kHz rate requires 48,000 bytes/second.
+    forged[28:32] = (1).to_bytes(4, "little")
+    path.write_bytes(forged)
+    with pytest.raises(ValueError, match="invalid PCM header"):
+        inspect_wav_candidate(path)
+
+
+@pytest.mark.parametrize(("marker", "payload"), [
+    (b"fmt ", bytes(16)),
+    (b"data", bytes(2)),
+])
+def test_rejects_duplicate_fmt_or_data_chunks_even_after_valid_samples(
+    tmp_path: Path, marker: bytes, payload: bytes,
+) -> None:
+    path = wav_file(tmp_path / "duplicate.wav")
+    path.write_bytes(_append_riff_chunk(path.read_bytes(), marker, payload))
+    with pytest.raises(ValueError, match="invalid PCM header"):
+        inspect_wav_candidate(path)
+
+
+def test_rejects_forged_riff_size_trailing_junk_and_oversized_chunk(
+    tmp_path: Path,
+) -> None:
+    path = wav_file(tmp_path / "forged.wav")
+    original = path.read_bytes()
+    # Correct file data with four extra bytes not declared by RIFF.
+    path.write_bytes(original + b"junk")
+    with pytest.raises(ValueError, match="invalid PCM header"):
+        inspect_wav_candidate(path)
+    # Correct RIFF byte count, but trailing data lacks a chunk header.
+    extended = bytearray(original + b"junk")
+    extended[4:8] = (len(extended) - 8).to_bytes(4, "little")
+    path.write_bytes(extended)
+    with pytest.raises(ValueError, match="invalid PCM header"):
+        inspect_wav_candidate(path)
+    # A chunk claims more bytes than physically exist.
+    corrupt = _append_riff_chunk(original, b"JUNK", b"ab")
+    corrupt = corrupt[:-4] + (9999).to_bytes(4, "little") + corrupt[-2:]
+    path.write_bytes(corrupt)
+    with pytest.raises(ValueError, match="invalid PCM header"):
+        inspect_wav_candidate(path)
+
+
+def test_accepts_bounded_padded_unknown_metadata_chunk(tmp_path: Path) -> None:
+    path = wav_file(tmp_path / "metadata.wav")
+    path.write_bytes(_append_riff_chunk(path.read_bytes(), b"JUNK", b"abc"))
+    report = inspect_wav_candidate(path)
+    assert report["frames"] == 2400
+    assert report["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_rejects_excessive_metadata_chunk_count(tmp_path: Path) -> None:
+    path = wav_file(tmp_path / "many-chunks.wav")
+    original = path.read_bytes()
+    # Normal files have fmt + data; 4095 extra chunks exceed the 4096 cap.
+    chunks = b"JUNK" + bytes(4)
+    extra = original + chunks * 4095
+    extra = extra[:4] + (len(extra) - 8).to_bytes(4, "little") + extra[8:]
+    path.write_bytes(extra)
+    with pytest.raises(ValueError, match="too many metadata chunks"):
+        inspect_wav_candidate(path)
+
+
 def test_symlink_not_accepted_even_if_target_is_valid(tmp_path: Path) -> None:
     target = wav_file(tmp_path / "target.wav")
     alias = tmp_path / "alias.wav"
