@@ -66,3 +66,15 @@ def test_prerelease_disclosures_remain_explicit() -> None:
     assert "NOT A COMPLETE INSTALLER" in instructions
     assert "NOT STABLE" in notes
     assert "KathaSvara-v0.5.1-dev-win64.exe" in notes
+
+
+def test_public_site_uses_latest_published_prerelease_without_stable_claims() -> None:
+    site = (ROOT / "website/index.html").read_text(encoding="utf-8")
+    latest = f"https://github.com/sanskarIN/KathaSvara/releases/tag/v{VERSION}"
+    assert site.count(latest) >= 2
+    assert f"v{VERSION} · Latest experimental pre-release" in site
+    assert f">v{VERSION} pre-release ↗" in site
+    assert "not a self-contained installer" in site
+    assert "Real Hindi listening" in site
+    assert "remain unverified" in site
+    assert "issues/3" in site
