@@ -363,6 +363,30 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.queryByRole("button", { name: "Export WAV" })).toBeNull();
   });
 
+  it("shows a bounded recovery explanation without echoing raw exception data", async () => {
+    const privateText = "/Users/private/story/निजी Chatterbox MODEL_SECRET";
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "story_render_history") return [{
+        job_id: "stopped-job", story_id: ID, state: "failed",
+        done: 1, total: 3, failure_code: "storage",
+        updated_at: "2026-10-21T00:00:00Z",
+      }, {
+        job_id: "legacy-job", story_id: ID, state: "failed",
+        done: 0, total: 3, failure_code: privateText,
+        updated_at: "2026-10-21T00:00:00Z",
+      }];
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    await screen.findByText(/Review free space and folder permissions/);
+    expect(screen.getByText(/exact reason is not stored/)).toBeTruthy();
+    expect(screen.queryByText(/MODEL_SECRET/)).toBeNull();
+    expect(screen.queryByText(/निजी/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Retry current full story" }))
+      .toHaveLength(2);
+  });
+
   it("does not automatically retry; confirmation launches a new full-story render", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     mocks.invoke.mockImplementation(async (command: string) => {

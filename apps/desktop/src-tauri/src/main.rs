@@ -879,6 +879,25 @@ struct RenderHistoryEntry {
     done: u32,
     total: u32,
     updated_at: String,
+    failure_code: &'static str,
+}
+
+/// Translate untrusted journal exception metadata to fixed public codes.
+/// Never return raw class names, user text, paths, tracebacks or model details.
+fn render_failure_code(state: &str, exception_type: Option<&str>) -> &'static str {
+    match state {
+        "interrupted" => "interrupted",
+        "cancelled" => "cancelled",
+        "failed" => match exception_type {
+            Some("IncompleteRender") => "incomplete",
+            Some("ValueError") => "validation",
+            Some("PermissionError" | "FileNotFoundError" | "OSError") => "storage",
+            Some("MemoryError") => "resources",
+            Some("RuntimeError") => "runtime",
+            _ => "unknown",
+        },
+        _ => "none",
+    }
 }
 
 // Keep the history reader independent of Tauri to test filtering and
@@ -951,6 +970,7 @@ fn read_render_history_bounded(
         reports.push(RenderHistoryEntry {
             job_id, story_id: story_id.to_owned(), state: display_state.to_owned(),
             done: done as u32, total: total as u32, updated_at: updated_at.to_owned(),
+            failure_code: render_failure_code(display_state, data["error_type"].as_str()),
         });
         if reports.len() == 20 {
             break;
@@ -1500,6 +1520,44 @@ mod tests {
         assert_eq!(valid.len(), 1);
         assert_eq!(valid[0].job_id, id);
         assert_eq!(valid[0].state, "failed");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn recovery_failure_codes_are_fixed_and_do_not_expose_private_exception_text() {
+        assert_eq!(render_failure_code("failed", Some("IncompleteRender")), "incomplete");
+        assert_eq!(render_failure_code("failed", Some("ValueError")), "validation");
+        assert_eq!(render_failure_code("failed", Some("PermissionError")), "storage");
+        assert_eq!(render_failure_code("failed", Some("FileNotFoundError")), "storage");
+        assert_eq!(render_failure_code("failed", Some("OSError")), "storage");
+        assert_eq!(render_failure_code("failed", Some("MemoryError")), "resources");
+        assert_eq!(render_failure_code("failed", Some("RuntimeError")), "runtime");
+        assert_eq!(render_failure_code("failed", None), "unknown");
+        assert_eq!(render_failure_code("interrupted", Some("RuntimeError")), "interrupted");
+        assert_eq!(render_failure_code("cancelled", None), "cancelled");
+        assert_eq!(render_failure_code("running", Some("ValueError")), "none");
+        assert_eq!(render_failure_code("completed", Some("OSError")), "none");
+        assert_eq!(render_failure_code("failed", Some("secret /home/me निजी कथा")), "unknown");
+
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let folder = std::env::temp_dir().join(format!("kathasvara-safe-hints-{}", Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let story = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4().to_string();
+        let path = folder.join(format!("{id}.manifest.json"));
+        fs::write(&path, json!({
+            "schema_version": 1, "story_id": story,
+            "state": "failed", "done": 1, "total": 2,
+            "error_type": "secret /home/me निजी कथा",
+            "updated_at": "2026-10-20T10:01:00+00:00",
+        }).to_string()).unwrap();
+        let history = read_render_history(&folder, Some(&story)).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].failure_code, "unknown");
+        let exposed = serde_json::to_string(&history).unwrap();
+        assert!(!exposed.contains("secret"));
+        assert!(!exposed.contains("/home/me"));
+        assert!(!exposed.contains("निजी"));
         fs::remove_dir_all(folder).unwrap();
     }
 

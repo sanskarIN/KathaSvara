@@ -12,6 +12,7 @@ import {
   updateAudioReview, type AudioReview, type ReviewStep,
 } from "./lib/production_review";
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
+import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
@@ -36,6 +37,7 @@ type RenderHistory = {
   done: number;
   total: number;
   updated_at: string;
+  failure_code?: string;
 };
 
 interface Props {
@@ -676,6 +678,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                   <strong>{item.state === "interrupted" ? "Interrupted" : item.state}</strong>
                   {" · "}{item.done}/{item.total} segments
                   {" · "}{item.updated_at}
+                  <span className="helper">{" · "}{recoveryHint(item)}</span>
                   {canOfferManualRetry(item, document.id) && (
                     <button className="secondary-button" type="button" disabled={busy || rendering}
                       onClick={() => retryFromHistory(item)}>Retry current full story</button>
