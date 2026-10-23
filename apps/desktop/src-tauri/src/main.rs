@@ -879,6 +879,25 @@ struct RenderHistoryEntry {
     done: u32,
     total: u32,
     updated_at: String,
+    failure_code: &'static str,
+}
+
+/// Translate untrusted journal exception metadata to fixed public codes.
+/// Never return raw class names, user text, paths, tracebacks or model details.
+fn render_failure_code(state: &str, exception_type: Option<&str>) -> &'static str {
+    match state {
+        "interrupted" => "interrupted",
+        "cancelled" => "cancelled",
+        "failed" => match exception_type {
+            Some("IncompleteRender") => "incomplete",
+            Some("ValueError") => "validation",
+            Some("PermissionError" | "FileNotFoundError" | "OSError") => "storage",
+            Some("MemoryError") => "resources",
+            Some("RuntimeError") => "runtime",
+            _ => "unknown",
+        },
+        _ => "none",
+    }
 }
 
 // Keep the history reader independent of Tauri to test filtering and
@@ -951,6 +970,7 @@ fn read_render_history_bounded(
         reports.push(RenderHistoryEntry {
             job_id, story_id: story_id.to_owned(), state: display_state.to_owned(),
             done: done as u32, total: total as u32, updated_at: updated_at.to_owned(),
+            failure_code: render_failure_code(display_state, data["error_type"].as_str()),
         });
         if reports.len() == 20 {
             break;
