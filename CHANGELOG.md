@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — post-v0.5.1 development
+## Unreleased — v0.5.2 experimental developer pre-release candidate (not published)
 
 - Harden rendered Hindi caption previews and SRT export against unknown story-segment identities or cue endpoints past the actual WAV duration, including valid rounding tolerances. Add a local-only, bounded text search over already validated cues that resets pagination without changing the exported SRT or QA checklist. Add component and unit regressions; no model loading, released binaries or publication changes. See [v0.5.2 development](docs/releases/v0.5.2-development.md).
 
