@@ -40,6 +40,21 @@ jobs:
         run: |
           echo '{"action":"diagnose"}' | python -m kathasvara.cli | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'] and r['result']['model_weights_verified'] is False and r['result']['audio_synthesis_verified'] is False"
 
+  journal-windows:
+    name: Windows Python journal atomicity (no model)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal test runner
+        run: python -m pip install pytest
+      - name: Verify exclusive journal publication on NTFS
+        env:
+          PYTHONPATH: ${{ github.workspace }}/services/inference
+        run: python -m pytest -q services/inference/tests/test_render_journal_atomicity.py
+
   frontend:
     name: React build and tests
     runs-on: ubuntu-latest
