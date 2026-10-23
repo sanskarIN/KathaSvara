@@ -642,4 +642,97 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(mocks.invoke.mock.calls.some(([command]) => command === "export_subtitles")).toBe(false);
   });
 
+
+  it("does not replace the current story with an obsolete dialogue parse response", async () => {
+    let finishParse: (result: unknown) => void = () => { throw new Error("Parser not called"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "parse_dialogue") {
+        return new Promise(resolve => { finishParse = resolve; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Parse labeled Hindi script" }));
+    await waitFor(() => expect(mocks.invoke.mock.calls.some(([name]) => name === "parse_dialogue"))
+      .toBe(true));
+    const next = { ...doc, id: "new-story-id", title: "अलग कहानी" };
+    rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
+    await act(async () => { finishParse({
+      ok: true, result: { ...doc, title: "पुरानी पार्स की गई कहानी" },
+      unresolved: [], distinct_voices_verified: false,
+    }); });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage.mock.calls.some(([message]) => typeof message === "string" &&
+      message.includes("Parsed "))).toBe(false);
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "discard_audio")).toBe(false);
+    expect(screen.getByRole("button", { name: "Parse labeled Hindi script" })).toBeTruthy();
+  });
+
+  it("does not mark a newer document as saved after an old save resolves", async () => {
+    let finishSave: (result: unknown) => void = () => { throw new Error("Save not called"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "save_story_v2") {
+        return new Promise(resolve => { finishSave = resolve; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Save cast and scenes" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "save_story_v2", expect.objectContaining({ project: doc }),
+    ));
+    rerender(<CastStudio document={{ ...doc, title: "नई संपादित कहानी" }}
+      onChange={onChange} onMessage={onMessage} />);
+    await act(async () => { finishSave({ ...doc, title: "पुरानी बचाई हुई कहानी" }); });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("saved atomically"))).toBe(false);
+    expect(screen.getByRole("button", { name: "Save cast and scenes" })).toBeTruthy();
+  });
+
+  it("does not replace another story when a delayed load completes", async () => {
+    let finishLoad: (result: unknown) => void = () => { throw new Error("Load not called"); };
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_story_v2") {
+        return new Promise(resolve => { finishLoad = resolve; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Load saved v2" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("load_story_v2", { id: ID }));
+    rerender(<CastStudio document={{ ...doc, id: "another-story", title: "दूसरी कहानी" }}
+      onChange={onChange} onMessage={onMessage} />);
+    await act(async () => { finishLoad({ ...doc, title: "पुरानी कहानी" }); });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage.mock.calls.some(([message]) => typeof message === "string" &&
+      message.includes("Saved v2 story loaded"))).toBe(false);
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "discard_audio")).toBe(false);
+  });
+
+  it("does not echo stale parse failures after switching stories", async () => {
+    let failParse: (reason: Error) => void = () => { throw new Error("Parse not called"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "parse_dialogue") {
+        return new Promise((_resolve, reject) => { failParse = reject; });
+      }
+      return Promise.reject(new Error("Unexpected Tauri command: " + command));
+    });
+    const doc = story();
+    const { rerender, onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Parse labeled Hindi script" }));
+    await waitFor(() => expect(mocks.invoke.mock.calls.some(([name]) => name === "parse_dialogue"))
+      .toBe(true));
+    rerender(<CastStudio document={{ ...doc, id: "new-story", title: "दूसरी कहानी" }}
+      onChange={onChange} onMessage={onMessage} />);
+    await act(async () => { failParse(new Error("old private source path")); });
+    expect(onMessage.mock.calls.some(([message]) => typeof message === "string" &&
+      message.includes("old private source path"))).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
 });
