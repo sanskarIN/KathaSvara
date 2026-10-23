@@ -78,6 +78,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   // Never persisted or transferred to the model: only manual QA for the current WAV.
   const [review, setReview] = useState<AudioReview | null>(null);
   const renderRevision = useRef(0);
+  // Invalidates history reads when the story, render or recovery list changes.
+  const historyEpoch = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const currentJob = useRef<string | null>(null);
   const currentAudio = useRef<string | null>(null);
@@ -85,12 +87,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   currentAudio.current = audio?.audio_id ?? null;
   useEffect(() => () => {
     renderRevision.current += 1;
+    historyEpoch.current += 1;
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
   }, []);
   useEffect(() => {
     // Parent script/story switches are edits too; reject late renders of older documents.
     renderRevision.current += 1;
+    historyEpoch.current += 1;
+    setLoadingHistory(false);
     if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     audioEpoch.current += 1;
@@ -104,14 +109,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }, [document]);
   useEffect(() => {
     if (!jobId) return;
+    let active = true;
     const interval = window.setInterval(() => {
       void invoke<{ done: number; total: number }>("story_render_progress", { jobId })
-        .then(setProgress).catch(() => {});
+        .then(result => { if (active) setProgress(result); }).catch(() => {});
     }, 500);
-    return () => window.clearInterval(interval);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [jobId]);
   function edit(update: (previous: StoryV2) => StoryV2) {
     renderRevision.current += 1;
+    historyEpoch.current += 1;
+    setHistory(null);
+    setLoadingHistory(false);
     if (jobId) void invoke("cancel_story_render", { jobId }).catch(() => {});
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     audioEpoch.current += 1;
@@ -167,6 +179,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     // unrelated scene tab is selected during playback or export.
     const exportLabel = renderExportLabel(document, id, sceneId, forceSegmentId);
     const revision = renderRevision.current;
+    historyEpoch.current += 1;
+    setLoadingHistory(false);
     setJobId(id);
     setProgress({ done: 0, total: 0 });
     setRendering(true);
@@ -275,18 +289,19 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
 
   async function showRenderHistory() {
     const revision = renderRevision.current;
+    const epoch = ++historyEpoch.current;
     setLoadingHistory(true);
     try {
       const records = await invoke<RenderHistory[]>("story_render_history", { storyId: document.id });
-      if (revision !== renderRevision.current) return;
+      if (revision !== renderRevision.current || epoch !== historyEpoch.current) return;
       setHistory(records.slice(0, 10));
       onMessage("Local history loaded. Retry is manual: the current entire story will be revalidated with a fresh job ID; only unchanged cached speech can be reused.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && epoch === historyEpoch.current) {
         onMessage("Could not read local render history: " + errorString(error));
       }
     } finally {
-      setLoadingHistory(false);
+      if (epoch === historyEpoch.current) setLoadingHistory(false);
     }
   }
 
@@ -305,12 +320,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   async function forgetHistory(job: RenderHistory) {
     if (job.state === "running") return;
     if (!window.confirm("Forget this inactive render attempt and its temporary progress/cancel markers? The story, finished WAVs, exports and speech cache will remain unchanged.")) return;
+    const revision = renderRevision.current;
+    const epoch = ++historyEpoch.current;
+    setLoadingHistory(false);
     try {
       await invoke("forget_render_journal", { jobId: job.job_id, storyId: job.story_id });
+      if (revision !== renderRevision.current || epoch !== historyEpoch.current) return;
       setHistory(previous => previous?.filter(item => item.job_id !== job.job_id) ?? null);
       onMessage("Render record and matching bookkeeping markers removed. Projects and completed WAV audio were untouched.");
     } catch (error) {
-      onMessage("Cannot forget render history: " + errorString(error));
+      if (revision === renderRevision.current && epoch === historyEpoch.current) {
+        onMessage("Cannot forget render history: " + errorString(error));
+      }
     }
   }
 
