@@ -2,6 +2,8 @@
 
 ## Unreleased — post-v0.5.1 development
 
+- Add a **local Hindi dialogue subtitle cue preview** before exporting SRT: reuse the complete rounded-millisecond SRT validation path, reject duplicate segment IDs and control characters, paginate 10 cues at a time, and seek inline WAV audio to individual cues. A preview does not export a file or mark the human QA checklist. Add React integration and Vitest coverage; published v0.5.1 assets and metadata unchanged. See [v0.5.2 development notes](docs/releases/v0.5.2-development.md).
+
 - Guard cancellation and progress bookkeeping sidecars against clobbering other files. Native Windows cancellation now uses exclusive create-new markers, supports safe repeated requests without rewriting the marker, and rejects pre-existing symlink/directory/oversized entries. Python progress writes use exclusive, randomized sibling files instead of the predictable `.partial` name; do not remove a competitor's temporary entry on collisions, and preserve previous progress if replacement fails. Add Rust and model-free Windows/Python regression tests. Source-only; published v0.5.1 unchanged.
 
 - Add privacy-preserving recovery diagnostics: Python limits persisted exception labels to fixed categories rather than custom class names; the native history API exposes only a fixed, allowlisted failure code; React presents safe, actionable suggestions for interrupted, cancelled, incomplete, storage, validation and runtime failures. Legacy/unknown values are never rendered verbatim. Add Python, Windows Rust and React unit/integration regressions. Source-only; published v0.5.1 assets unchanged.
