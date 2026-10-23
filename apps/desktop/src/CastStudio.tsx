@@ -15,7 +15,7 @@ import { serializeProductionManifest, type ProductionAudit } from "./lib/product
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
 import {
-  addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
+  addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
@@ -175,6 +175,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       edit(previous => addScene(previous, newSceneTitle));
       setNewSceneTitle("");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function duplicateCurrentScene(sceneId: string) {
+    if (busy || rendering) return;
+    try {
+      // Materialize the IDs before the React state updater is scheduled, so
+      // the newly selected scene is the actual clone, not the source scene.
+      const cloned = duplicateScene(document, sceneId);
+      const originalIndex = document.scenes.findIndex(scene => scene.id === sceneId);
+      const copyId = cloned.scenes[originalIndex + 1].id;
+      edit(() => cloned);
+      setSelectedScene(copyId);
+      onMessage("Copied this scene with new line IDs. Old generated audio was not copied; save the story and review any new narration.");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -925,6 +940,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               </label>
               <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
               <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
+              <button type="button" className="secondary-button"
+                disabled={busy || rendering || document.scenes.length >= 200}
+                onClick={() => duplicateCurrentScene(activeScene.id)}>
+                Duplicate scene (fresh audio)
+              </button>
             </div>
             <ol className="scene-segments">
               {activeScene.segments.map((segment, index) => (
