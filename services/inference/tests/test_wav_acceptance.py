@@ -150,7 +150,7 @@ def test_rejects_forged_riff_size_trailing_junk_and_oversized_chunk(
         inspect_wav_candidate(path)
     # A chunk claims more bytes than physically exist.
     corrupt = _append_riff_chunk(original, b"JUNK", b"ab")
-    corrupt = corrupt[:-4] + (9999).to_bytes(4, "little") + corrupt[-2:]
+    corrupt = corrupt[:-6] + (9999).to_bytes(4, "little") + corrupt[-2:]
     path.write_bytes(corrupt)
     with pytest.raises(ValueError, match="invalid PCM header"):
         inspect_wav_candidate(path)
