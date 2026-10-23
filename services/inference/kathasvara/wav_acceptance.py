@@ -75,9 +75,12 @@ def _validate_pcm16_riff(raw, file_bytes: int) -> tuple[int, int]:
     invalid = "WAV contains an unsupported or invalid PCM header."
     raw.seek(0)
     header = raw.read(12)
-    if (len(header) != 12 or header[:4] != b"RIFF" or
-        header[8:] != b"WAVE" or
-        int.from_bytes(header[4:8], "little") + 8 != file_bytes):
+    if len(header) != 12 or header[:4] != b"RIFF" or header[8:] != b"WAVE":
+        raise ValueError(invalid)
+    declared_length = int.from_bytes(header[4:8], "little") + 8
+    if declared_length > file_bytes:
+        raise ValueError("WAV audio is truncated or the frame count is incorrect.")
+    if declared_length != file_bytes:
         raise ValueError(invalid)
 
     cursor = 12
@@ -113,7 +116,9 @@ def _validate_pcm16_riff(raw, file_bytes: int) -> tuple[int, int]:
             alignment = int.from_bytes(fmt[12:14], "little")
             bit_depth = int.from_bytes(fmt[14:16], "little")
             if (codec != 1 or channels != 1 or not 8000 <= rate <= 192000 or
-                byte_rate != rate * 2 or alignment != 2 or bit_depth != 16):
+                alignment != 2 or bit_depth != 16):
+                raise ValueError("Expected mono PCM16 WAV of at most 20 minutes.")
+            if byte_rate != rate * 2:
                 raise ValueError(invalid)
             sample_rate = rate
         elif chunk_header[:4] == b"data":
