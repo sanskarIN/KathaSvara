@@ -79,6 +79,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   // Preview stays in memory only and never marks the separate human QA checklist.
   const [subtitlePreview, setSubtitlePreview] = useState<{ audioId: string; cues: DialogueCue[] } | null>(null);
   const [subtitlePage, setSubtitlePage] = useState(0);
+  const [subtitleQuery, setSubtitleQuery] = useState("");
   const [inspectingWav, setInspectingWav] = useState(false);
   const qaEpoch = useRef(0);
   function clearWavInspection() {
@@ -87,6 +88,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setInspectingWav(false);
     setSubtitlePreview(null);
     setSubtitlePage(0);
+    setSubtitleQuery("");
   }
   const audioEpoch = useRef(0);
   // Never persisted or transferred to the model: only manual QA for the current WAV.
@@ -363,9 +365,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     if (!audio?.segment_timings?.length) return;
     try {
       // Validate ALL cues, not just the first visible page; no filesystem I/O.
-      const cues = buildDialogueCues(audio.segment_timings, spokenSubtitleLines(document));
+      const cues = buildDialogueCues(audio.segment_timings, spokenSubtitleLines(document), {
+        duration_seconds: audio.duration_seconds, sample_rate: audio.sample_rate,
+      });
       setSubtitlePreview({ audioId: audio.audio_id, cues });
       setSubtitlePage(0);
+      setSubtitleQuery("");
       onMessage("Dialogue cues ready for local preview. Listen and compare before exporting; no human QA step was marked.");
     } catch (error) {
       setSubtitlePreview(null);
@@ -382,7 +387,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       // Timings are derived from actual rendered PCM frames, not reading-speed estimates.
       // The same complete validation is used by the optional in-app preview.
-      const content = buildDialogueSrt(audio.segment_timings, spokenSubtitleLines(document));
+      const content = buildDialogueSrt(audio.segment_timings, spokenSubtitleLines(document), {
+        duration_seconds: audio.duration_seconds, sample_rate: audio.sample_rate,
+      });
       const destination = await save({
         title: "Export segment-timed Hindi SubRip subtitles",
         defaultPath: suggestedOutputFile(label, "srt"),
@@ -565,8 +572,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const activeSubtitlePreview = audio && subtitlePreview?.audioId === audio.audio_id
     ? subtitlePreview : null;
   const subtitlePageSize = 10;
-  const subtitlePages = activeSubtitlePreview
-    ? Math.ceil(activeSubtitlePreview.cues.length / subtitlePageSize) : 0;
+  const normalizedSubtitleQuery = subtitleQuery.trim().normalize("NFC").toLocaleLowerCase();
+  const filteredSubtitleCues = activeSubtitlePreview
+    ? activeSubtitlePreview.cues.filter(cue =>
+        cue.text.normalize("NFC").toLocaleLowerCase().includes(normalizedSubtitleQuery))
+    : [];
+  const subtitlePages = Math.ceil(filteredSubtitleCues.length / subtitlePageSize);
   const activeReview = audio ? reviewForAudio(review, audio.audio_id) : null;
   const reviewState = audio ? reviewProgress(activeReview, audio.audio_id) : null;
   const reviewPrompts: Array<{ step: ReviewStep; label: string }> = [
@@ -751,11 +762,24 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                 <p>Local preview only; all cues were checked for valid timeline ordering.
                   These captions are timed per dialogue, not word-aligned. No SRT has been
                   exported and no listening or subtitle review is automatically completed.</p>
+                <label className="field-label" htmlFor="dialogue-cue-search">Find a Hindi dialogue cue</label>
+                <input id="dialogue-cue-search" type="search" className="title-input"
+                  aria-label="Find dialogue cue text" maxLength={120}
+                  placeholder="Search spoken dialogue…" value={subtitleQuery}
+                  onChange={event => {
+                    setSubtitleQuery(event.target.value);
+                    setSubtitlePage(0);
+                  }} />
+                <p role="status">{filteredSubtitleCues.length} of {activeSubtitlePreview.cues.length} cues shown.
+                  Search stays on this device and does not modify the exported SRT.</p>
+                {filteredSubtitleCues.length === 0 && (
+                  <p>No matching dialogue cues. Clear the search to show all captions.</p>
+                )}
                 <ol className="subtitle-cues" start={subtitlePage * subtitlePageSize + 1}>
-                  {activeSubtitlePreview.cues
+                  {filteredSubtitleCues
                     .slice(subtitlePage * subtitlePageSize, (subtitlePage + 1) * subtitlePageSize)
                     .map(cue => (
-                      <li key={cue.number}>
+                      <li key={cue.number} value={cue.number}>
                         <small>{cue.start_seconds.toFixed(3)}s → {cue.end_seconds.toFixed(3)}s</small>
                         <p lang="hi">{cue.text}</p>
                         {audio.preview_available !== false && (
