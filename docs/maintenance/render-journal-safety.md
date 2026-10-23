@@ -10,6 +10,24 @@ counts, cache fingerprints, measured durations and completion state. They do
 **not** persist Hindi script, the effective text sent to Chatterbox, local model
 paths, or generated voice recordings.
 
+## Fixed, privacy-safe recovery diagnostics
+
+Post-v0.5.1 source development categorizes terminal errors without storing
+exception messages or arbitrary exception-class names. Python writes only fixed
+failure labels (`RuntimeError`, `ValueError`, `OSError`,
+`PermissionError`, `FileNotFoundError`, `MemoryError`, and `OtherError`),
+plus `IncompleteRender` and `RenderCancelled` for explicit terminal states.
+Any unknown custom exception class is saved as `OtherError`.
+
+Native history reduces even these labels to a small allowlist of codes:
+`incomplete`, `validation`, `storage`, `resources`, `runtime`, or
+`unknown`. Interrupted and cancelled states have their own fixed codes;
+running and completed jobs have no failure code. React displays hardcoded
+explanations and does not render untrusted journal diagnostic strings.
+Previously written arbitrary error labels are safely mapped to `unknown`
+without modifying the original journal. Hints are advisory only and cannot
+prove why an unsupported model, hardware, or filesystem operation failed.
+
 ## First creation and retries
 
 1. A new job supplies a unique absolute `.json` journal destination.
