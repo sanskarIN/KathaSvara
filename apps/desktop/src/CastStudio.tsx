@@ -673,24 +673,33 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                 <span>Character name</span>
                 <input value={char.name} disabled={char.id === "narrator"} maxLength={120}
                   onChange={event => {
-                    try { edit(doc => renameCharacter(doc, char.id, event.target.value)); }
-                    catch (error) { onMessage(errorString(error)); }
+                    const nextName = event.target.value;
+                    try {
+                      renameCharacter(document, char.id, nextName);
+                      edit(doc => renameCharacter(doc, char.id, nextName));
+                    } catch (error) { onMessage(errorString(error)); }
                   }} />
               </label>
               <div className="cast-voice-row">
                 <label>Expression
                   <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration}
-                    onChange={event => edit(doc => ({
-                      ...doc, characters: doc.characters.map(item => item.id === char.id
-                        ? { ...item, voice: { ...item.voice, exaggeration: Number(event.target.value) } } : item),
-                    }))} />
+                    onChange={event => {
+                      const exaggeration = Number(event.target.value);
+                      edit(doc => ({
+                        ...doc, characters: doc.characters.map(item => item.id === char.id
+                          ? { ...item, voice: { ...item.voice, exaggeration } } : item),
+                      }));
+                    }} />
                 </label>
                 <label>CFG
                   <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight}
-                    onChange={event => edit(doc => ({
-                      ...doc, characters: doc.characters.map(item => item.id === char.id
-                        ? { ...item, voice: { ...item.voice, cfg_weight: Number(event.target.value) } } : item),
-                    }))} />
+                    onChange={event => {
+                      const cfg_weight = Number(event.target.value);
+                      edit(doc => ({
+                        ...doc, characters: doc.characters.map(item => item.id === char.id
+                          ? { ...item, voice: { ...item.voice, cfg_weight } } : item),
+                      }));
+                    }} />
                 </label>
               </div>
               <p className="helper">Hindi · Chatterbox Multilingual · pause {char.voice.pause_ms} ms · no distinct speaker verified</p>
@@ -998,8 +1007,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     {segment.kind === "speech" && (
                       <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""}
                         onChange={event => {
-                          try { edit(doc => assignSegment(doc, segment.id, event.target.value)); }
-                          catch (error) { onMessage(errorString(error)); }
+                          const speakerId = event.target.value;
+                          try {
+                            assignSegment(document, segment.id, speakerId);
+                            edit(doc => assignSegment(doc, segment.id, speakerId));
+                          } catch (error) { onMessage(errorString(error)); }
                         }}>
                         <option value="">Unassigned — manual correction required</option>
                         {document.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
@@ -1042,8 +1054,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                   <label className="move-segment-label">Move line to scene
                     <select aria-label={"Move line " + segment.id} value={activeScene.id}
                       onChange={event => {
-                        try { edit(doc => moveSegment(doc, segment.id, event.target.value)); }
-                        catch (error) { onMessage(errorString(error)); }
+                        const destinationId = event.target.value;
+                        try {
+                          moveSegment(document, segment.id, destinationId);
+                          edit(doc => moveSegment(doc, segment.id, destinationId));
+                        } catch (error) { onMessage(errorString(error)); }
                       }}>
                       {document.scenes.map(scene => <option key={scene.id} value={scene.id}>{scene.title}</option>)}
                     </select>
