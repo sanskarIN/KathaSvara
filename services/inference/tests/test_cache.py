@@ -86,7 +86,6 @@ def test_invalid_budgets_are_rejected(tmp_path: Path, budget: object) -> None:
         prune_cache(tmp_path, max_bytes=budget)
 
 
-
 def test_cache_scan_limit_counts_unrelated_entries_and_refuses_partial_pruning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
