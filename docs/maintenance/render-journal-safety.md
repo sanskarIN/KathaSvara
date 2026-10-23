@@ -28,6 +28,29 @@ Previously written arbitrary error labels are safely mapped to `unknown`
 without modifying the original journal. Hints are advisory only and cannot
 prove why an unsupported model, hardware, or filesystem operation failed.
 
+## Cancellation and progress sidecars
+
+A render's `.cancel` marker is created using an **exclusive create-new**
+operation, never `fs::write` against an existing path. A repeated cancellation
+request can acknowledge an existing six-byte regular marker without truncating
+it. Pre-existing symlinks, directories and invalid-size entries produce an
+error instead of writing through or replacing them. The cooperative Python
+worker checks for the marker between segments and chunks, not during an
+uninterruptible model inference call.
+
+The Python worker writes `.progress.json` using a **randomized, exclusively
+created temporary sibling**, then atomically replaces the destination. The
+legacy predictable `.partial` path is never opened for writing, so a
+pre-existing symbolic link with that name cannot redirect a write into
+another file. On a temporary-name collision, a competitor's entry remains
+untouched. If replacement fails, the last progress JSON remains intact and
+only the temporary file created by that call is cleaned up. Counters are
+bounded to 0–256. Recovery readers continue to enforce bounded regular JSON.
+
+These measures protect against accidental collisions and ordinary local
+symlinks. They cannot protect against arbitrary malicious processes already
+allowed to mutate the entire app-owned jobs directory.
+
 ## First creation and retries
 
 1. A new job supplies a unique absolute `.json` journal destination.

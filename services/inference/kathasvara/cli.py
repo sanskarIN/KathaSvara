@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from pathlib import Path
 
 from .cache import CACHE_BUDGET_BYTES, inspect_cache, prune_cache
@@ -21,6 +22,33 @@ from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
 from .temp_cleanup import cleanup_partial_wavs
 from .wav_acceptance import inspect_wav_candidate
+
+
+def write_render_progress_file(path: Path, done: int, total: int) -> None:
+    """Replace progress metadata atomically without predictable temp filenames.
+
+    A fixed sibling named '.partial' could be a pre-existing symlink and be
+    truncated by a normal write. Exclusive random siblings never overwrite it.
+    """
+    if not path.is_absolute() or path.suffix != ".json":
+        raise ValueError("Progress file must be an absolute .json path.")
+    if (type(done) is not int or type(total) is not int or
+            not 0 <= done <= total <= 256):
+        raise ValueError("Invalid render progress counters.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.partial")
+    # A collision may belong to another process: only unlink a file which
+    # *this call* successfully created, not an existing competing entry.
+    created = False
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            created = True
+            json.dump({"done": done, "total": total}, stream, separators=(",", ":"))
+            stream.flush()
+        temporary.replace(path)
+    finally:
+        if created:
+            temporary.unlink(missing_ok=True)
 
 
 def handle(request: dict[str, object]) -> dict[str, object]:
@@ -187,10 +215,7 @@ def handle(request: dict[str, object]) -> dict[str, object]:
 
         def report(done: int, total: int) -> None:
             if progress_path is not None:
-                progress_path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = progress_path.with_name(progress_path.name + ".partial")
-                tmp.write_text(json.dumps({"done": done, "total": total}), encoding="utf-8")
-                tmp.replace(progress_path)
+                write_render_progress_file(progress_path, done, total)
 
         result = render_story(
             doc, Path(output), Path(cache), on_progress=report, is_cancelled=cancelled,
