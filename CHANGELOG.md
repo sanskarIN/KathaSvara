@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — post-v0.5.0 development and maintenance
+## v0.5.1 — experimental recovery and cache maintenance pre-release
+
+This section documents source changes prepared for the gated v0.5.1 developer pre-release. It does not certify natural Hindi speech, clean Windows operation or a complete installer. The GitHub release is published only after exact-commit gates pass.
 
 - Bound local segment-cache inventory to **20,000 directory entries** (including irrelevant files and symlinks); inspection and explicitly requested pruning now fail before any deletion if the directory exceeds the limit. Reject NaN/infinite, boolean, negative and implausible caller clocks so the ten-minute cache grace window cannot be bypassed. Add model-free regression tests and maintenance guidance. Source-only; published v0.5.0 pre-release unchanged.
 
