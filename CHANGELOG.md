@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Add 4000-character **production notes** for scenes, explicitly excluded from narration, with validation and unsaved-state tracking. Add a **confirmed Delete Scene** action that removes only the selected parsed scene, preserves the original script and other content, and falls back to a neighboring scene selection; cancellation leaves the story untouched. Cover controls and pure edit helpers with tests.
+
 - Support **Duplicate scene (fresh audio)** to copy reviewed Hindi dialogue, actor assignments and stage directions with new scene/line identities while explicitly clearing cached/generated audio metadata. Insert directly after its source with a distinguishable title. Enforce the 200-scene and 256-spoken-cue limits and reject ID conflicts. Add unit and React regressions without copying any model output.
 
 - Add in-scene ↑/↓ reordering controls for dialogue and stage directions without altering the original script, scene IDs, spoken Hindi text or actor assignments. Guard missing/duplicated segment identities, disable edge controls, preserve local data and reuse the existing editor's stale-WAV invalidation and unsaved-state tracking. Add unit and mocked-Tauri React tests. Source draft only; v0.5.2 publication and real Hindi/Windows manual acceptance remain separate. [Development notes](docs/releases/v0.5.3-development.md).
