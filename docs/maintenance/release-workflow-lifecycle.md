@@ -16,6 +16,8 @@ Once a version is published, modifying its workflow is **not** a reason to publi
 
 ## Procedure for a future preview release
 
+For the specifically prepared **v0.5.2 experimental developer candidate**, follow the [one-time v0.5.2 publication and verification checklist](../releases/v0.5.2-publication-checklist.md). It documents the exact commit, authenticated manual dispatch, mandatory Windows/Python/React gates, SHA-256 asset verification, honest prerelease disclosures and post-publication website update. Do not treat that checklist as evidence that publication already occurred.
+
 1. Implement features in a development branch, keep `main` protected, review the acceptance limitations and pass the Python/React/Rust and Windows candidate checks.
 2. Add a **new** version-specific publication workflow for the new version (rather than reusing or modifying a previous version), with exact main-commit verification, clean tests, checksum verification, refusal to overwrite an existing tag/release and minimal GitHub token permissions.
 3. Manually dispatch that workflow with its explicit full 40-character current `main` SHA, review the result and release asset integrity, then publish the exact version's experimental release.
