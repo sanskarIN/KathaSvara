@@ -50,9 +50,8 @@ def test_racing_other_worker_journal_is_never_overwritten(
         original_link(source, target)
 
     monkeypatch.setattr(render_journal.os, "link", competitor_creates_destination)
-    with pytest.raises(ValueError, match="already exists"):
-        with RenderJournal(destination, "example-story", 1):
-            pytest.fail("Concurrent journal creation was allowed")
+    with pytest.raises(ValueError, match="already exists"), RenderJournal(destination, "example-story", 1):
+        pytest.fail("Concurrent journal creation was allowed")
     assert destination.read_text(encoding="utf-8") == "other worker's journal"
     assert list(destination.parent.glob("*.partial.json")) == []
 
@@ -74,9 +73,8 @@ def test_symlink_swap_during_first_write_does_not_touch_target(
         original_link(source, target)
 
     monkeypatch.setattr(render_journal.os, "link", competitor_creates_alias)
-    with pytest.raises(ValueError, match="already exists"):
-        with RenderJournal(destination, "example-story", 1):
-            pytest.fail("Concurrent journal symlink was followed")
+    with pytest.raises(ValueError, match="already exists"), RenderJournal(destination, "example-story", 1):
+        pytest.fail("Concurrent journal symlink was followed")
     assert destination.is_symlink()
     assert outside.read_text(encoding="utf-8") == "KEEP"
     assert list(destination.parent.glob("*.partial.json")) == []
@@ -91,8 +89,7 @@ def test_initial_publication_never_falls_back_to_overwriting_on_link_error(
         raise PermissionError("simulated link restriction")
 
     monkeypatch.setattr(render_journal.os, "link", unsupported_hardlinks)
-    with pytest.raises(PermissionError, match="link restriction"):
-        with RenderJournal(destination, "example-story", 1):
-            pytest.fail("Journal initialized without exclusive publication")
+    with pytest.raises(PermissionError, match="link restriction"), RenderJournal(destination, "example-story", 1):
+        pytest.fail("Journal initialized without exclusive publication")
     assert not destination.exists()
     assert list(destination.parent.glob("*.partial.json")) == []
