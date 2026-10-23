@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, duplicateScene, legacyToStoryV2,
-  makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech,
+  makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, removeScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech, updateSceneNotes,
   type StoryV2,
 } from "./story_v2";
 
@@ -238,5 +238,45 @@ describe("v0.5.3 safe scene duplication", () => {
     }));
     expect(() => duplicateScene(doc, "s1")).toThrow("exceed 256");
     expect(doc.scenes).toHaveLength(2);
+  });
+});
+
+
+describe("v0.5.3 nonspoken scene production notes and confirmed deletion", () => {
+  it("updates scene notes without changing spoken dialogue, actor IDs, or original Hindi text", () => {
+    const doc = fixture();
+    const changed = updateSceneNotes(doc, "s1", "धीरे बोलें।\nअभी संगीत नहीं।");
+    expect(changed.scenes[0].notes).toBe("धीरे बोलें।\nअभी संगीत नहीं।");
+    expect(changed.scenes[0].segments).toBe(doc.scenes[0].segments);
+    expect(changed.scenes[0].segments[0].spoken_text).toBe("नमस्कार");
+    expect(changed.scenes[1]).toBe(doc.scenes[1]);
+    expect(changed.text).toBe(doc.text);
+    expect(doc.scenes[0].notes).toBe("");
+    expect(updateSceneNotes(changed, "s1", changed.scenes[0].notes)).toBe(changed);
+  });
+  it("rejects invalid notes or nonexistent/duplicated scene identifiers", () => {
+    const doc = fixture();
+    expect(() => updateSceneNotes(doc, "s1", "अ".repeat(4001))).toThrow("4000");
+    expect(() => updateSceneNotes(doc, "s1", "private\u0000 note")).toThrow("control");
+    expect(() => updateSceneNotes(doc, "missing", "note")).toThrow("exactly once");
+    const duplicated = { ...doc, scenes: [...doc.scenes, { ...doc.scenes[0] }] };
+    expect(() => updateSceneNotes(duplicated, "s1", "note")).toThrow("exactly once");
+  });
+  it("removes only the requested scene and retains unparsed original script and other scenes", () => {
+    const doc = fixture();
+    const changed = removeScene(doc, "s1");
+    expect(changed.scenes.map(scene => scene.id)).toEqual(["s2"]);
+    expect(changed.scenes[0]).toBe(doc.scenes[1]);
+    expect(changed.text).toBe(doc.text);
+    expect(changed.characters).toBe(doc.characters);
+    expect(changed.pronunciation_glossary).toBe(doc.pronunciation_glossary);
+    expect(doc.scenes.map(scene => scene.id)).toEqual(["s1", "s2"]);
+    expect(removeScene(changed, "s2").scenes).toHaveLength(0);
+  });
+  it("refuses deleting a nonexistent or ambiguously duplicated scene", () => {
+    const doc = fixture();
+    expect(() => removeScene(doc, "missing")).toThrow("exactly once");
+    const duplicate = { ...doc, scenes: [...doc.scenes, { ...doc.scenes[0] }] };
+    expect(() => removeScene(duplicate, "s1")).toThrow("exactly once");
   });
 });
