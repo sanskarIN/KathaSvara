@@ -37,13 +37,18 @@ def write_render_progress_file(path: Path, done: int, total: int) -> None:
         raise ValueError("Invalid render progress counters.")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.partial")
+    # A collision may belong to another process: only unlink a file which
+    # *this call* successfully created, not an existing competing entry.
+    created = False
     try:
         with temporary.open("x", encoding="utf-8") as stream:
+            created = True
             json.dump({"done": done, "total": total}, stream, separators=(",", ":"))
             stream.flush()
         temporary.replace(path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if created:
+            temporary.unlink(missing_ok=True)
 
 
 def handle(request: dict[str, object]) -> dict[str, object]:
