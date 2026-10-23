@@ -183,8 +183,15 @@ jobs:
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_SHA" != "" 
+          test "$GITHUB_SHA" != ""
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          # Builds may take time. Do not publish an obsolete head even if it
+          # matched main when the prepare job originally started.
+          current_main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test "$current_main_sha" = "$RELEASE_SHA" || {
+            echo "::error::Main advanced while the candidate was tested; rerun at the new SHA"
+            exit 1
+          }
           test -s release-assets/KathaSvara-v0.5.2-dev-win64.exe
           test -s release-assets/README.txt
           test -s release-assets/SHA256SUMS.txt
