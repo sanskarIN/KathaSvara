@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, duplicateScene, legacyToStoryV2,
-  makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, removeScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech, updateSceneNotes,
+  makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, splitSceneAtSegment, removeScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech, updateSceneNotes,
   type StoryV2,
 } from "./story_v2";
 
@@ -241,6 +241,84 @@ describe("v0.5.3 in-scene narration ordering", () => {
   });
 });
 
+
+
+describe("v0.5.3 non-destructive split-scene authoring", () => {
+  function withThreeLines(): StoryV2 {
+    const doc = fixture();
+    const original = doc.scenes[0].segments[0];
+    doc.scenes[0].notes = "निर्देशक की निजी टिप्पणी";
+    doc.scenes[0].segments.push(
+      { ...original, id: "stage", kind: "direction", speaker_id: null,
+        original_text: "[द्वार खुलता है]", spoken_text: "",
+        audio_ref: null, duration_seconds: null },
+      { ...original, id: "third", original_text: "फिर मिलेंगे",
+        spoken_text: "फिर मिलेंगे", audio_ref: "other-cached-audio" },
+    );
+    return doc;
+  }
+  it("splits a story at a stage direction, preserving all source and audio metadata", () => {
+    const original = withThreeLines();
+    const split = splitSceneAtSegment(original, "s1", "stage", "new-scene");
+    expect(split.scenes.map(scene => scene.id)).toEqual(["s1", "new-scene", "s2"]);
+    expect(split.scenes.map(scene => scene.title)).toEqual(["दरबार", "दरबार (part 2)", "रास्ता"]);
+    expect(split.scenes[0].segments.map(segment => segment.id)).toEqual(["seg1"]);
+    expect(split.scenes[1].segments.map(segment => segment.id)).toEqual(["stage", "third"]);
+    expect(split.scenes[0].segments[0]).toBe(original.scenes[0].segments[0]);
+    expect(split.scenes[1].segments[1]).toBe(original.scenes[0].segments[2]);
+    expect(split.scenes[1].segments[1].audio_ref).toBe("other-cached-audio");
+    expect(split.scenes[0].notes).toBe("निर्देशक की निजी टिप्पणी");
+    expect(split.scenes[1].notes).toBe("");
+    expect(split.scenes[2]).toBe(original.scenes[1]);
+    expect(split.text).toBe(original.text);
+    expect(split.characters).toBe(original.characters);
+    expect(split.pronunciation_glossary).toBe(original.pronunciation_glossary);
+    expect(original.scenes[0].segments.map(segment => segment.id)).toEqual(["seg1", "stage", "third"]);
+    expect(split.scenes.flatMap(scene => scene.segments).map(segment => segment.id))
+      .toEqual(original.scenes.flatMap(scene => scene.segments).map(segment => segment.id));
+  });
+  it("refuses first-line splits and absent, duplicated, or ambiguous source identities", () => {
+    const doc = withThreeLines();
+    expect(() => splitSceneAtSegment(doc, "s1", "seg1", "new-scene")).toThrow("at least one");
+    expect(() => splitSceneAtSegment(doc, "s1", "missing", "new-scene")).toThrow("exactly once");
+    expect(() => splitSceneAtSegment(doc, "missing", "stage", "new-scene")).toThrow("exactly once");
+    const ambiguous = { ...doc, scenes: [...doc.scenes, {
+      ...doc.scenes[0], segments: [],
+    }] };
+    expect(() => splitSceneAtSegment(ambiguous, "s1", "stage", "new-scene"))
+      .toThrow("exactly once");
+    const duplicatedLine = { ...doc, scenes: [...doc.scenes, {
+      ...doc.scenes[1], segments: [{ ...doc.scenes[0].segments[1] }],
+    }] };
+    expect(() => splitSceneAtSegment(duplicatedLine, "s1", "stage", "new-scene"))
+      .toThrow("exactly once");
+  });
+  it("rejects duplicate, malformed or overlong generated scene IDs", () => {
+    const doc = withThreeLines();
+    for (const id of ["s1", "seg1", doc.id, "raja", "", " bad ", "x".repeat(81), "bad\u0000id"]) {
+      expect(() => splitSceneAtSegment(doc, "s1", "stage", id)).toThrow("unique and valid");
+    }
+    expect(doc.scenes).toHaveLength(2);
+  });
+  it("respects the native scene cap and creates unique bounded unicode titles", () => {
+    const doc = withThreeLines();
+    doc.scenes[0].title = "😀".repeat(60);
+    const first = splitSceneAtSegment(doc, "s1", "stage", "new-scene");
+    expect(first.scenes[1].title).toMatch(/ \(part 2\)$/);
+    expect(first.scenes[1].title.length).toBeLessThanOrEqual(120);
+    const existingTitle = { ...doc, scenes: [...doc.scenes, {
+      id: "existing", title: first.scenes[1].title, notes: "", segments: [],
+    }] };
+    const next = splitSceneAtSegment(existingTitle, "s1", "stage", "unique-scene");
+    expect(next.scenes[1].title).toMatch(/ \(part 3\)$/);
+    expect(next.scenes[1].title.length).toBeLessThanOrEqual(120);
+    const full = { ...doc, scenes: Array.from({ length: 200 }, (_, i) => ({
+      id: "scene-" + i, title: "दृश्य " + i, notes: "",
+      segments: i === 0 ? doc.scenes[0].segments : [],
+    })) };
+    expect(() => splitSceneAtSegment(full, "scene-0", "stage", "new")).toThrow("Maximum 200");
+  });
+});
 
 describe("v0.5.3 safe scene duplication", () => {
   function makeIds(...ids: string[]) {
