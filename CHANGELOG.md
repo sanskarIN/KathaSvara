@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Introduce a **local searchable scene outline** in the desktop: find Hindi scene titles, original/reviewed dialogue, source labels, stage directions or production notes; filter scenes with unresolved speech assignments; display counts of spoken lines, directions, unknown speakers and notes. Navigation filtering does not edit/synthesize/transmit project content, and selecting a match opens the full scene. Reset private search/filter state when loading another story. Unit and mocked React tests cover normalized Unicode searches, speaker-resolution updates, empty results, clearing filters, story switching and unchanged story data.
+
 - Extend model-free **native Python round-trip tests** to cover merged Hindi scenes with copied production-note context, preserved dialogue IDs and review/cache metadata, source text equality and render preflight counts; assert 4,000-character notes / 2,000-line scene limits at deserialization. This proves schema interoperability in tests, not real device or voice QA.
 
 - Prevent unsaveable editor documents by validating new scene/character IDs before insertion (nonempty, 80-character cap, no controls/outer spaces) and rejecting cross-scene line moves into a full 2,000-line scene. Test both success cases and rejected edits with the original source untouched.
