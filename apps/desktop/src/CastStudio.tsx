@@ -664,7 +664,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="cast-add">
           <input aria-label="New character name" placeholder="नया पात्र — e.g. राजा भोज" maxLength={120} value={newName}
             onChange={event => setNewName(event.target.value)} />
-          <button className="secondary-button" onClick={addNewCharacter} disabled={busy || !newName.trim()}>+ Add</button>
+          <button className="secondary-button" onClick={addNewCharacter} disabled={busy || rendering || document.characters.length >= 100 || !newName.trim()}>+ Add</button>
         </div>
         <ul className="cast-list">
           {document.characters.map(char => (
@@ -704,7 +704,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               </div>
               <p className="helper">Hindi · Chatterbox Multilingual · pause {char.voice.pause_ms} ms · no distinct speaker verified</p>
               <div className="cast-actions">
-                <button className="quiet-button" onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
+                <button className="quiet-button" disabled={busy || rendering || document.characters.length >= 100} onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
                 {char.id !== "narrator" && <button className="quiet-button" onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
               </div>
             </li>
