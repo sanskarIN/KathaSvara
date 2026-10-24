@@ -105,9 +105,13 @@ export function addCharacter(project: StoryV2, name: string, id?: string): Story
 export function reassignAndRemoveCharacter(project: StoryV2, id: string, replacementId = "narrator"): StoryV2 {
   if (id === "narrator") throw new Error("The narrator cannot be removed.");
   if (id === replacementId) throw new Error("Cannot reassign a character to itself.");
-  if (!project.characters.some(char => char.id === replacementId)) throw new Error("Replacement character is missing.");
+  if (project.characters.filter(char => char.id === replacementId).length !== 1) {
+    throw new Error("Replacement character must exist exactly once.");
+  }
+  if (project.characters.filter(char => char.id === id).length !== 1) {
+    throw new Error("Character to remove must exist exactly once.");
+  }
   const characters = project.characters.filter(char => char.id !== id);
-  if (characters.length === project.characters.length) throw new Error("Character not found.");
   const scenes = project.scenes.map(scene => ({
     ...scene,
     segments: scene.segments.map(seg => seg.speaker_id === id
@@ -118,26 +122,30 @@ export function reassignAndRemoveCharacter(project: StoryV2, id: string, replace
 }
 
 export function assignSegment(project: StoryV2, segmentId: string, speakerId: string): StoryV2 {
-  if (!project.characters.some(item => item.id === speakerId)) throw new Error("Unknown speaker.");
-  let updated = false;
+  if (project.characters.filter(item => item.id === speakerId).length !== 1) {
+    throw new Error("Speaker must exist exactly once.");
+  }
+  const matches = project.scenes.flatMap(scene => scene.segments)
+    .filter(segment => segment.id === segmentId);
+  if (matches.length !== 1 || matches[0].kind !== "speech") {
+    throw new Error("Speech segment must exist exactly once.");
+  }
+  if (matches[0].speaker_id === speakerId && matches[0].source_label === null) return project;
   const scenes = project.scenes.map(scene => ({
     ...scene,
-    segments: scene.segments.map(segment => {
-      if (segment.id !== segmentId || segment.kind !== "speech") return segment;
-      updated = true;
-      return {
-        ...segment, speaker_id: speakerId, source_label: null,
-        status: "pending", audio_ref: null, duration_seconds: null,
-      };
+    segments: scene.segments.map(segment => segment.id !== segmentId ? segment : {
+      ...segment, speaker_id: speakerId, source_label: null,
+      status: "pending", audio_ref: null, duration_seconds: null,
     }),
   }));
-  if (!updated) throw new Error("Speech segment was not found.");
   return { ...project, scenes };
 }
 
 export function moveScene(project: StoryV2, sceneId: string, offset: -1 | 1): StoryV2 {
+  const matching = project.scenes.filter(scene => scene.id === sceneId);
+  if (matching.length !== 1) throw new Error("Scene to reorder must exist exactly once.");
   const index = project.scenes.findIndex(scene => scene.id === sceneId);
-  if (index < 0 || index + offset < 0 || index + offset >= project.scenes.length) return project;
+  if (index + offset < 0 || index + offset >= project.scenes.length) return project;
   const scenes = [...project.scenes];
   [scenes[index], scenes[index + offset]] = [scenes[index + offset], scenes[index]];
   return { ...project, scenes };
@@ -145,8 +153,12 @@ export function moveScene(project: StoryV2, sceneId: string, offset: -1 | 1): St
 
 export function renameScene(project: StoryV2, sceneId: string, title: string): StoryV2 {
   if (!title.trim() || title.length > 120) throw new Error("Scene title must contain 1–120 characters.");
+  const matches = project.scenes.filter(scene => scene.id === sceneId);
+  if (matches.length !== 1) throw new Error("Scene to rename must exist exactly once.");
+  const clean = title.trim();
+  if (matches[0].title === clean) return project;
   return { ...project, scenes: project.scenes.map(scene =>
-    scene.id === sceneId ? { ...scene, title: title.trim() } : scene) };
+    scene.id === sceneId ? { ...scene, title: clean } : scene) };
 }
 
 export function addScene(project: StoryV2, title: string, id: string = crypto.randomUUID()): StoryV2 {
@@ -316,20 +328,24 @@ export function moveSegment(project: StoryV2, segmentId: string, destinationScen
   const matching = project.scenes.flatMap(scene => scene.segments)
     .filter(segment => segment.id === segmentId);
   if (matching.length !== 1) throw new Error("Dialogue segment must be unique.");
+  const originalScenes = project.scenes.filter(scene =>
+    scene.segments.some(segment => segment.id === segmentId));
+  if (originalScenes.length !== 1 ||
+      project.scenes.filter(scene => scene.id === originalScenes[0].id).length !== 1) {
+    throw new Error("Source scene identifier must be unique.");
+  }
+  if (originalScenes[0].id === destinationSceneId) return project;
   const segment = matching[0];
-  const scenes = project.scenes.map(scene => ({
-    ...scene,
-    segments: scene.id === destinationSceneId
-      ? [...scene.segments.filter(entry => entry.id !== segmentId), segment]
-      : scene.segments.filter(entry => entry.id !== segmentId),
-  }));
+  const scenes = project.scenes.map(scene =>
+    scene.id === originalScenes[0].id
+      ? { ...scene, segments: scene.segments.filter(entry => entry.id !== segmentId) }
+      : scene.id === destinationSceneId
+        ? { ...scene, segments: [...scene.segments, segment] }
+        : scene,
+  );
   return { ...project, scenes };
 }
 
-/** Reorder exactly one spoken line or direction inside its existing scene.
- * This edits the narrative order only. Source text, speaker assignments and
- * per-segment cached metadata stay attached to their original segment IDs.
- */
 export function moveSegmentWithinScene(
   project: StoryV2, segmentId: string, offset: -1 | 1,
 ): StoryV2 {
@@ -390,11 +406,14 @@ export function duplicateCharacter(project: StoryV2, id: string, newId: string =
 export function renameCharacter(project: StoryV2, id: string, name: string): StoryV2 {
   if (id === "narrator") throw new Error("The narrator's identity is fixed.");
   if (!name.trim() || name.length > 120) throw new Error("Character name must contain 1–120 characters.");
+  const matches = project.characters.filter(item => item.id === id);
+  if (matches.length !== 1) throw new Error("Character to rename must exist exactly once.");
   const clean = name.trim();
   if (project.characters.some(item => item.id !== id &&
       item.name.toLocaleLowerCase() === clean.toLocaleLowerCase())) {
     throw new Error("Character names must be unique.");
   }
+  if (matches[0].name === clean) return project;
   return { ...project, characters: project.characters.map(item =>
     item.id === id ? { ...item, name: clean } : item) };
 }
@@ -405,22 +424,23 @@ export function unresolvedSpeech(project: StoryV2): SegmentV2[] {
 }
 
 /** Changes only the reviewed speech, never the untouched source script. */
+/** Changes only the reviewed speech, never the untouched source script. */
 export function reviewSpokenText(project: StoryV2, segmentId: string, spokenText: string): StoryV2 {
   if (!spokenText.trim() || spokenText.length > 100_000 || spokenText.includes("\u0000")) {
     throw new Error("Reviewed speech must contain 1–100000 valid characters.");
   }
-  let found = false;
+  const matches = project.scenes.flatMap(scene => scene.segments)
+    .filter(segment => segment.id === segmentId);
+  if (matches.length !== 1 || matches[0].kind !== "speech") {
+    throw new Error("Spoken segment must exist exactly once.");
+  }
+  if (matches[0].spoken_text === spokenText) return project;
   const scenes = project.scenes.map(scene => ({
     ...scene,
-    segments: scene.segments.map(seg => {
-      if (seg.id !== segmentId || seg.kind !== "speech") return seg;
-      found = true;
-      return seg.spoken_text === spokenText ? seg : {
-        ...seg, spoken_text: spokenText, status: "stale", audio_ref: null, duration_seconds: null,
-      };
+    segments: scene.segments.map(seg => seg.id !== segmentId ? seg : {
+      ...seg, spoken_text: spokenText, status: "stale", audio_ref: null, duration_seconds: null,
     }),
   }));
-  if (!found) throw new Error("Spoken segment was not found.");
   return { ...project, scenes };
 }
 
