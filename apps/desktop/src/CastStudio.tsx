@@ -63,6 +63,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newSceneTitle, setNewSceneTitle] = useState("");
   const [sceneSearch, setSceneSearch] = useState("");
   const [unresolvedScenesOnly, setUnresolvedScenesOnly] = useState(false);
+  useEffect(() => {
+    // A search belongs to the current story; do not hide a newly loaded story
+    // behind the previous author's private dialogue terms or note filters.
+    setSceneSearch("");
+    setUnresolvedScenesOnly(false);
+  }, [document.id]);
   const [busy, setBusy] = useState(false);
   // Only the current parse/save/load operation can own the busy flag.
   const editorOperationEpoch = useRef(0);
