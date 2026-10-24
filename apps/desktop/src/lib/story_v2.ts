@@ -93,6 +93,9 @@ export function legacyToStoryV2(project: StoryProject, id: string = crypto.rando
 export function addCharacter(project: StoryV2, name: string, id?: string): StoryV2 {
   if (project.characters.length >= 100) throw new Error("Maximum 100 characters.");
   const character = makeCharacter(name, id);
+  if (project.characters.some(item => item.id === character.id)) {
+    throw new Error("Character ID must be unique.");
+  }
   if (project.characters.some(item => item.name.trim().toLocaleLowerCase() === character.name.toLocaleLowerCase())) {
     throw new Error("A character with this name already exists.");
   }
@@ -276,18 +279,29 @@ export function moveSegmentWithinScene(
   };
 }
 
+/** Copy editable voice settings, not a verified voice identity or conditioning. */
 export function duplicateCharacter(project: StoryV2, id: string, newId: string = crypto.randomUUID()): StoryV2 {
-  const source = project.characters.find(item => item.id === id);
-  if (!source) throw new Error("Original character not found.");
-  let suffix = 2;
-  let name = `${source.name} copy`;
-  while (project.characters.some(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
-    name = `${source.name} copy ${suffix++}`;
+  if (project.characters.length >= 100) throw new Error("Maximum 100 characters.");
+  const sources = project.characters.filter(item => item.id === id);
+  if (sources.length !== 1) throw new Error("Original character must exist exactly once.");
+  if (!newId || newId.length > 80 || newId.trim() !== newId ||
+      /[\u0000-\u001f\u007f]/u.test(newId) ||
+      project.characters.some(item => item.id === newId)) {
+    throw new Error("New character ID must be unique and valid.");
   }
-  const clone: CharacterV2 = {
-    ...source, id: newId, name, voice: { ...source.voice },
-  };
-  return { ...project, characters: [...project.characters, clone] };
+  const source = sources[0];
+  const usedNames = new Set(project.characters.map(item => item.name.toLocaleLowerCase()));
+  for (let suffix = 1; suffix <= 100; suffix++) {
+    const tail = suffix === 1 ? " copy" : ` copy ${suffix}`;
+    // Avoid splitting surrogate pairs when truncating a long Unicode name.
+    const name = Array.from(source.name).slice(0, 120 - tail.length).join("").trimEnd() + tail;
+    if (usedNames.has(name.toLocaleLowerCase())) continue;
+    const clone: CharacterV2 = {
+      ...source, id: newId, name, voice: { ...source.voice },
+    };
+    return { ...project, characters: [...project.characters, clone] };
+  }
+  throw new Error("No available unique copy name.");
 }
 
 export function renameCharacter(project: StoryV2, id: string, name: string): StoryV2 {
