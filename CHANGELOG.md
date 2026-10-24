@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Prevent unsaveable editor documents by validating new scene/character IDs before insertion (nonempty, 80-character cap, no controls/outer spaces) and rejecting cross-scene line moves into a full 2,000-line scene. Test both success cases and rejected edits with the original source untouched.
+
 - Add **Merge with next scene (keep dialogue)** as a confirmed, non-destructive structural edit. Joining adjacent scenes retains every existing line in the same order with its speaker, reviewed text, status and audio metadata; the successor scene's title and production notes are kept in nonspoken production notes. Refuse ambiguous IDs, >2000 combined segments or >4000 combined note characters. The original script remains unchanged and explicit Save is required. Add unit and mocked React desktop tests.
 
 
