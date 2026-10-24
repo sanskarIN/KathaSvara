@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Add **Split scene here** before any non-first spoken line or stage direction. Keep original Hindi source text, pronunciation glossary, actor assignments, reviewed lines, existing per-line audio metadata and overall order unchanged. Place the new scene immediately after the source, give it a unique bounded `(part 2)` title and empty editorial notes, and make Save explicit. Reject duplicate/invalid scene identities, ambiguous line IDs and 200-scene overflow. Cover pure TypeScript and mocked desktop React flows (without speech synthesis).
+
 - Fail closed on ambiguous scene IDs during cross-scene line moves and in-scene reordering, and on malformed generated scene/line IDs during duplication. Keep long Unicode character names within safe UTF-16 input bounds without splitting emoji surrogate pairs; add regression tests. Draft-only, no changes to v0.5.2 release gate.
 
 - Harden **Duplicate voice profile** and character creation against invalid or conflicting IDs, accidental over-capacity casts (100 characters), and overlong Hindi copy names. The desktop disables add/duplicate controls at the native validation limit or during renders. Copied settings remain a configuration profile, **not proof of a distinct generated speaker**. Include model-free TypeScript and React boundary regressions.
