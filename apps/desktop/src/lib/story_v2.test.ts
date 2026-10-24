@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addCharacter, addScene, assignSegment, defaultVoice, duplicateCharacter, duplicateScene, legacyToStoryV2,
-  makeCharacter, moveScene, moveSegment, moveSegmentWithinScene, splitSceneAtSegment, removeScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech, updateSceneNotes,
+  makeCharacter, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, splitSceneAtSegment, removeScene, reviewSpokenText, setGlossary, reassignAndRemoveCharacter, renameCharacter, renameScene, unresolvedSpeech, updateSceneNotes,
   type StoryV2,
 } from "./story_v2";
 
@@ -411,6 +411,91 @@ describe("v0.5.3 non-destructive split-scene authoring", () => {
       segments: i === 0 ? doc.scenes[0].segments : [],
     })) };
     expect(() => splitSceneAtSegment(full, "scene-0", "stage", "new")).toThrow("Maximum 200");
+  });
+});
+
+describe("v0.5.3 safe adjacent-scene merging", () => {
+  function mergeFixture(): StoryV2 {
+    const doc = fixture();
+    const dialogue = doc.scenes[0].segments[0];
+    doc.scenes[0].notes = "निर्देशक: पहले दृश्य पर ध्यान दें";
+    doc.scenes[1].notes = "दूसरे दृश्य में हल्का संगीत";
+    doc.scenes[1].segments = [
+      { ...dialogue, id: "direction2", kind: "direction",
+        original_text: "[हवा चलती है]", spoken_text: "", speaker_id: null,
+        status: "pending", audio_ref: null, duration_seconds: null },
+      { ...dialogue, id: "spoken2", spoken_text: "दूसरे दृश्य का संवाद",
+        audio_ref: "retained-cache", duration_seconds: 2.3 },
+    ];
+    return doc;
+  }
+  it("retains all dialogue line objects, cached voice metadata, title and production notes", () => {
+    const doc = mergeFixture();
+    const combined = mergeSceneWithNext(doc, "s1");
+    expect(combined.scenes).toHaveLength(1);
+    expect(combined.scenes[0].id).toBe("s1");
+    expect(combined.scenes[0].title).toBe("दरबार");
+    expect(combined.scenes[0].segments.map(line => line.id))
+      .toEqual(["seg1", "direction2", "spoken2"]);
+    expect(combined.scenes[0].segments[0]).toBe(doc.scenes[0].segments[0]);
+    expect(combined.scenes[0].segments[1]).toBe(doc.scenes[1].segments[0]);
+    expect(combined.scenes[0].segments[2]).toBe(doc.scenes[1].segments[1]);
+    expect(combined.scenes[0].segments[2].audio_ref).toBe("retained-cache");
+    expect(combined.scenes[0].segments[2].duration_seconds).toBe(2.3);
+    expect(combined.scenes[0].notes).toBe(
+      "निर्देशक: पहले दृश्य पर ध्यान दें\\n\\nMerged scene: रास्ता\\nदूसरे दृश्य में हल्का संगीत"
+    );
+    expect(combined.text).toBe(doc.text);
+    expect(combined.characters).toBe(doc.characters);
+    expect(combined.pronunciation_glossary).toBe(doc.pronunciation_glossary);
+    expect(doc.scenes[0].segments.map(line => line.id)).toEqual(["seg1"]);
+    expect(doc.scenes[1].segments.map(line => line.id)).toEqual(["direction2", "spoken2"]);
+  });
+  it("preserves an empty second scene title in nonspoken notes", () => {
+    const doc = fixture();
+    const combined = mergeSceneWithNext(doc, "s1");
+    expect(combined.scenes[0].notes).toBe("Merged scene: रास्ता");
+    expect(combined.scenes[0].segments).toEqual(doc.scenes[0].segments);
+    expect(doc.scenes[1].title).toBe("रास्ता");
+  });
+  it("refuses a missing, repeated or final scene source and duplicate next scene ID", () => {
+    const doc = mergeFixture();
+    expect(() => mergeSceneWithNext(doc, "s2")).toThrow("No next scene");
+    expect(() => mergeSceneWithNext(doc, "absent")).toThrow("exactly once");
+    const repeated = { ...doc, scenes: [...doc.scenes, { ...doc.scenes[0] }] };
+    expect(() => mergeSceneWithNext(repeated, "s1")).toThrow("exactly once");
+    const repeatedNext = { ...doc, scenes: [...doc.scenes, { ...doc.scenes[1] }] };
+    expect(() => mergeSceneWithNext(repeatedNext, "s1")).toThrow("Next scene identity");
+    expect(doc.scenes).toHaveLength(2);
+  });
+  it("fails closed on duplicate lines anywhere in the original story", () => {
+    const doc = mergeFixture();
+    doc.scenes[1].segments[1].id = "seg1";
+    expect(() => mergeSceneWithNext(doc, "s1")).toThrow("Line identities");
+  });
+  it("honors the native 2000-segment cap and rejects note overflow", () => {
+    const doc = mergeFixture();
+    const repeated = doc.scenes[0].segments[0];
+    doc.scenes[0].segments = Array.from({ length: 2000 }, (_, i) => ({
+      ...repeated, id: "first-" + i,
+    }));
+    expect(() => mergeSceneWithNext(doc, "s1")).toThrow("more than 2000");
+    expect(doc.scenes[0].segments).toHaveLength(2000);
+    const notesDoc = mergeFixture();
+    notesDoc.scenes[0].notes = "अ".repeat(4000);
+    expect(() => mergeSceneWithNext(notesDoc, "s1")).toThrow("4000-character");
+    expect(notesDoc.scenes[0].notes.length).toBe(4000);
+  });
+  it("joins a split story without changing narration IDs or spoken text", () => {
+    const doc = mergeFixture();
+    const before = doc.scenes.flatMap(scene => scene.segments).map(line => ({
+      id: line.id, original: line.original_text, reviewed: line.spoken_text, speaker: line.speaker_id,
+    }));
+    const joined = mergeSceneWithNext(doc, "s1");
+    expect(joined.scenes.flatMap(scene => scene.segments).map(line => ({
+      id: line.id, original: line.original_text, reviewed: line.spoken_text, speaker: line.speaker_id,
+    }))).toEqual(before);
+    expect(joined.scenes[0].segments.every((line, i) => line === doc.scenes.flatMap(s => s.segments)[i])).toBe(true);
   });
 });
 
