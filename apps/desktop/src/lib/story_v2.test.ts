@@ -414,6 +414,32 @@ describe("v0.5.3 non-destructive split-scene authoring", () => {
   });
 });
 
+describe("v0.5.3 native persistence limits for new identities and line moves", () => {
+  it("rejects unsafe IDs before adding a scene or character", () => {
+    const doc = fixture();
+    for (const id of ["", " ", " bad ", "x".repeat(81), "bad\u0000id"]) {
+      expect(() => makeCharacter("नया पात्र", id)).toThrow("identifier");
+      expect(() => addCharacter(doc, "नया पात्र", id)).toThrow("identifier");
+      expect(() => addScene(doc, "नया दृश्य", id)).toThrow("identifier");
+    }
+    expect(addScene(doc, "नया दृश्य", "safe-scene").scenes.at(-1)?.id).toBe("safe-scene");
+    expect(addCharacter(doc, "नया पात्र", "safe-cast").characters.at(-1)?.id).toBe("safe-cast");
+    expect(doc.scenes).toHaveLength(2);
+    expect(doc.characters).toHaveLength(2);
+  });
+  it("refuses moves that would exceed the 2000-line scene limit", () => {
+    const doc = fixture();
+    const original = doc.scenes[0].segments[0];
+    doc.scenes[1].segments = Array.from({ length: 2000 }, (_, i) => ({
+      ...original, id: "already-" + i,
+    }));
+    expect(() => moveSegment(doc, "seg1", "s2")).toThrow("more than 2000");
+    expect(doc.scenes[0].segments.map(line => line.id)).toEqual(["seg1"]);
+    expect(doc.scenes[1].segments).toHaveLength(2000);
+    expect(moveSegment(doc, "seg1", "s1")).toBe(doc);
+  });
+});
+
 describe("v0.5.3 safe adjacent-scene merging", () => {
   function mergeFixture(): StoryV2 {
     const doc = fixture();
