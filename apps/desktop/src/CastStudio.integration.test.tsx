@@ -833,6 +833,48 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(onMessage).not.toHaveBeenCalled();
   });
 
+  it("disables boundary scene-order buttons instead of invalidating the current review", () => {
+    const doc = story();
+    doc.scenes.push({ id: "second-scene", title: "दूसरा दृश्य", notes: "", segments: [] });
+    const { onChange } = mount(doc);
+    const up = screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement;
+    const down = screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement;
+    expect(up.disabled).toBe(true);
+    expect(down.disabled).toBe(false);
+    fireEvent.click(up);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "दूसरा दृश्य" }));
+    expect((screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+    expect((screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "↓ Move down" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("blocks actor, scene and line mutation controls during a pending script parse", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "parse_dialogue") return new Promise(() => {});
+      return Promise.reject(new Error("Unexpected command: " + command));
+    });
+    const doc = story();
+    doc.characters.push({ id: "friend", name: "मित्र", voice: defaultVoice(), description: "" });
+    doc.scenes[0].segments.push({ ...doc.scenes[0].segments[0], id: "line-two" });
+    const { onChange } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Parse labeled Hindi script" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Processing…" })).toBeTruthy());
+    expect((screen.getByRole("textbox", { name: "Scene production notes (not spoken)" }) as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole("textbox", { name: "Scene title" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Speaker for नमस्कार।" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Move line line-one" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Delete and reassign to narrator" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Split scene before line line-two" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("reorders scene dialogue and stage directions without regenerating audio or editing the original script", () => {
     const doc = story();
     const speech = doc.scenes[0].segments[0];
