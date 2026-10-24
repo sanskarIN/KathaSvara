@@ -785,6 +785,54 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
   });
 
 
+  it("splits the current Hindi scene before a later line and preserves the complete narration", () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "550e8400-e29b-41d4-a716-446655440003" });
+    const doc = story();
+    const first = doc.scenes[0].segments[0];
+    doc.scenes[0].notes = "दृश्य निर्देश, बोलना नहीं";
+    doc.scenes[0].segments.push(
+      { ...first, id: "stage-one", kind: "direction", speaker_id: null,
+        original_text: "[घंटी बजती है]", spoken_text: "", audio_ref: null,
+        duration_seconds: null },
+      { ...first, id: "line-two", original_text: "दूसरी पंक्ति।",
+        spoken_text: "दूसरी पंक्ति।", audio_ref: "previous-audio" },
+    );
+    const { rerender, onChange, onMessage } = mount(doc);
+    expect(screen.queryByRole("button", { name: "Split scene before line line-one" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Split scene before line stage-one" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const update = onChange.mock.calls[0][0] as (old: StoryV2) => StoryV2;
+    const next = update(doc);
+    expect(next.scenes.map(scene => scene.title))
+      .toEqual(["प्रथम दृश्य", "प्रथम दृश्य (part 2)"]);
+    expect(next.scenes.map(scene => scene.segments.map(segment => segment.id)))
+      .toEqual([["line-one"], ["stage-one", "line-two"]]);
+    expect(next.scenes[1].segments[1]).toBe(doc.scenes[0].segments[2]);
+    expect(next.scenes[1].notes).toBe("");
+    expect(next.scenes[0].notes).toBe("दृश्य निर्देश, बोलना नहीं");
+    expect(next.text).toBe(doc.text);
+    expect(next.characters).toBe(doc.characters);
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("Save the story"));
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+    rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
+    expect(screen.getByRole("textbox", { name: "Scene production notes (not spoken)" }))
+      .toHaveProperty("value", "");
+  });
+  it("blocks scene splitting when 200 scenes are already present", () => {
+    const doc = story();
+    const first = doc.scenes[0].segments[0];
+    doc.scenes = Array.from({ length: 200 }, (_, i) => ({
+      id: "scene-" + i, title: "दृश्य " + i, notes: "",
+      segments: i === 0 ? [first, { ...first, id: "second-line" }] : [],
+    }));
+    const { onChange, onMessage } = mount(doc);
+    const split = screen.getByRole("button", { name: "Split scene before line second-line" });
+    expect((split as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
   it("reorders scene dialogue and stage directions without regenerating audio or editing the original script", () => {
     const doc = story();
     const speech = doc.scenes[0].segments[0];
