@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Harden **Duplicate voice profile** and character creation against invalid or conflicting IDs, accidental over-capacity casts (100 characters), and overlong Hindi copy names. The desktop disables add/duplicate controls at the native validation limit or during renders. Copied settings remain a configuration profile, **not proof of a distinct generated speaker**. Include model-free TypeScript and React boundary regressions.
+
 - Fix deferred React editor updates by capturing speaker, destination scene, character name and voice-slider input values immediately rather than later reading a mutable browser event object. Add a queued scene-move regression and resolved-speaker integration coverage.
 
 - Fix stale unknown-speaker warnings: the banner now reflects active, unresolved scene lines instead of permanently showing the parser's earlier unknown-label list. Correcting a speaker clears the warning without synthesis.
