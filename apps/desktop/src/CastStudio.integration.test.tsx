@@ -784,4 +784,415 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.getByRole("button", { name: "Parse labeled Hindi script" })).toBeTruthy();
   });
 
+
+  it("filters 200-scene navigation locally by Hindi dialogue, title and nonspoken notes", () => {
+    const doc = story();
+    const source = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...source, id: "direction-one", kind: "direction", speaker_id: null,
+      original_text: "[द्वार बंद होता है]", spoken_text: "",
+    });
+    doc.scenes[1] = {
+      id: "second-scene", title: "दरबार", notes: "संगीत थोड़ा धीमा",
+      segments: [{ ...source, id: "line-two", original_text: "महाराज का स्वागत",
+        spoken_text: "महाराज का स्वागत" }],
+    };
+    const { onChange } = mount(doc);
+    const search = screen.getByRole("searchbox", { name: "Find scenes or dialogue" });
+    expect(screen.getByText("Showing 2 of 2 scenes.", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .toContain("1 spoken · 1 directions");
+    fireEvent.change(search, { target: { value: "महाराज" } });
+    expect(screen.getByText("Showing 1 of 2 scenes.", { exact: false })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "प्रथम दृश्य" })).toBeNull();
+    expect(screen.getByRole("button", { name: "दरबार" }).textContent).toContain("1 spoken");
+    fireEvent.click(screen.getByRole("button", { name: "दरबार" }));
+    expect((screen.getByRole("textbox", { name: "Scene title" }) as HTMLInputElement).value)
+      .toBe("दरबार");
+    fireEvent.change(search, { target: { value: "संगीत" } });
+    expect(screen.getByRole("button", { name: "दरबार" })).toBeTruthy();
+    fireEvent.change(search, { target: { value: "द्वार" } });
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[1].notes).toBe("संगीत थोड़ा धीमा");
+  });
+
+  it("locally filters unassigned speech but does not misclassify unspoken stage directions", () => {
+    const doc = story();
+    const line = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push(
+      { ...line, id: "missing-speaker", speaker_id: null, source_label: "अजनबी" },
+      { ...line, id: "unspoken-direction", kind: "direction", speaker_id: null,
+        original_text: "[पर्दा उठता है]", spoken_text: "" },
+    );
+    doc.scenes.push({ id: "second", title: "दूसरा दृश्य", notes: "", segments: [] });
+    const { rerender, onChange } = mount(doc);
+    const filter = screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" });
+    fireEvent.click(filter);
+    expect((filter as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent).toContain("1 unassigned");
+    expect(screen.queryByRole("button", { name: "दूसरा दृश्य" })).toBeNull();
+    const revised: StoryV2 = {
+      ...doc, scenes: [{
+        ...doc.scenes[0], segments: doc.scenes[0].segments.map(segment =>
+          segment.id === "missing-speaker"
+            ? { ...segment, speaker_id: "narrator", source_label: null }
+            : segment,
+        ),
+      }, doc.scenes[1]],
+    };
+    rerender(<CastStudio document={revised} onChange={onChange} onMessage={vi.fn()} />);
+    expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "प्रथम दृश्य" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear scene filters" }));
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .toContain("2 spoken");
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .not.toContain("unassigned");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
+  });
+
+  it("clears the previous story's private search and unresolved filter after changing stories", () => {
+    const doc = story();
+    doc.scenes[0].segments[0].speaker_id = null;
+    doc.scenes[0].segments[0].source_label = "अनजाना";
+    const onChange = vi.fn();
+    const onMessage = vi.fn();
+    const { rerender } = render(
+      <CastStudio document={doc} onChange={onChange} onMessage={onMessage} />,
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
+      target: { value: "प्रथम" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }));
+    expect(screen.getByText("Showing 1 of 1 scenes.", { exact: false })).toBeTruthy();
+    const next: StoryV2 = {
+      ...doc, id: "other-story", title: "अलग कहानी",
+      scenes: [{ id: "other-scene", title: "नई कहानी", notes: "", segments: [] }],
+    };
+    rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
+    expect((screen.getByRole("searchbox", { name: "Find scenes or dialogue" }) as HTMLInputElement).value)
+      .toBe("");
+    expect((screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }) as HTMLInputElement).checked)
+      .toBe(false);
+    expect(screen.getByRole("button", { name: "नई कहानी" })).toBeTruthy();
+    expect(screen.getByText("Showing 1 of 1 scenes.", { exact: false })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("merges adjacent Hindi scenes only after confirmation, retaining speaker and cached line data", () => {
+    const doc = story();
+    const originalLine = doc.scenes[0].segments[0];
+    doc.scenes[0].notes = "पहले दृश्य के निर्देश";
+    doc.scenes.push({
+      id: "scene-two", title: "दूसरा दृश्य", notes: "अंत में संगीत",
+      segments: [{
+        ...originalLine, id: "second-line", original_text: "दूसरा संवाद",
+        spoken_text: "दूसरा संवाद", audio_ref: "retained-audio", duration_seconds: 1.5,
+      }],
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { rerender, onChange, onMessage } = mount(doc);
+    const button = screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(button);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const apply = onChange.mock.calls[0][0] as (old: StoryV2) => StoryV2;
+    const joined = apply(doc);
+    expect(joined.scenes).toHaveLength(1);
+    expect(joined.scenes[0].segments.map(line => line.id)).toEqual(["line-one", "second-line"]);
+    expect(joined.scenes[0].segments[0]).toBe(originalLine);
+    expect(joined.scenes[0].segments[1]).toBe(doc.scenes[1].segments[0]);
+    expect(joined.scenes[0].segments[1].audio_ref).toBe("retained-audio");
+    expect(joined.scenes[0].notes).toContain("पहले दृश्य के निर्देश");
+    expect(joined.scenes[0].notes).toContain("Merged scene: दूसरा दृश्य");
+    expect(joined.scenes[0].notes).toContain("अंत में संगीत");
+    expect(joined.text).toBe(doc.text);
+    expect(joined.characters).toBe(doc.characters);
+    expect(doc.scenes).toHaveLength(2);
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("save to persist"));
+    rerender(<CastStudio document={joined} onChange={onChange} onMessage={onMessage} />);
+    expect((screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("disables merging the last scene and rejects overlong combined notes before editor mutation", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const doc = story();
+    doc.scenes.push({ id: "scene-two", title: "दूसरा दृश्य", notes: "एक नोट", segments: [] });
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "दूसरा दृश्य" }));
+    expect((screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "प्रथम दृश्य" }));
+    doc.scenes[0].notes = "अ".repeat(4000);
+    fireEvent.click(screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("4000-character"));
+    expect(doc.scenes).toHaveLength(2);
+  });
+
+  it("splits the current Hindi scene before a later line and preserves the complete narration", () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "550e8400-e29b-41d4-a716-446655440003" });
+    const doc = story();
+    const first = doc.scenes[0].segments[0];
+    doc.scenes[0].notes = "दृश्य निर्देश, बोलना नहीं";
+    doc.scenes[0].segments.push(
+      { ...first, id: "stage-one", kind: "direction", speaker_id: null,
+        original_text: "[घंटी बजती है]", spoken_text: "", audio_ref: null,
+        duration_seconds: null },
+      { ...first, id: "line-two", original_text: "दूसरी पंक्ति।",
+        spoken_text: "दूसरी पंक्ति।", audio_ref: "previous-audio" },
+    );
+    const { rerender, onChange, onMessage } = mount(doc);
+    expect(screen.queryByRole("button", { name: "Split scene before line line-one" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Split scene before line stage-one" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const update = onChange.mock.calls[0][0] as (old: StoryV2) => StoryV2;
+    const next = update(doc);
+    expect(next.scenes.map(scene => scene.title))
+      .toEqual(["प्रथम दृश्य", "प्रथम दृश्य (part 2)"]);
+    expect(next.scenes.map(scene => scene.segments.map(segment => segment.id)))
+      .toEqual([["line-one"], ["stage-one", "line-two"]]);
+    expect(next.scenes[1].segments[1]).toBe(doc.scenes[0].segments[2]);
+    expect(next.scenes[1].notes).toBe("");
+    expect(next.scenes[0].notes).toBe("दृश्य निर्देश, बोलना नहीं");
+    expect(next.text).toBe(doc.text);
+    expect(next.characters).toBe(doc.characters);
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("Save the story"));
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+    rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
+    expect(screen.getByRole("textbox", { name: "Scene production notes (not spoken)" }))
+      .toHaveProperty("value", "");
+  });
+  it("blocks scene splitting when 200 scenes are already present", () => {
+    const doc = story();
+    const first = doc.scenes[0].segments[0];
+    doc.scenes = Array.from({ length: 200 }, (_, i) => ({
+      id: "scene-" + i, title: "दृश्य " + i, notes: "",
+      segments: i === 0 ? [first, { ...first, id: "second-line" }] : [],
+    }));
+    const { onChange, onMessage } = mount(doc);
+    const split = screen.getByRole("button", { name: "Split scene before line second-line" });
+    expect((split as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it("disables boundary scene-order buttons instead of invalidating the current review", () => {
+    const doc = story();
+    doc.scenes.push({ id: "second-scene", title: "दूसरा दृश्य", notes: "", segments: [] });
+    const { onChange } = mount(doc);
+    const up = screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement;
+    const down = screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement;
+    expect(up.disabled).toBe(true);
+    expect(down.disabled).toBe(false);
+    fireEvent.click(up);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "दूसरा दृश्य" }));
+    expect((screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+    expect((screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "↓ Move down" }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("blocks actor, scene and line mutation controls during a pending script parse", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "parse_dialogue") return new Promise(() => {});
+      return Promise.reject(new Error("Unexpected command: " + command));
+    });
+    const doc = story();
+    doc.characters.push({ id: "friend", name: "मित्र", voice: defaultVoice(), description: "" });
+    doc.scenes[0].segments.push({ ...doc.scenes[0].segments[0], id: "line-two" });
+    const { onChange } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Parse labeled Hindi script" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Processing…" })).toBeTruthy());
+    expect((screen.getByRole("textbox", { name: "Scene production notes (not spoken)" }) as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole("textbox", { name: "Scene title" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement).disabled).toBe(true);
+    const speakerControls = screen.getAllByRole("combobox", { name: "Speaker for नमस्कार।" });
+    expect(speakerControls).toHaveLength(2);
+    expect(speakerControls.every(control => (control as HTMLSelectElement).disabled)).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Move line line-one" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Delete and reassign to narrator" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Split scene before line line-two" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("reorders scene dialogue and stage directions without regenerating audio or editing the original script", () => {
+    const doc = story();
+    const speech = doc.scenes[0].segments[0];
+    doc.scenes[0].segments = [
+      speech,
+      { ...speech, id: "direction-one", kind: "direction", speaker_id: null,
+        original_text: "[दरवाज़ा खुलता है]", spoken_text: "" },
+      { ...speech, id: "line-two", original_text: "दूसरा वाक्य।",
+        spoken_text: "दूसरा वाक्य।" },
+    ];
+    const { onChange } = mount(doc);
+    expect((screen.getByRole("button", { name: "Move line line-one up" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "Move line line-two down" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Move line line-two up" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const update = onChange.mock.calls[0][0] as (doc: StoryV2) => StoryV2;
+    const next = update(doc);
+    expect(next.scenes[0].segments.map(line => line.id))
+      .toEqual(["line-one", "line-two", "direction-one"]);
+    expect(next.scenes[0].segments[1].spoken_text).toBe("दूसरा वाक्य।");
+    expect(next.scenes[0].segments[0].speaker_id).toBe("narrator");
+    expect(next.text).toBe(doc.text);
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+
+
+  it("disables new and duplicated characters when native cast capacity is reached", () => {
+    const doc = story();
+    doc.characters.push(...Array.from({ length: 99 }, (_, i) => ({
+      id: `character-${i}`, name: `पात्र ${i}`, description: "", voice: defaultVoice(),
+    })));
+    const { onChange, onMessage } = mount(doc);
+    const duplicates = screen.getAllByRole("button", { name: "Duplicate voice profile" });
+    expect(duplicates).toHaveLength(100);
+    expect(duplicates.every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "New character name" }), {
+      target: { value: "नया पात्र" },
+    });
+    expect((screen.getByRole("button", { name: "+ Add" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it("duplicates the selected Hindi scene with new line identities and pending audio", () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce("550e8400-e29b-41d4-a716-446655440001")
+      .mockReturnValueOnce("550e8400-e29b-41d4-a716-446655440002") });
+    const doc = story();
+    doc.scenes[0].segments[0].audio_ref = "completed-audio-placeholder";
+    doc.scenes[0].segments[0].status = "completed";
+    doc.scenes[0].segments[0].duration_seconds = 1.25;
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate scene (fresh audio)" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const update = onChange.mock.calls[0][0] as (old: StoryV2) => StoryV2;
+    const result = update(doc);
+    expect(result.scenes).toHaveLength(2);
+    expect(result.scenes[1].title).toBe("प्रथम दृश्य (copy)");
+    expect(result.scenes[1].id).not.toBe(doc.scenes[0].id);
+    expect(result.scenes[1].segments[0].id).not.toBe(doc.scenes[0].segments[0].id);
+    expect(result.scenes[1].segments[0].spoken_text).toBe("नमस्कार।");
+    expect(result.scenes[1].segments[0].speaker_id).toBe("narrator");
+    expect(result.scenes[1].segments[0].audio_ref).toBeNull();
+    expect(result.scenes[1].segments[0].duration_seconds).toBeNull();
+    expect(result.scenes[1].segments[0].status).toBe("pending");
+    expect(result.text).toBe(doc.text);
+    expect(doc.scenes[0].segments[0].audio_ref).toBe("completed-audio-placeholder");
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("new line IDs"));
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+  it("does not edit or claim success when cloning would exceed the 200-scene limit", () => {
+    const doc = story();
+    doc.scenes = Array.from({ length: 200 }, (_, i) => ({
+      id: "scene-" + i, title: "दृश्य " + i, notes: "",
+      segments: i === 0 ? [doc.scenes[0].segments[0]] : [],
+    }));
+    const { onChange } = mount(doc);
+    expect((screen.getByRole("button", {
+      name: "Duplicate scene (fresh audio)",
+    }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+
+  it("edits nonspoken production notes without modifying the source script or invoking synthesis", () => {
+    const doc = story();
+    const { onChange, onMessage } = mount(doc);
+    const field = screen.getByRole("textbox", { name: "Scene production notes (not spoken)" });
+    expect((field as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(field, { target: { value: "रोशनी कम।\nचुपचाप।" } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const next = updater(doc);
+    expect(next.scenes[0].notes).toBe("रोशनी कम।\nचुपचाप।");
+    expect(next.scenes[0].segments).toBe(doc.scenes[0].segments);
+    expect(next.text).toBe(doc.text);
+    expect(screen.getByText(/Unsaved character or scene changes/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps a scene when deletion is cancelled and removes only that scene on confirmation", () => {
+    const doc = story();
+    doc.scenes.push({ id: "scene-two", title: "दूसरा दृश्य", notes: "not spoken",
+      segments: [] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { onChange, onMessage } = mount(doc);
+    const action = screen.getByRole("button", { name: "Delete scene (keep original script)" });
+    fireEvent.click(action);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("original script text"));
+    expect(onChange).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(action);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const next = updater(doc);
+    expect(next.scenes.map(scene => scene.id)).toEqual(["scene-two"]);
+    expect(next.scenes[0].notes).toBe("not spoken");
+    expect(next.text).toBe(doc.text);
+    expect(doc.scenes).toHaveLength(2);
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("Original script text remains unchanged"));
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+
+
+  it("clears stale unknown-speaker alert when its dialogue is reassigned", () => {
+    const doc = story();
+    doc.scenes[0].segments[0].speaker_id = null;
+    doc.scenes[0].segments[0].source_label = "अज्ञात पात्र";
+    const { rerender, onChange, onMessage } = mount(doc);
+    expect(screen.getByRole("alert").textContent).toContain("अज्ञात पात्र");
+    expect(screen.getByText(/1 unresolved speech segments/)).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: /Speaker for नमस्कार/ }), {
+      target: { value: "narrator" },
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const resolved = updater(doc);
+    expect(resolved.scenes[0].segments[0].speaker_id).toBe("narrator");
+    expect(resolved.scenes[0].segments[0].source_label).toBeNull();
+    rerender(<CastStudio document={resolved} onChange={onChange} onMessage={onMessage} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(/0 unresolved speech segments/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
+  });
+
+
+  it("captures destination scene selection before a deferred React updater executes", () => {
+    const doc = story();
+    doc.scenes.push({ id: "scene-two", title: "अगला दृश्य", notes: "", segments: [] });
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.change(screen.getByRole("combobox", { name: "Move line line-one" }), {
+      target: { value: "scene-two" },
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const updater = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const moved = updater(doc);
+    expect(moved.scenes[0].segments).toHaveLength(0);
+    expect(moved.scenes[1].segments.map(s => s.id)).toEqual(["line-one"]);
+    expect(moved.scenes[1].segments[0].spoken_text).toBe("नमस्कार।");
+    expect(moved.text).toBe(doc.text);
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
 });

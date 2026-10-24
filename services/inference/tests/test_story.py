@@ -4,6 +4,7 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 
 import pytest
@@ -117,3 +118,67 @@ def test_no_silent_truncation_of_long_text() -> None:
 def test_document_serialization_roundtrip() -> None:
     doc = parse_dialogue("Roundtrip", "मंत्री: सब कुशल।", characters())
     assert from_dict(doc.to_dict()).to_dict() == doc.to_dict()
+
+
+def test_editor_style_adjacent_scene_merge_survives_native_roundtrip_without_model() -> None:
+    """Match the desktop's structural merge output using real v2 validation."""
+    from kathasvara.render_preflight import inspect_render_plan
+
+    script = (
+        "# पहला दृश्य\nNarrator: राजा महल में आए।\n"
+        "---\n# दूसरा दृश्य\n[द्वार खुलता है]\nNarrator: मंत्री ने नमस्ते कहा।"
+    )
+    doc = parse_dialogue("दो दृश्य", script, [narrator()], script_id="merge-roundtrip")
+    assert len(doc.scenes) == 2
+    doc.scenes[0].notes = "पहला दृश्य: धीमा प्रकाश"
+    doc.scenes[1].notes = "दूसरा दृश्य: हल्का संगीत"
+    line = next(seg for seg in doc.scenes[1].segments if seg.kind == "speech")
+    line.audio_ref = "550e8400-e29b-41d4-a716-446655440000"
+    line.duration_seconds = 1.5
+    line.status = "completed"
+    original = doc.to_dict()
+    before_segments = [
+        (part["id"], line["id"], line["original_text"], line["spoken_text"],
+         line["speaker_id"], line["audio_ref"], line["duration_seconds"])
+        for part in original["scenes"] for line in part["segments"]
+    ]
+
+    edited = deepcopy(original)
+    first, second = edited["scenes"]
+    first["notes"] = first["notes"] + "\n\nMerged scene: " + second["title"] + "\n" + second["notes"]
+    first["segments"].extend(second["segments"])
+    edited["scenes"] = [first]
+    loaded = from_dict(edited)
+    assert loaded.to_dict() == edited
+    assert loaded.text == script
+    assert len(loaded.scenes) == 1
+    assert loaded.scenes[0].notes.endswith("Merged scene: दूसरा दृश्य\nदूसरा दृश्य: हल्का संगीत")
+    after_segments = [
+        (line["id"], line["original_text"], line["spoken_text"], line["speaker_id"],
+         line["audio_ref"], line["duration_seconds"])
+        for line in loaded.to_dict()["scenes"][0]["segments"]
+    ]
+    assert after_segments == [entry[1:] for entry in before_segments]
+    assert [seg.kind for seg in loaded.scenes[0].segments] == [
+        seg.kind for scene in doc.scenes for seg in scene.segments
+    ]
+    assert inspect_render_plan(loaded)["segments"] == 2
+
+
+def test_native_schema_rejects_merged_scene_note_and_line_overflows() -> None:
+    doc = parse_dialogue(
+        "गिनती", "Narrator: नमस्कार।", [narrator()], script_id="limit-roundtrip"
+    )
+    valid = doc.to_dict()
+    notes_overflow = deepcopy(valid)
+    notes_overflow["scenes"][0]["notes"] = "क" * 4001
+    with pytest.raises(ValueError, match="metadata or segment count"):
+        from_dict(notes_overflow)
+
+    too_many = deepcopy(valid)
+    first_line = too_many["scenes"][0]["segments"][0]
+    too_many["scenes"][0]["segments"] = [
+        {**first_line, "id": "line-" + str(i)} for i in range(2001)
+    ]
+    with pytest.raises(ValueError, match="metadata or segment count"):
+        from_dict(too_many)

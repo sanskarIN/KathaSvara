@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
@@ -14,9 +14,10 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
+import { sceneOverview } from "./lib/scene_overview";
 import {
-  addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
-  renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
+  addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
+  removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
 type RenderPlan = {
@@ -60,12 +61,19 @@ function spokenSubtitleLines(doc: StoryV2) {
 export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newName, setNewName] = useState("");
   const [newSceneTitle, setNewSceneTitle] = useState("");
+  const [sceneSearch, setSceneSearch] = useState("");
+  const [unresolvedScenesOnly, setUnresolvedScenesOnly] = useState(false);
+  useEffect(() => {
+    // A search belongs to the current story; do not hide a newly loaded story
+    // behind the previous author's private dialogue terms or note filters.
+    setSceneSearch("");
+    setUnresolvedScenesOnly(false);
+  }, [document.id]);
   const [busy, setBusy] = useState(false);
   // Only the current parse/save/load operation can own the busy flag.
   const editorOperationEpoch = useRef(0);
   const [dirty, setDirty] = useState(true);
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
-  const [unresolved, setUnresolved] = useState<string[]>([]);
   const [rendering, setRendering] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -175,6 +183,74 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       edit(previous => addScene(previous, newSceneTitle));
       setNewSceneTitle("");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function duplicateCurrentScene(sceneId: string) {
+    if (busy || rendering) return;
+    try {
+      // Materialize the IDs before the React state updater is scheduled, so
+      // the newly selected scene is the actual clone, not the source scene.
+      const cloned = duplicateScene(document, sceneId);
+      const originalIndex = document.scenes.findIndex(scene => scene.id === sceneId);
+      const copyId = cloned.scenes[originalIndex + 1].id;
+      edit(() => cloned);
+      setSelectedScene(copyId);
+      onMessage("Copied this scene with new line IDs. Old generated audio was not copied; save the story and review any new narration.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function splitCurrentScene(sceneId: string, segmentId: string) {
+    if (busy || rendering) return;
+    try {
+      // Validate and assign the new scene ID before the deferred React updater.
+      const updated = splitSceneAtSegment(document, sceneId, segmentId);
+      const index = updated.scenes.findIndex(scene => scene.id === sceneId);
+      const newScene = updated.scenes[index + 1];
+      edit(() => updated);
+      setSelectedScene(newScene.id);
+      onMessage("Scene split before the selected line. Dialogue order, original script and reviewed Hindi are preserved. Save the story to keep this change.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function mergeCurrentSceneWithNext(sceneId: string) {
+    if (busy || rendering) return;
+    const position = document.scenes.findIndex(scene => scene.id === sceneId);
+    const following = document.scenes[position + 1];
+    if (!following) return;
+    if (!window.confirm(
+      `Merge this scene with the next scene "${following.title}"? ` +
+      "All dialogue lines, voice assignments and cached line metadata are preserved in order. " +
+      "The next scene title and any notes move to nonspoken production notes. " +
+      "The original script is not edited; Save explicitly to keep this merge."
+    )) return;
+    try {
+      // Preflight the entire merge before invalidating the current preview.
+      const updated = mergeSceneWithNext(document, sceneId);
+      edit(() => updated);
+      setSelectedScene(sceneId);
+      onMessage("Adjacent scenes merged. Original script, dialogue order and voice assignments remain unchanged; save to persist.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function deleteCurrentScene(sceneId: string, title: string) {
+    if (busy || rendering) return;
+    if (!window.confirm(
+      `Remove scene "${title}" and all its parsed dialogue lines from this edited version? `
+      + "The original script text and other scenes are kept. This change is not saved until you choose Save."
+    )) return;
+    try {
+      const index = document.scenes.findIndex(scene => scene.id === sceneId);
+      if (index < 0) throw new Error("Scene to remove was not found.");
+      const remaining = document.scenes.filter(scene => scene.id !== sceneId);
+      // Select the next visible scene, otherwise the previous one.
+      setSelectedScene(remaining[Math.min(index, remaining.length - 1)]?.id ?? null);
+      edit(previous => removeScene(previous, sceneId));
+      onMessage("Scene removed from this unsaved project. Original script text remains unchanged.");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -536,7 +612,6 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       clearWavInspection();
       renderRevision.current += 1;
       onChange({ ...response.result, pronunciation_glossary: document.pronunciation_glossary ?? [] });
-      setUnresolved(response.unresolved);
       setSelectedScene(response.result.scenes[0]?.id ?? null);
       setDirty(true);
       onMessage(response.unresolved.length
@@ -602,7 +677,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
+  const visibleScenes = useMemo(() =>
+    sceneOverview(document, sceneSearch, unresolvedScenesOnly),
+    [document, sceneSearch, unresolvedScenesOnly]);
   const unresolvedNow = unresolvedSpeech(document);
+  // Derive the alert from the active document, not the one-time parse response:
+  // assigning a previously unknown actor must immediately clear stale warnings.
+  const unknownSpeakerLabels = Array.from(new Set(unresolvedNow.map(segment =>
+    segment.source_label?.trim() || "Unlabeled dialogue")));
   const activeSubtitlePreview = audio && subtitlePreview?.audioId === audio.audio_id
     ? subtitlePreview : null;
   const subtitlePageSize = 10;
@@ -629,39 +711,49 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="cast-add">
           <input aria-label="New character name" placeholder="नया पात्र — e.g. राजा भोज" maxLength={120} value={newName}
             onChange={event => setNewName(event.target.value)} />
-          <button className="secondary-button" onClick={addNewCharacter} disabled={busy || !newName.trim()}>+ Add</button>
+          <button className="secondary-button" onClick={addNewCharacter} disabled={busy || rendering || document.characters.length >= 100 || !newName.trim()}>+ Add</button>
         </div>
         <ul className="cast-list">
           {document.characters.map(char => (
             <li key={char.id}>
               <label>
                 <span>Character name</span>
-                <input value={char.name} disabled={char.id === "narrator"} maxLength={120}
+                <input value={char.name} disabled={char.id === "narrator" || busy || rendering} maxLength={120}
                   onChange={event => {
-                    try { edit(doc => renameCharacter(doc, char.id, event.target.value)); }
-                    catch (error) { onMessage(errorString(error)); }
+                    const nextName = event.target.value;
+                    if (nextName === char.name) return;
+                    try {
+                      renameCharacter(document, char.id, nextName);
+                      edit(doc => renameCharacter(doc, char.id, nextName));
+                    } catch (error) { onMessage(errorString(error)); }
                   }} />
               </label>
               <div className="cast-voice-row">
                 <label>Expression
-                  <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration}
-                    onChange={event => edit(doc => ({
-                      ...doc, characters: doc.characters.map(item => item.id === char.id
-                        ? { ...item, voice: { ...item.voice, exaggeration: Number(event.target.value) } } : item),
-                    }))} />
+                  <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration} disabled={busy || rendering}
+                    onChange={event => {
+                      const exaggeration = Number(event.target.value);
+                      edit(doc => ({
+                        ...doc, characters: doc.characters.map(item => item.id === char.id
+                          ? { ...item, voice: { ...item.voice, exaggeration } } : item),
+                      }));
+                    }} />
                 </label>
                 <label>CFG
-                  <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight}
-                    onChange={event => edit(doc => ({
-                      ...doc, characters: doc.characters.map(item => item.id === char.id
-                        ? { ...item, voice: { ...item.voice, cfg_weight: Number(event.target.value) } } : item),
-                    }))} />
+                  <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight} disabled={busy || rendering}
+                    onChange={event => {
+                      const cfg_weight = Number(event.target.value);
+                      edit(doc => ({
+                        ...doc, characters: doc.characters.map(item => item.id === char.id
+                          ? { ...item, voice: { ...item.voice, cfg_weight } } : item),
+                      }));
+                    }} />
                 </label>
               </div>
               <p className="helper">Hindi · Chatterbox Multilingual · pause {char.voice.pause_ms} ms · no distinct speaker verified</p>
               <div className="cast-actions">
-                <button className="quiet-button" onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
-                {char.id !== "narrator" && <button className="quiet-button" onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
+                <button className="quiet-button" disabled={busy || rendering || document.characters.length >= 100} onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
+                {char.id !== "narrator" && <button className="quiet-button" disabled={busy || rendering} onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
               </div>
             </li>
           ))}
@@ -901,41 +993,114 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           </>}
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
-        {unresolved.length > 0 && <p role="alert">{unresolved.length} unknown speaker label(s): {unresolved.join(", ")}</p>}
+        {unresolvedNow.length > 0 && <p role="alert">{unresolvedNow.length} unknown speaker label(s): {unknownSpeakerLabels.join(", ")}</p>}
         <div className="cast-add">
           <input placeholder="New scene title / नया दृश्य" aria-label="New scene title" value={newSceneTitle}
             maxLength={120} onChange={event => setNewSceneTitle(event.target.value)} />
           <button className="secondary-button" disabled={!newSceneTitle.trim() || busy || rendering} onClick={createScene}>+ Scene</button>
         </div>
+        <div className="scene-outline-controls" aria-label="Scene navigation filters">
+          <label>
+            Find scenes or dialogue
+            <input type="search" aria-label="Find scenes or dialogue" maxLength={120}
+              placeholder="दृश्य, संवाद, या नोट खोजें"
+              value={sceneSearch} onChange={event => setSceneSearch(event.target.value)} />
+          </label>
+          <label className="scene-outline-checkbox">
+            <input type="checkbox" checked={unresolvedScenesOnly}
+              onChange={event => setUnresolvedScenesOnly(event.target.checked)} />
+            Only scenes with unassigned speech
+          </label>
+          <button type="button" className="quiet-button" disabled={!sceneSearch && !unresolvedScenesOnly}
+            onClick={() => { setSceneSearch(""); setUnresolvedScenesOnly(false); }}>
+            Clear scene filters
+          </button>
+        </div>
+        <p className="helper scene-outline-count" aria-live="polite">
+          Showing {visibleScenes.length} of {document.scenes.length} scenes. Search filters navigation only; the selected scene stays open until you choose another.
+        </p>
         <div className="scene-navigation" aria-label="Scenes">
-          {document.scenes.map(scene => (
-            <button key={scene.id} className={"quiet-button " + (activeScene?.id === scene.id ? "selected-scene" : "")}
-              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>{scene.title}</button>
+          {visibleScenes.map(scene => (
+            <button type="button" key={scene.id} aria-label={scene.title}
+              className={"quiet-button scene-outline-entry " + (activeScene?.id === scene.id ? "selected-scene" : "")}
+              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>
+              <span>{scene.title}</span>
+              <small aria-hidden="true" className="scene-outline-meta">
+                {scene.spoken} spoken · {scene.directions} directions
+                {scene.unresolved > 0 ? ` · ${scene.unresolved} unassigned` : ""}
+                {scene.hasProductionNotes ? " · notes" : ""}
+              </small>
+            </button>
           ))}
         </div>
+        {visibleScenes.length === 0 && (
+          <p className="helper">No matching scenes. Clear filters to show all scenes; your original story has not changed.</p>
+        )}
         {activeScene ? (
           <>
             <div className="cast-actions">
               <label className="scene-title-label">Scene title
-                <input value={activeScene.title} maxLength={120} onChange={event => {
+                <input value={activeScene.title} disabled={busy || rendering} maxLength={120} onChange={event => {
                   const title = event.target.value;
-                  if (!title.trim()) return;
+                  if (!title.trim() || title.trim() === activeScene.title) return;
                   edit(doc => renameScene(doc, activeScene.id, title));
                 }} />
               </label>
-              <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
-              <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering || document.scenes[0]?.id === activeScene.id}
+                onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering || document.scenes[document.scenes.length - 1]?.id === activeScene.id}
+                onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
+              <button type="button" className="secondary-button"
+                disabled={busy || rendering || document.scenes.length >= 200}
+                onClick={() => duplicateCurrentScene(activeScene.id)}>
+                Duplicate scene (fresh audio)
+              </button>
+              <button type="button" className="secondary-button"
+                disabled={busy || rendering || document.scenes[document.scenes.length - 1]?.id === activeScene.id}
+                onClick={() => mergeCurrentSceneWithNext(activeScene.id)}>
+                Merge with next scene (keep dialogue)
+              </button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering}
+                onClick={() => deleteCurrentScene(activeScene.id, activeScene.title)}>
+                Delete scene (keep original script)
+              </button>
             </div>
+            <label className="reviewed-dialogue-label">
+              Production notes for this scene (not spoken)
+              <textarea lang="hi" rows={3} maxLength={4000}
+                aria-label="Scene production notes (not spoken)"
+                value={activeScene.notes}
+                disabled={busy || rendering}
+                placeholder="Optional staging or editing notes. Never synthesized as speech."
+                onChange={event => {
+                  const next = event.target.value;
+                  if (next === activeScene.notes) return;
+                  try {
+                    updateSceneNotes(document, activeScene.id, next);
+                    edit(previous => updateSceneNotes(previous, activeScene.id, next));
+                  } catch (error) {
+                    onMessage(errorString(error));
+                  }
+                }} />
+            </label>
+            <p className="helper">Production notes are stored with this scene, not read aloud, and do not alter the original script or dialogue text.</p>
             <ol className="scene-segments">
-              {activeScene.segments.map(segment => (
+              {activeScene.segments.map((segment, index) => (
                 <li key={segment.id}>
                   <div className="segment-header">
                     <span>{segment.kind === "direction" ? "Stage direction (not spoken)" : "Spoken segment"}</span>
                     {segment.kind === "speech" && (
-                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""}
+                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""} disabled={busy || rendering}
                         onChange={event => {
-                          try { edit(doc => assignSegment(doc, segment.id, event.target.value)); }
-                          catch (error) { onMessage(errorString(error)); }
+                          const speakerId = event.target.value;
+                          if (speakerId === segment.speaker_id && segment.source_label === null) return;
+                          try {
+                            assignSegment(document, segment.id, speakerId);
+                            edit(doc => assignSegment(doc, segment.id, speakerId));
+                          } catch (error) { onMessage(errorString(error)); }
                         }}>
                         <option value="">Unassigned — manual correction required</option>
                         {document.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
@@ -961,17 +1126,43 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                          }
                        }} />
                    </label>}
+                  <div className="cast-actions" aria-label={"Order controls for " + segment.id}>
+                    <button type="button" className="quiet-button"
+                      aria-label={"Move line " + segment.id + " up"}
+                      disabled={busy || rendering || index === 0}
+                      onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, -1))}>
+                      ↑ Line up
+                    </button>
+                    <button type="button" className="quiet-button"
+                      aria-label={"Move line " + segment.id + " down"}
+                      disabled={busy || rendering || index === activeScene.segments.length - 1}
+                      onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, 1))}>
+                      ↓ Line down
+                    </button>
+                    {index > 0 && (
+                      <button type="button" className="secondary-button"
+                        aria-label={"Split scene before line " + segment.id}
+                        disabled={busy || rendering || document.scenes.length >= 200}
+                        onClick={() => splitCurrentScene(activeScene.id, segment.id)}>
+                        Split scene here
+                      </button>
+                    )}
+                  </div>
                   <label className="move-segment-label">Move line to scene
-                    <select aria-label={"Move line " + segment.id} value={activeScene.id}
+                    <select aria-label={"Move line " + segment.id} value={activeScene.id} disabled={busy || rendering || document.scenes.length < 2}
                       onChange={event => {
-                        try { edit(doc => moveSegment(doc, segment.id, event.target.value)); }
-                        catch (error) { onMessage(errorString(error)); }
+                        const destinationId = event.target.value;
+                        if (destinationId === activeScene.id) return;
+                        try {
+                          moveSegment(document, segment.id, destinationId);
+                          edit(doc => moveSegment(doc, segment.id, destinationId));
+                        } catch (error) { onMessage(errorString(error)); }
                       }}>
                       {document.scenes.map(scene => <option key={scene.id} value={scene.id}>{scene.title}</option>)}
                     </select>
                   </label>
                   {segment.kind === "speech" && segment.speaker_id && (
-                    <button className="quiet-button" disabled={rendering}
+                    <button className="quiet-button" disabled={busy || rendering}
                       onClick={() => void startRender(activeScene.id, segment.id)}>
                       Regenerate / retry this line only
                     </button>
