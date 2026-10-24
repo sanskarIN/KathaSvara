@@ -223,7 +223,13 @@ export function duplicateScene(
   let title = "";
   do {
     const suffix = number === 1 ? " (copy)" : ` (copy ${number})`;
-    title = source.title.slice(0, 120 - suffix.length).trimEnd() + suffix;
+    const stemLimit = 120 - suffix.length;
+    let stem = "";
+    for (const char of source.title) {
+      if (stem.length + char.length > stemLimit) break;
+      stem += char;
+    }
+    title = stem.trimEnd() + suffix;
     number += 1;
   } while (labels.has(title.toLocaleLowerCase()));
   const duplicated: SceneV2 = {
