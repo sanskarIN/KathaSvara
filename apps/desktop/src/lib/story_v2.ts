@@ -75,6 +75,10 @@ export function makeCharacter(name: string, id: string = crypto.randomUUID()): C
   if (!name.trim() || name.trim().length > 120) {
     throw new Error("Character name must be 1–120 characters.");
   }
+  if (!id || id.trim() !== id || id.length > 80 ||
+      /[\u0000-\u001f\u007f]/u.test(id)) {
+    throw new Error("Character identifier must contain 1–80 valid characters.");
+  }
   return { id, name: name.trim(), voice: defaultVoice(), description: "" };
 }
 
@@ -164,6 +168,10 @@ export function renameScene(project: StoryV2, sceneId: string, title: string): S
 export function addScene(project: StoryV2, title: string, id: string = crypto.randomUUID()): StoryV2 {
   if (!title.trim() || title.length > 120) throw new Error("Scene title must contain 1–120 characters.");
   if (project.scenes.length >= 200) throw new Error("Maximum 200 scenes.");
+  if (!id || id.trim() !== id || id.length > 80 ||
+      /[\u0000-\u001f\u007f]/u.test(id)) {
+    throw new Error("Scene identifier must contain 1–80 valid characters.");
+  }
   if (project.scenes.some(scene => scene.id === id)) throw new Error("Duplicate scene identifier.");
   return { ...project, scenes: [...project.scenes, {
     id, title: title.trim(), notes: "", segments: [],
@@ -379,6 +387,9 @@ export function moveSegment(project: StoryV2, segmentId: string, destinationScen
     throw new Error("Source scene identifier must be unique.");
   }
   if (originalScenes[0].id === destinationSceneId) return project;
+  if (destinations[0].segments.length >= 2000) {
+    throw new Error("Destination scene cannot contain more than 2000 lines.");
+  }
   const segment = matching[0];
   const scenes = project.scenes.map(scene =>
     scene.id === originalScenes[0].id
