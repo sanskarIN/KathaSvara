@@ -108,6 +108,17 @@ describe("extended cast and scene editing", () => {
     expect(() => addCharacter(full, "और पात्र", "new-character")).toThrow("Maximum 100");
     expect(full.characters).toHaveLength(100);
   });
+  it("does not split emoji surrogate pairs when shortening copied names", () => {
+    const doc = fixture();
+    doc.characters[1].name = "😀".repeat(60);
+    const copied = duplicateCharacter(doc, "raja", "emoji-copy");
+    const name = copied.characters[2].name;
+    expect(name.length).toBeLessThanOrEqual(120);
+    expect(name).toMatch(/ copy$/);
+    expect(name).not.toContain("\uFFFD");
+    expect(Array.from(name).every(unit => !(unit.length === 1 &&
+      unit.charCodeAt(0) >= 0xD800 && unit.charCodeAt(0) <= 0xDFFF))).toBe(true);
+  });
   it("truncates long Hindi copy names safely and resolves name conflicts", () => {
     const doc = fixture();
     doc.characters[1].name = "क".repeat(120);
@@ -128,6 +139,25 @@ describe("extended cast and scene editing", () => {
     expect(moved.scenes[0].segments).toHaveLength(0);
     expect(moved.scenes[2].segments[0].original_text).toBe("नमस्कार");
     expect(() => moveSegment(doc, "seg1", "not-there")).toThrow("does not exist");
+  });
+  it("does not move dialogue into two scenes sharing an ambiguous destination ID", () => {
+    const doc = fixture();
+    const corrupt = { ...doc, scenes: [
+      ...doc.scenes, { ...doc.scenes[1], segments: [] },
+    ] };
+    expect(() => moveSegment(corrupt, "seg1", "s2")).toThrow("must be unique");
+    expect(doc.scenes[0].segments.map(seg => seg.id)).toEqual(["seg1"]);
+  });
+  it("rejects ambiguous original scene IDs when reordering a line", () => {
+    const doc = fixture();
+    doc.scenes[0].segments.push({
+      ...doc.scenes[0].segments[0], id: "seg2", original_text: "दूसरी पंक्ति",
+    });
+    const corrupt = { ...doc, scenes: [
+      ...doc.scenes, { ...doc.scenes[0], segments: [] },
+    ] };
+    expect(() => moveSegmentWithinScene(corrupt, "seg1", 1)).toThrow("must be unique");
+    expect(doc.scenes[0].segments.map(seg => seg.id)).toEqual(["seg1", "seg2"]);
   });
   it("rejects duplicate names on renaming", () => {
     const doc = fixture();
@@ -265,6 +295,9 @@ describe("v0.5.3 safe scene duplication", () => {
     expect(() => duplicateScene(doc, "s1", makeIds("s1", "line"))).toThrow("duplicate");
     expect(() => duplicateScene(doc, "s1", makeIds("fresh-scene", "seg1"))).toThrow("duplicate");
     expect(() => duplicateScene(doc, "s1", makeIds("same", "same"))).toThrow("duplicate");
+    expect(() => duplicateScene(doc, "s1", makeIds(" bad ", "line"))).toThrow("invalid");
+    expect(() => duplicateScene(doc, "s1", makeIds("x".repeat(81), "line"))).toThrow("invalid");
+    expect(() => duplicateScene(doc, "s1", makeIds("good-id", "bad\u0000id"))).toThrow("invalid");
     const full: StoryV2 = { ...doc, scenes: Array.from({ length: 200 }, (_, i) => ({
       id: "scene-" + i, title: "शीर्षक", notes: "", segments: [],
     })) };
