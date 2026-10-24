@@ -210,7 +210,10 @@ export function duplicateScene(
   ]);
   const uniqueId = (): string => {
     const id = makeId();
-    if (!id || usedIds.has(id)) throw new Error("Generated duplicate scene/line identity.");
+    if (!id || id.length > 80 || id.trim() !== id ||
+        /[\u0000-\u001f\u007f]/u.test(id) || usedIds.has(id)) {
+      throw new Error("Generated duplicate scene/line identity or invalid identifier.");
+    }
     usedIds.add(id);
     return id;
   };
@@ -236,9 +239,9 @@ export function duplicateScene(
 }
 
 export function moveSegment(project: StoryV2, segmentId: string, destinationSceneId: string): StoryV2 {
-  if (!project.scenes.some(scene => scene.id === destinationSceneId)) {
-    throw new Error("Destination scene does not exist.");
-  }
+  const destinations = project.scenes.filter(scene => scene.id === destinationSceneId);
+  if (destinations.length === 0) throw new Error("Destination scene does not exist.");
+  if (destinations.length !== 1) throw new Error("Destination scene identifier must be unique.");
   const matching = project.scenes.flatMap(scene => scene.segments)
     .filter(segment => segment.id === segmentId);
   if (matching.length !== 1) throw new Error("Dialogue segment must be unique.");
@@ -267,6 +270,9 @@ export function moveSegmentWithinScene(
     throw new Error("Dialogue segment must exist exactly once.");
   }
   const scene = matchingScenes[0];
+  if (project.scenes.filter(item => item.id === scene.id).length !== 1) {
+    throw new Error("Scene identifiers must be unique.");
+  }
   const index = scene.segments.findIndex(segment => segment.id === segmentId);
   const next = index + offset;
   if (next < 0 || next >= scene.segments.length) return project;
@@ -294,7 +300,13 @@ export function duplicateCharacter(project: StoryV2, id: string, newId: string =
   for (let suffix = 1; suffix <= 100; suffix++) {
     const tail = suffix === 1 ? " copy" : ` copy ${suffix}`;
     // Avoid splitting surrogate pairs when truncating a long Unicode name.
-    const name = Array.from(source.name).slice(0, 120 - tail.length).join("").trimEnd() + tail;
+    const stemLimit = 120 - tail.length;
+    let stem = "";
+    for (const unit of source.name) {
+      if (stem.length + unit.length > stemLimit) break;
+      stem += unit;
+    }
+    const name = stem.trimEnd() + tail;
     if (usedNames.has(name.toLocaleLowerCase())) continue;
     const clone: CharacterV2 = {
       ...source, id: newId, name, voice: { ...source.voice },
