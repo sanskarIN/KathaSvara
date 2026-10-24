@@ -238,6 +238,71 @@ export function duplicateScene(
   return { ...project, scenes };
 }
 
+/**
+ * Split an edited scene immediately before one of its later lines.
+ *
+ * The two scenes retain their exact segment objects in original order. In
+ * particular, their reviewed Hindi, actor mapping and audio references do
+ * not change; only the scene boundary changes. The original source script,
+ * glossary and characters remain untouched. Save remains explicit.
+ */
+export function splitSceneAtSegment(
+  project: StoryV2, sceneId: string, segmentId: string,
+  newSceneId: string = crypto.randomUUID(),
+): StoryV2 {
+  const matching = project.scenes.filter(scene => scene.id === sceneId);
+  if (matching.length !== 1) throw new Error("Scene to split must exist exactly once.");
+  if (project.scenes.length >= 200) throw new Error("Maximum 200 scenes.");
+  const source = matching[0];
+  const targetLines = source.segments.filter(segment => segment.id === segmentId);
+  const allMatchingLines = project.scenes.reduce((count, scene) =>
+    count + scene.segments.filter(segment => segment.id === segmentId).length, 0);
+  if (targetLines.length !== 1 || allMatchingLines !== 1) {
+    throw new Error("Split line must exist exactly once in the selected scene.");
+  }
+  const splitAt = source.segments.findIndex(segment => segment.id === segmentId);
+  if (splitAt <= 0) throw new Error("Split must leave at least one line in each scene.");
+  const usedIds = new Set([
+    project.id,
+    ...project.characters.map(character => character.id),
+    ...project.scenes.map(scene => scene.id),
+    ...project.scenes.flatMap(scene => scene.segments.map(segment => segment.id)),
+  ]);
+  if (!newSceneId || newSceneId.length > 80 || newSceneId.trim() !== newSceneId ||
+      /[\u0000-\u001f\u007f]/u.test(newSceneId) || usedIds.has(newSceneId)) {
+    throw new Error("New scene identity must be unique and valid.");
+  }
+  const usedTitles = new Set(project.scenes.map(scene => scene.title.toLocaleLowerCase()));
+  let nextTitle = "";
+  for (let number = 2; number <= 202; number++) {
+    const suffix = ` (part ${number})`;
+    const maxStemLength = 120 - suffix.length;
+    let stem = "";
+    for (const char of source.title) {
+      if (stem.length + char.length > maxStemLength) break;
+      stem += char;
+    }
+    const candidate = stem.trimEnd() + suffix;
+    if (!usedTitles.has(candidate.toLocaleLowerCase())) {
+      nextTitle = candidate;
+      break;
+    }
+  }
+  if (!nextTitle) throw new Error("No available split-scene title.");
+  const newScene: SceneV2 = {
+    id: newSceneId,
+    title: nextTitle,
+    notes: "",
+    segments: source.segments.slice(splitAt),
+  };
+  const scenes = [...project.scenes];
+  const position = project.scenes.indexOf(source);
+  scenes.splice(position, 1, {
+    ...source, segments: source.segments.slice(0, splitAt),
+  }, newScene);
+  return { ...project, scenes };
+}
+
 export function moveSegment(project: StoryV2, segmentId: string, destinationSceneId: string): StoryV2 {
   const destinations = project.scenes.filter(scene => scene.id === destinationSceneId);
   if (destinations.length === 0) throw new Error("Destination scene does not exist.");
