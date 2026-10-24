@@ -814,6 +814,23 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
   });
 
 
+  it("disables new and duplicated characters when native cast capacity is reached", () => {
+    const doc = story();
+    doc.characters.push(...Array.from({ length: 99 }, (_, i) => ({
+      id: `character-${i}`, name: `पात्र ${i}`, description: "", voice: defaultVoice(),
+    })));
+    const { onChange, onMessage } = mount(doc);
+    const duplicates = screen.getAllByRole("button", { name: "Duplicate voice profile" });
+    expect(duplicates).toHaveLength(100);
+    expect(duplicates.every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "New character name" }), {
+      target: { value: "नया पात्र" },
+    });
+    expect((screen.getByRole("button", { name: "+ Add" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
   it("duplicates the selected Hindi scene with new line identities and pending audio", () => {
     vi.stubGlobal("crypto", { randomUUID: vi.fn()
       .mockReturnValueOnce("550e8400-e29b-41d4-a716-446655440001")
