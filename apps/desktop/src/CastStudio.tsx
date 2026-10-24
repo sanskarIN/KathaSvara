@@ -15,7 +15,7 @@ import { serializeProductionManifest, type ProductionAudit } from "./lib/product
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
 import {
-  addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
+  addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
@@ -203,6 +203,27 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       edit(() => updated);
       setSelectedScene(newScene.id);
       onMessage("Scene split before the selected line. Dialogue order, original script and reviewed Hindi are preserved. Save the story to keep this change.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function mergeCurrentSceneWithNext(sceneId: string) {
+    if (busy || rendering) return;
+    const position = document.scenes.findIndex(scene => scene.id === sceneId);
+    const following = document.scenes[position + 1];
+    if (!following) return;
+    if (!window.confirm(
+      `Merge this scene with the next scene "${following.title}"? ` +
+      "All dialogue lines, voice assignments and cached line metadata are preserved in order. " +
+      "The next scene title and any notes move to nonspoken production notes. " +
+      "The original script is not edited; Save explicitly to keep this merge."
+    )) return;
+    try {
+      // Preflight the entire merge before invalidating the current preview.
+      const updated = mergeSceneWithNext(document, sceneId);
+      edit(() => updated);
+      setSelectedScene(sceneId);
+      onMessage("Adjacent scenes merged. Original script, dialogue order and voice assignments remain unchanged; save to persist.");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -992,6 +1013,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                 disabled={busy || rendering || document.scenes.length >= 200}
                 onClick={() => duplicateCurrentScene(activeScene.id)}>
                 Duplicate scene (fresh audio)
+              </button>
+              <button type="button" className="secondary-button"
+                disabled={busy || rendering || document.scenes[document.scenes.length - 1]?.id === activeScene.id}
+                onClick={() => mergeCurrentSceneWithNext(activeScene.id)}>
+                Merge with next scene (keep dialogue)
               </button>
               <button type="button" className="quiet-button"
                 disabled={busy || rendering}
