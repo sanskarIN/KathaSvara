@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Add **Merge with next scene (keep dialogue)** as a confirmed, non-destructive structural edit. Joining adjacent scenes retains every existing line in the same order with its speaker, reviewed text, status and audio metadata; the successor scene's title and production notes are kept in nonspoken production notes. Refuse ambiguous IDs, >2000 combined segments or >4000 combined note characters. The original script remains unchanged and explicit Save is required. Add unit and mocked React desktop tests.
+
+
 - Harden existing cast and scene mutation helpers against ambiguous IDs: reject missing or repeated scene/character/line identities during rename, reorder, speaker reassignments and reviewed-speech edits. Preserve generated audio/metadata on unchanged speaker, text or same-scene moves; do not append a line when moving it to its own scene. Disable invalid scene-boundary buttons and block desktop mutation controls during parsing/rendering. Add model-free and mocked desktop regressions.
 
 - Ensure **Duplicate scene** adds copy suffixes without cutting a UTF-16 surrogate pair in a long emoji/mixed Unicode scene title, consistent with scene-splitting title safety; add a Unicode regression test.
