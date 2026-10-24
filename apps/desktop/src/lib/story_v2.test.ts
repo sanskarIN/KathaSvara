@@ -83,6 +83,45 @@ describe("extended cast and scene editing", () => {
     expect(result.characters[2].voice).toEqual(result.characters[1].voice);
     expect(result.characters[2].voice).not.toBe(result.characters[1].voice);
   });
+  it("rejects duplicate or unsafe character IDs instead of making an unsaveable project", () => {
+    const doc = fixture();
+    expect(() => addCharacter(doc, "नया पात्र", "raja")).toThrow("ID must be unique");
+    expect(() => duplicateCharacter(doc, "raja", "narrator")).toThrow("ID must be unique");
+    expect(() => duplicateCharacter(doc, "raja", "")).toThrow("ID must be unique");
+    expect(() => duplicateCharacter(doc, "raja", " bad ")).toThrow("ID must be unique");
+    expect(() => duplicateCharacter(doc, "raja", "x".repeat(81))).toThrow("ID must be unique");
+    expect(() => duplicateCharacter(doc, "raja", "bad\u0000id")).toThrow("ID must be unique");
+    const corrupt = { ...doc, characters: [...doc.characters, { ...doc.characters[1] }] };
+    expect(() => duplicateCharacter(corrupt, "raja", "new-id")).toThrow("exactly once");
+    expect(doc.characters).toHaveLength(2);
+  });
+  it("never duplicates beyond the native 100-character project limit", () => {
+    const doc = fixture();
+    const full = { ...doc, characters: [
+      ...doc.characters,
+      ...Array.from({ length: 98 }, (_, i) => ({
+        ...doc.characters[1], id: `cast-${i}`, name: `पात्र ${i}`,
+      })),
+    ] };
+    expect(full.characters).toHaveLength(100);
+    expect(() => duplicateCharacter(full, "raja", "new-character")).toThrow("Maximum 100");
+    expect(() => addCharacter(full, "और पात्र", "new-character")).toThrow("Maximum 100");
+    expect(full.characters).toHaveLength(100);
+  });
+  it("truncates long Hindi copy names safely and resolves name conflicts", () => {
+    const doc = fixture();
+    doc.characters[1].name = "क".repeat(120);
+    const first = duplicateCharacter(doc, "raja", "copy-long-1");
+    expect(first.characters[2].name.length).toBeLessThanOrEqual(120);
+    expect(first.characters[2].name).toMatch(/ copy$/);
+    expect(first.characters[2].voice).toEqual(doc.characters[1].voice);
+    expect(first.characters[2].voice).not.toBe(doc.characters[1].voice);
+    const second = duplicateCharacter(first, "raja", "copy-long-2");
+    expect(second.characters[3].name).toMatch(/ copy 2$/);
+    expect(second.characters[3].name.length).toBeLessThanOrEqual(120);
+    expect(new Set(second.characters.map(char => char.name)).size).toBe(4);
+    expect(doc.characters).toHaveLength(2);
+  });
   it("adds a scene and moves a line without dropping original text", () => {
     const doc = addScene(fixture(), "नया दृश्य", "newscene");
     const moved = moveSegment(doc, "seg1", "newscene");
