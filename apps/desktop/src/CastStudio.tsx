@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
@@ -14,6 +14,7 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
+import { sceneOverview } from "./lib/scene_overview";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
@@ -60,6 +61,8 @@ function spokenSubtitleLines(doc: StoryV2) {
 export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newName, setNewName] = useState("");
   const [newSceneTitle, setNewSceneTitle] = useState("");
+  const [sceneSearch, setSceneSearch] = useState("");
+  const [unresolvedScenesOnly, setUnresolvedScenesOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   // Only the current parse/save/load operation can own the busy flag.
   const editorOperationEpoch = useRef(0);
@@ -668,6 +671,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
+  const visibleScenes = useMemo(() =>
+    sceneOverview(document, sceneSearch, unresolvedScenesOnly),
+    [document, sceneSearch, unresolvedScenesOnly]);
   const unresolvedNow = unresolvedSpeech(document);
   // Derive the alert from the active document, not the one-time parse response:
   // assigning a previously unknown actor must immediately clear stale warnings.
@@ -987,12 +993,43 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             maxLength={120} onChange={event => setNewSceneTitle(event.target.value)} />
           <button className="secondary-button" disabled={!newSceneTitle.trim() || busy || rendering} onClick={createScene}>+ Scene</button>
         </div>
+        <div className="scene-outline-controls" aria-label="Scene navigation filters">
+          <label>
+            Find scenes or dialogue
+            <input type="search" aria-label="Find scenes or dialogue" maxLength={120}
+              placeholder="दृश्य, संवाद, या नोट खोजें"
+              value={sceneSearch} onChange={event => setSceneSearch(event.target.value)} />
+          </label>
+          <label className="scene-outline-checkbox">
+            <input type="checkbox" checked={unresolvedScenesOnly}
+              onChange={event => setUnresolvedScenesOnly(event.target.checked)} />
+            Only scenes with unassigned speech
+          </label>
+          <button type="button" className="quiet-button" disabled={!sceneSearch && !unresolvedScenesOnly}
+            onClick={() => { setSceneSearch(""); setUnresolvedScenesOnly(false); }}>
+            Clear scene filters
+          </button>
+        </div>
+        <p className="helper scene-outline-count" aria-live="polite">
+          Showing {visibleScenes.length} of {document.scenes.length} scenes. Search filters navigation only; the selected scene stays open until you choose another.
+        </p>
         <div className="scene-navigation" aria-label="Scenes">
-          {document.scenes.map(scene => (
-            <button key={scene.id} className={"quiet-button " + (activeScene?.id === scene.id ? "selected-scene" : "")}
-              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>{scene.title}</button>
+          {visibleScenes.map(scene => (
+            <button type="button" key={scene.id} aria-label={scene.title}
+              className={"quiet-button scene-outline-entry " + (activeScene?.id === scene.id ? "selected-scene" : "")}
+              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>
+              <span>{scene.title}</span>
+              <small aria-hidden="true" className="scene-outline-meta">
+                {scene.spoken} spoken · {scene.directions} directions
+                {scene.unresolved > 0 ? ` · ${scene.unresolved} unassigned` : ""}
+                {scene.hasProductionNotes ? " · notes" : ""}
+              </small>
+            </button>
           ))}
         </div>
+        {visibleScenes.length === 0 && (
+          <p className="helper">No matching scenes. Clear filters to show all scenes; your original story has not changed.</p>
+        )}
         {activeScene ? (
           <>
             <div className="cast-actions">
