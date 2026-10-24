@@ -321,6 +321,50 @@ export function splitSceneAtSegment(
   return { ...project, scenes };
 }
 
+/**
+ * Join a scene with its immediate successor, preserving narration and review.
+ *
+ * Scene/segment order and object identities stay stable; the second scene's
+ * title and production notes are retained in nonspoken notes, never in a
+ * dialogue segment. No generated audio metadata is copied or invalidated.
+ */
+export function mergeSceneWithNext(project: StoryV2, sceneId: string): StoryV2 {
+  const matches = project.scenes.filter(scene => scene.id === sceneId);
+  if (matches.length !== 1) throw new Error("Scene to merge must exist exactly once.");
+  const index = project.scenes.findIndex(scene => scene.id === sceneId);
+  if (index >= project.scenes.length - 1) throw new Error("No next scene to merge.");
+  const first = project.scenes[index];
+  const second = project.scenes[index + 1];
+  if (project.scenes.filter(scene => scene.id === second.id).length !== 1) {
+    throw new Error("Next scene identity must be unique.");
+  }
+  const allLineIds = project.scenes.flatMap(scene => scene.segments.map(segment => segment.id));
+  if (new Set(allLineIds).size !== allLineIds.length) {
+    throw new Error("Line identities must be unique before merging scenes.");
+  }
+  if (first.segments.length + second.segments.length > 2000) {
+    throw new Error("A merged scene cannot contain more than 2000 lines.");
+  }
+  const retainedNotes = `Merged scene: ${second.title}` +
+    (second.notes ? `\n${second.notes}` : "");
+  const notes = first.notes ? `${first.notes}\n\n${retainedNotes}` : retainedNotes;
+  if (notes.length > 4000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(notes)) {
+    throw new Error("Combined production notes exceed the 4000-character limit or contain controls.");
+  }
+  const joined: SceneV2 = {
+    ...first, notes,
+    segments: [...first.segments, ...second.segments],
+  };
+  return {
+    ...project,
+    scenes: [
+      ...project.scenes.slice(0, index),
+      joined,
+      ...project.scenes.slice(index + 2),
+    ],
+  };
+}
+
 export function moveSegment(project: StoryV2, segmentId: string, destinationSceneId: string): StoryV2 {
   const destinations = project.scenes.filter(scene => scene.id === destinationSceneId);
   if (destinations.length === 0) throw new Error("Destination scene does not exist.");
