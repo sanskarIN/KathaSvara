@@ -846,7 +846,9 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.queryByRole("button", { name: "प्रथम दृश्य" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Clear scene filters" }));
     expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
-      .toContain("0 unassigned".replace("0 unassigned", "2 spoken"));
+      .toContain("2 spoken");
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .not.toContain("unassigned");
     expect(onChange).not.toHaveBeenCalled();
     expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
   });
