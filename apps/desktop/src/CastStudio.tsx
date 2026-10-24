@@ -685,9 +685,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             <li key={char.id}>
               <label>
                 <span>Character name</span>
-                <input value={char.name} disabled={char.id === "narrator"} maxLength={120}
+                <input value={char.name} disabled={char.id === "narrator" || busy || rendering} maxLength={120}
                   onChange={event => {
                     const nextName = event.target.value;
+                    if (nextName === char.name) return;
                     try {
                       renameCharacter(document, char.id, nextName);
                       edit(doc => renameCharacter(doc, char.id, nextName));
@@ -696,7 +697,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               </label>
               <div className="cast-voice-row">
                 <label>Expression
-                  <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration}
+                  <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration} disabled={busy || rendering}
                     onChange={event => {
                       const exaggeration = Number(event.target.value);
                       edit(doc => ({
@@ -706,7 +707,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     }} />
                 </label>
                 <label>CFG
-                  <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight}
+                  <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight} disabled={busy || rendering}
                     onChange={event => {
                       const cfg_weight = Number(event.target.value);
                       edit(doc => ({
@@ -719,7 +720,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               <p className="helper">Hindi · Chatterbox Multilingual · pause {char.voice.pause_ms} ms · no distinct speaker verified</p>
               <div className="cast-actions">
                 <button className="quiet-button" disabled={busy || rendering || document.characters.length >= 100} onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
-                {char.id !== "narrator" && <button className="quiet-button" onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
+                {char.id !== "narrator" && <button className="quiet-button" disabled={busy || rendering} onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
               </div>
             </li>
           ))}
@@ -975,14 +976,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           <>
             <div className="cast-actions">
               <label className="scene-title-label">Scene title
-                <input value={activeScene.title} maxLength={120} onChange={event => {
+                <input value={activeScene.title} disabled={busy || rendering} maxLength={120} onChange={event => {
                   const title = event.target.value;
-                  if (!title.trim()) return;
+                  if (!title.trim() || title.trim() === activeScene.title) return;
                   edit(doc => renameScene(doc, activeScene.id, title));
                 }} />
               </label>
-              <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
-              <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering || document.scenes[0]?.id === activeScene.id}
+                onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering || document.scenes[document.scenes.length - 1]?.id === activeScene.id}
+                onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
               <button type="button" className="secondary-button"
                 disabled={busy || rendering || document.scenes.length >= 200}
                 onClick={() => duplicateCurrentScene(activeScene.id)}>
@@ -1019,9 +1024,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                   <div className="segment-header">
                     <span>{segment.kind === "direction" ? "Stage direction (not spoken)" : "Spoken segment"}</span>
                     {segment.kind === "speech" && (
-                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""}
+                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""} disabled={busy || rendering}
                         onChange={event => {
                           const speakerId = event.target.value;
+                          if (speakerId === segment.speaker_id && segment.source_label === null) return;
                           try {
                             assignSegment(document, segment.id, speakerId);
                             edit(doc => assignSegment(doc, segment.id, speakerId));
@@ -1074,9 +1080,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     )}
                   </div>
                   <label className="move-segment-label">Move line to scene
-                    <select aria-label={"Move line " + segment.id} value={activeScene.id}
+                    <select aria-label={"Move line " + segment.id} value={activeScene.id} disabled={busy || rendering || document.scenes.length < 2}
                       onChange={event => {
                         const destinationId = event.target.value;
+                        if (destinationId === activeScene.id) return;
                         try {
                           moveSegment(document, segment.id, destinationId);
                           edit(doc => moveSegment(doc, segment.id, destinationId));
@@ -1086,7 +1093,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     </select>
                   </label>
                   {segment.kind === "speech" && segment.speaker_id && (
-                    <button className="quiet-button" disabled={rendering}
+                    <button className="quiet-button" disabled={busy || rendering}
                       onClick={() => void startRender(activeScene.id, segment.id)}>
                       Regenerate / retry this line only
                     </button>
