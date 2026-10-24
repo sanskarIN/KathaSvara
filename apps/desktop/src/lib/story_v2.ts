@@ -122,9 +122,9 @@ export function reassignAndRemoveCharacter(project: StoryV2, id: string, replace
 }
 
 export function assignSegment(project: StoryV2, segmentId: string, speakerId: string): StoryV2 {
-  if (project.characters.filter(item => item.id === speakerId).length !== 1) {
-    throw new Error("Speaker must exist exactly once.");
-  }
+  const speakers = project.characters.filter(item => item.id === speakerId);
+  if (speakers.length === 0) throw new Error("Unknown speaker.");
+  if (speakers.length !== 1) throw new Error("Speaker must exist exactly once.");
   const matches = project.scenes.flatMap(scene => scene.segments)
     .filter(segment => segment.id === segmentId);
   if (matches.length !== 1 || matches[0].kind !== "speech") {
@@ -431,6 +431,7 @@ export function reviewSpokenText(project: StoryV2, segmentId: string, spokenText
   }
   const matches = project.scenes.flatMap(scene => scene.segments)
     .filter(segment => segment.id === segmentId);
+  if (matches.length === 0) throw new Error("Spoken segment was not found.");
   if (matches.length !== 1 || matches[0].kind !== "speech") {
     throw new Error("Spoken segment must exist exactly once.");
   }
