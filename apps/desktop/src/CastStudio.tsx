@@ -16,7 +16,7 @@ import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
-  removeScene, renameScene, reviewSpokenText, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
+  removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
 type RenderPlan = {
@@ -189,6 +189,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       edit(() => cloned);
       setSelectedScene(copyId);
       onMessage("Copied this scene with new line IDs. Old generated audio was not copied; save the story and review any new narration.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function splitCurrentScene(sceneId: string, segmentId: string) {
+    if (busy || rendering) return;
+    try {
+      // Validate and assign the new scene ID before the deferred React updater.
+      const updated = splitSceneAtSegment(document, sceneId, segmentId);
+      const index = updated.scenes.findIndex(scene => scene.id === sceneId);
+      const newScene = updated.scenes[index + 1];
+      edit(() => updated);
+      setSelectedScene(newScene.id);
+      onMessage("Scene split before the selected line. Dialogue order, original script and reviewed Hindi are preserved. Save the story to keep this change.");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -1050,6 +1064,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                       onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, 1))}>
                       ↓ Line down
                     </button>
+                    {index > 0 && (
+                      <button type="button" className="secondary-button"
+                        aria-label={"Split scene before line " + segment.id}
+                        disabled={busy || rendering || document.scenes.length >= 200}
+                        onClick={() => splitCurrentScene(activeScene.id, segment.id)}>
+                        Split scene here
+                      </button>
+                    )}
                   </div>
                   <label className="move-segment-label">Move line to scene
                     <select aria-label={"Move line " + segment.id} value={activeScene.id}
