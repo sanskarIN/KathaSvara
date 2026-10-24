@@ -785,6 +785,60 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
   });
 
 
+  it("merges adjacent Hindi scenes only after confirmation, retaining speaker and cached line data", () => {
+    const doc = story();
+    const originalLine = doc.scenes[0].segments[0];
+    doc.scenes[0].notes = "पहले दृश्य के निर्देश";
+    doc.scenes.push({
+      id: "scene-two", title: "दूसरा दृश्य", notes: "अंत में संगीत",
+      segments: [{
+        ...originalLine, id: "second-line", original_text: "दूसरा संवाद",
+        spoken_text: "दूसरा संवाद", audio_ref: "retained-audio", duration_seconds: 1.5,
+      }],
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { rerender, onChange, onMessage } = mount(doc);
+    const button = screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(button);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const apply = onChange.mock.calls[0][0] as (old: StoryV2) => StoryV2;
+    const joined = apply(doc);
+    expect(joined.scenes).toHaveLength(1);
+    expect(joined.scenes[0].segments.map(line => line.id)).toEqual(["line-one", "second-line"]);
+    expect(joined.scenes[0].segments[0]).toBe(originalLine);
+    expect(joined.scenes[0].segments[1]).toBe(doc.scenes[1].segments[0]);
+    expect(joined.scenes[0].segments[1].audio_ref).toBe("retained-audio");
+    expect(joined.scenes[0].notes).toContain("पहले दृश्य के निर्देश");
+    expect(joined.scenes[0].notes).toContain("Merged scene: दूसरा दृश्य");
+    expect(joined.scenes[0].notes).toContain("अंत में संगीत");
+    expect(joined.text).toBe(doc.text);
+    expect(joined.characters).toBe(doc.characters);
+    expect(doc.scenes).toHaveLength(2);
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("save to persist"));
+    rerender(<CastStudio document={joined} onChange={onChange} onMessage={onMessage} />);
+    expect((screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("disables merging the last scene and rejects overlong combined notes before editor mutation", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const doc = story();
+    doc.scenes.push({ id: "scene-two", title: "दूसरा दृश्य", notes: "एक नोट", segments: [] });
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "दूसरा दृश्य" }));
+    expect((screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "प्रथम दृश्य" }));
+    doc.scenes[0].notes = "अ".repeat(4000);
+    fireEvent.click(screen.getByRole("button", { name: "Merge with next scene (keep dialogue)" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("4000-character"));
+    expect(doc.scenes).toHaveLength(2);
+  });
+
   it("splits the current Hindi scene before a later line and preserves the complete narration", () => {
     vi.stubGlobal("crypto", { randomUUID: () => "550e8400-e29b-41d4-a716-446655440003" });
     const doc = story();
