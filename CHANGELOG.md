@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Fail closed on ambiguous scene IDs during cross-scene line moves and in-scene reordering, and on malformed generated scene/line IDs during duplication. Keep long Unicode character names within safe UTF-16 input bounds without splitting emoji surrogate pairs; add regression tests. Draft-only, no changes to v0.5.2 release gate.
+
 - Harden **Duplicate voice profile** and character creation against invalid or conflicting IDs, accidental over-capacity casts (100 characters), and overlong Hindi copy names. The desktop disables add/duplicate controls at the native validation limit or during renders. Copied settings remain a configuration profile, **not proof of a distinct generated speaker**. Include model-free TypeScript and React boundary regressions.
 
 - Fix deferred React editor updates by capturing speaker, destination scene, character name and voice-slider input values immediately rather than later reading a mutable browser event object. Add a queued scene-move regression and resolved-speaker integration coverage.
