@@ -868,7 +868,9 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect((screen.getByRole("textbox", { name: "Scene title" }) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "↑ Move up" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "↓ Move down" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "Speaker for नमस्कार।" }) as HTMLSelectElement).disabled).toBe(true);
+    const speakerControls = screen.getAllByRole("combobox", { name: "Speaker for नमस्कार।" });
+    expect(speakerControls).toHaveLength(2);
+    expect(speakerControls.every(control => (control as HTMLSelectElement).disabled)).toBe(true);
     expect((screen.getByRole("combobox", { name: "Move line line-one" }) as HTMLSelectElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Delete and reassign to narrator" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Split scene before line line-two" }) as HTMLButtonElement).disabled).toBe(true);
