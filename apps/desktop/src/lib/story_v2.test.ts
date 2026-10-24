@@ -367,6 +367,16 @@ describe("v0.5.3 safe scene duplication", () => {
     expect(long.scenes[1].title.length).toBeLessThanOrEqual(120);
     expect(long.scenes[1].title).toContain("(copy)");
   });
+  it("keeps Unicode surrogate pairs intact when duplicating long scene titles", () => {
+    const doc = fixture();
+    doc.scenes[0].title = "😀".repeat(60);
+    const copy = duplicateScene(doc, "s1", (() => { let i = 0; return () => "copy-" + ++i; })());
+    const title = copy.scenes[1].title;
+    expect(title.length).toBeLessThanOrEqual(120);
+    expect(title).toMatch(/ \(copy\)$/);
+    expect(Array.from(title).every(unit => !(unit.length === 1 &&
+      unit.charCodeAt(0) >= 0xD800 && unit.charCodeAt(0) <= 0xDFFF))).toBe(true);
+  });
   it("fails closed on missing scene, duplicate IDs and excessive scene count", () => {
     const doc = fixture();
     expect(() => duplicateScene(doc, "unknown", makeIds("new", "line"))).toThrow("not found");
