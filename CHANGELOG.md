@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Harden existing cast and scene mutation helpers against ambiguous IDs: reject missing or repeated scene/character/line identities during rename, reorder, speaker reassignments and reviewed-speech edits. Preserve generated audio/metadata on unchanged speaker, text or same-scene moves; do not append a line when moving it to its own scene. Disable invalid scene-boundary buttons and block desktop mutation controls during parsing/rendering. Add model-free and mocked desktop regressions.
+
 - Ensure **Duplicate scene** adds copy suffixes without cutting a UTF-16 surrogate pair in a long emoji/mixed Unicode scene title, consistent with scene-splitting title safety; add a Unicode regression test.
 
 - Add **Split scene here** before any non-first spoken line or stage direction. Keep original Hindi source text, pronunciation glossary, actor assignments, reviewed lines, existing per-line audio metadata and overall order unchanged. Place the new scene immediately after the source, give it a unique bounded `(part 2)` title and empty editorial notes, and make Save explicit. Reject duplicate/invalid scene identities, ambiguous line IDs and 200-scene overflow. Cover pure TypeScript and mocked desktop React flows (without speech synthesis).
