@@ -166,6 +166,100 @@ describe("extended cast and scene editing", () => {
   });
 });
 
+describe("v0.5.3 identity-safe edits of older cast and scene operations", () => {
+  it("refuses missing or ambiguous scene IDs when reordering or renaming", () => {
+    const doc = fixture();
+    expect(moveScene(doc, "s1", -1)).toBe(doc);
+    expect(moveScene(doc, "s2", 1)).toBe(doc);
+    expect(() => moveScene(doc, "missing", 1)).toThrow("exactly once");
+    expect(() => renameScene(doc, "missing", "शीर्षक")).toThrow("exactly once");
+    expect(renameScene(doc, "s1", "दरबार")).toBe(doc);
+    const corrupt: StoryV2 = { ...doc, scenes: [...doc.scenes, { ...doc.scenes[0] }] };
+    expect(() => moveScene(corrupt, "s1", 1)).toThrow("exactly once");
+    expect(() => renameScene(corrupt, "s1", "नया दरबार")).toThrow("exactly once");
+    expect(doc.scenes[0].title).toBe("दरबार");
+  });
+
+  it("does not silently remove several characters sharing one identity", () => {
+    const doc = fixture();
+    expect(() => reassignAndRemoveCharacter(doc, "unknown")).toThrow("exactly once");
+    const duplicate: StoryV2 = { ...doc, characters: [
+      ...doc.characters, { ...doc.characters[1] },
+    ] };
+    expect(() => reassignAndRemoveCharacter(duplicate, "raja")).toThrow("exactly once");
+    const duplicateNarrator: StoryV2 = { ...doc, characters: [
+      ...doc.characters, { ...doc.characters[0] },
+    ] };
+    expect(() => reassignAndRemoveCharacter(duplicateNarrator, "raja")).toThrow("exactly once");
+    expect(doc.characters).toHaveLength(2);
+    expect(doc.scenes[0].segments[0].audio_ref).toBe("cached-audio");
+  });
+
+  it("does not reassign an unchanged speaker or overwrite two equal line IDs", () => {
+    const doc = fixture();
+    const first = doc.scenes[0].segments[0];
+    expect(assignSegment(doc, "seg1", "raja")).toBe(doc);
+    expect(first.audio_ref).toBe("cached-audio");
+    expect(() => assignSegment(doc, "missing", "raja")).toThrow("exactly once");
+    expect(() => assignSegment(doc, "seg1", "unknown")).toThrow("Unknown speaker");
+    const duplicateLine: StoryV2 = { ...doc, scenes: [
+      doc.scenes[0], { ...doc.scenes[1], segments: [{ ...first }] },
+    ] };
+    expect(() => assignSegment(duplicateLine, "seg1", "narrator")).toThrow("exactly once");
+    const duplicateSpeaker: StoryV2 = { ...doc, characters: [
+      ...doc.characters, { ...doc.characters[1] },
+    ] };
+    expect(() => assignSegment(duplicateSpeaker, "seg1", "raja")).toThrow("exactly once");
+    const direction: StoryV2 = { ...doc, scenes: [{
+      ...doc.scenes[0], segments: [{ ...first, kind: "direction", speaker_id: null }],
+    }, doc.scenes[1]] };
+    expect(() => assignSegment(direction, "seg1", "narrator")).toThrow("exactly once");
+  });
+
+  it("retains reviewed speech/audio metadata for no-op text edits and refuses duplicate lines", () => {
+    const doc = fixture();
+    const first = doc.scenes[0].segments[0];
+    expect(reviewSpokenText(doc, "seg1", "नमस्कार")).toBe(doc);
+    expect(first.status).toBe("completed");
+    expect(first.audio_ref).toBe("cached-audio");
+    const duplicate: StoryV2 = { ...doc, scenes: [
+      doc.scenes[0], { ...doc.scenes[1], segments: [{ ...first }] },
+    ] };
+    expect(() => reviewSpokenText(duplicate, "seg1", "नया पाठ"))
+      .toThrow("exactly once");
+    const direction: StoryV2 = { ...doc, scenes: [{
+      ...doc.scenes[0], segments: [{ ...first, kind: "direction" }],
+    }, doc.scenes[1]] };
+    expect(() => reviewSpokenText(direction, "seg1", "नया पाठ")).toThrow("exactly once");
+    expect(doc.scenes[0].segments[0].spoken_text).toBe("नमस्कार");
+  });
+
+  it("keeps a same-scene line move inert and rejects ambiguous source scene identity", () => {
+    const doc = fixture();
+    expect(moveSegment(doc, "seg1", "s1")).toBe(doc);
+    expect(doc.scenes[0].segments[0].id).toBe("seg1");
+    const corrupt: StoryV2 = { ...doc, scenes: [
+      ...doc.scenes, { ...doc.scenes[0], segments: [] },
+    ] };
+    expect(() => moveSegment(corrupt, "seg1", "s2")).toThrow("Source scene identifier");
+    const moved = moveSegment(doc, "seg1", "s2");
+    expect(moved.scenes[1].segments[0]).toBe(doc.scenes[0].segments[0]);
+    expect(moved.scenes[0].segments).toHaveLength(0);
+    expect(doc.scenes[0].segments).toHaveLength(1);
+  });
+
+  it("rejects missing and repeated character IDs on rename, leaving source untouched", () => {
+    const doc = fixture();
+    expect(() => renameCharacter(doc, "missing", "नया नाम")).toThrow("exactly once");
+    expect(renameCharacter(doc, "raja", "राजा भोज")).toBe(doc);
+    const corrupt: StoryV2 = { ...doc, characters: [
+      ...doc.characters, { ...doc.characters[1] },
+    ] };
+    expect(() => renameCharacter(corrupt, "raja", "नया नाम")).toThrow("exactly once");
+    expect(doc.characters[1].name).toBe("राजा भोज");
+  });
+});
+
 describe("v0.2.1 non-destructive pronunciation authoring", () => {
   it("edits only reviewed speech and invalidates stale segment metadata", () => {
     const doc = fixture();
