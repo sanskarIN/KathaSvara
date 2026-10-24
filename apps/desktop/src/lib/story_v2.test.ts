@@ -443,7 +443,7 @@ describe("v0.5.3 safe adjacent-scene merging", () => {
     expect(combined.scenes[0].segments[2].audio_ref).toBe("retained-cache");
     expect(combined.scenes[0].segments[2].duration_seconds).toBe(2.3);
     expect(combined.scenes[0].notes).toBe(
-      "निर्देशक: पहले दृश्य पर ध्यान दें\\n\\nMerged scene: रास्ता\\nदूसरे दृश्य में हल्का संगीत"
+      "निर्देशक: पहले दृश्य पर ध्यान दें\n\nMerged scene: रास्ता\nदूसरे दृश्य में हल्का संगीत"
     );
     expect(combined.text).toBe(doc.text);
     expect(combined.characters).toBe(doc.characters);
