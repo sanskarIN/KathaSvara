@@ -785,6 +785,100 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
   });
 
 
+  it("filters 200-scene navigation locally by Hindi dialogue, title and nonspoken notes", () => {
+    const doc = story();
+    const source = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...source, id: "direction-one", kind: "direction", speaker_id: null,
+      original_text: "[द्वार बंद होता है]", spoken_text: "",
+    });
+    doc.scenes[1] = {
+      id: "second-scene", title: "दरबार", notes: "संगीत थोड़ा धीमा",
+      segments: [{ ...source, id: "line-two", original_text: "महाराज का स्वागत",
+        spoken_text: "महाराज का स्वागत" }],
+    };
+    const { onChange } = mount(doc);
+    const search = screen.getByRole("searchbox", { name: "Find scenes or dialogue" });
+    expect(screen.getByText("Showing 2 of 2 scenes.", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .toContain("1 spoken · 1 directions");
+    fireEvent.change(search, { target: { value: "महाराज" } });
+    expect(screen.getByText("Showing 1 of 2 scenes.", { exact: false })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "प्रथम दृश्य" })).toBeNull();
+    expect(screen.getByRole("button", { name: "दरबार" }).textContent).toContain("1 spoken");
+    fireEvent.click(screen.getByRole("button", { name: "दरबार" }));
+    expect((screen.getByRole("textbox", { name: "Scene title" }) as HTMLInputElement).value)
+      .toBe("दरबार");
+    fireEvent.change(search, { target: { value: "संगीत" } });
+    expect(screen.getByRole("button", { name: "दरबार" })).toBeTruthy();
+    fireEvent.change(search, { target: { value: "द्वार" } });
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[1].notes).toBe("संगीत थोड़ा धीमा");
+  });
+
+  it("locally filters unassigned speech but does not misclassify unspoken stage directions", () => {
+    const doc = story();
+    const line = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push(
+      { ...line, id: "missing-speaker", speaker_id: null, source_label: "अजनबी" },
+      { ...line, id: "unspoken-direction", kind: "direction", speaker_id: null,
+        original_text: "[पर्दा उठता है]", spoken_text: "" },
+    );
+    doc.scenes.push({ id: "second", title: "दूसरा दृश्य", notes: "", segments: [] });
+    const { rerender, onChange } = mount(doc);
+    const filter = screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" });
+    fireEvent.click(filter);
+    expect((filter as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent).toContain("1 unassigned");
+    expect(screen.queryByRole("button", { name: "दूसरा दृश्य" })).toBeNull();
+    const revised: StoryV2 = {
+      ...doc, scenes: [{
+        ...doc.scenes[0], segments: doc.scenes[0].segments.map(segment =>
+          segment.id === "missing-speaker"
+            ? { ...segment, speaker_id: "narrator", source_label: null }
+            : segment,
+        ),
+      }, doc.scenes[1]],
+    };
+    rerender(<CastStudio document={revised} onChange={onChange} onMessage={vi.fn()} />);
+    expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "प्रथम दृश्य" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear scene filters" }));
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .toContain("0 unassigned".replace("0 unassigned", "2 spoken"));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
+  });
+
+  it("clears the previous story's private search and unresolved filter after changing stories", () => {
+    const doc = story();
+    doc.scenes[0].segments[0].speaker_id = null;
+    doc.scenes[0].segments[0].source_label = "अनजाना";
+    const onChange = vi.fn();
+    const onMessage = vi.fn();
+    const { rerender } = render(
+      <CastStudio document={doc} onChange={onChange} onMessage={onMessage} />,
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
+      target: { value: "प्रथम" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }));
+    expect(screen.getByText("Showing 1 of 1 scenes.", { exact: false })).toBeTruthy();
+    const next: StoryV2 = {
+      ...doc, id: "other-story", title: "अलग कहानी",
+      scenes: [{ id: "other-scene", title: "नई कहानी", notes: "", segments: [] }],
+    };
+    rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
+    expect((screen.getByRole("searchbox", { name: "Find scenes or dialogue" }) as HTMLInputElement).value)
+      .toBe("");
+    expect((screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }) as HTMLInputElement).checked)
+      .toBe(false);
+    expect(screen.getByRole("button", { name: "नई कहानी" })).toBeTruthy();
+    expect(screen.getByText("Showing 1 of 1 scenes.", { exact: false })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("merges adjacent Hindi scenes only after confirmation, retaining speaker and cached line data", () => {
     const doc = story();
     const originalLine = doc.scenes[0].segments[0];
