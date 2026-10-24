@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Ensure **Duplicate scene** adds copy suffixes without cutting a UTF-16 surrogate pair in a long emoji/mixed Unicode scene title, consistent with scene-splitting title safety; add a Unicode regression test.
+
 - Add **Split scene here** before any non-first spoken line or stage direction. Keep original Hindi source text, pronunciation glossary, actor assignments, reviewed lines, existing per-line audio metadata and overall order unchanged. Place the new scene immediately after the source, give it a unique bounded `(part 2)` title and empty editorial notes, and make Save explicit. Reject duplicate/invalid scene identities, ambiguous line IDs and 200-scene overflow. Cover pure TypeScript and mocked desktop React flows (without speech synthesis).
 
 - Fail closed on ambiguous scene IDs during cross-scene line moves and in-scene reordering, and on malformed generated scene/line IDs during duplication. Keep long Unicode character names within safe UTF-16 input bounds without splitting emoji surrogate pairs; add regression tests. Draft-only, no changes to v0.5.2 release gate.
