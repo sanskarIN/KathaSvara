@@ -98,4 +98,34 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     expect(doc.scenes).toHaveLength(3);
     expect(separate.text).toBe(doc.text);
   });
+  it("filters scenes for a specific cast member using only spoken assignments", () => {
+    const doc = fixture();
+    doc.characters.push({
+      id: "king", name: "राजा", description: "", voice: doc.characters[0].voice,
+    });
+    doc.scenes[0].segments[0].speaker_id = "king";
+    doc.scenes[0].segments[1].speaker_id = "king"; // Direction must never match.
+    expect(sceneOverview(doc, "", false, "king").map(scene => scene.id)).toEqual(["forest"]);
+    expect(sceneOverview(doc, "", false, "narrator").map(scene => scene.id)).toEqual(["palace"]);
+    expect(sceneOverview(doc, "जंगल", false, "narrator")).toEqual([]);
+    expect(sceneOverview(doc, "नमस्कार", false, "king").map(scene => scene.id)).toEqual(["forest"]);
+    expect(sceneOverview(doc, "", false, "unknown-id")).toEqual([]);
+    expect(sceneOverview(doc).map(scene => scene.id)).toEqual(["forest", "palace", "empty"]);
+    expect(doc.scenes[0].segments[1].speaker_id).toBe("king");
+  });
+
+  it("combines cast and unresolved filters without matching unspoken stage directions", () => {
+    const doc = fixture();
+    doc.characters.push({
+      id: "king", name: "राजा", description: "", voice: doc.characters[0].voice,
+    });
+    doc.scenes[0].segments[0].speaker_id = "king";
+    expect(sceneOverview(doc, "", true, "king").map(scene => scene.id)).toEqual(["forest"]);
+    expect(sceneOverview(doc, "", true, "narrator")).toEqual([]);
+    doc.scenes[0].segments[2].speaker_id = "narrator";
+    expect(sceneOverview(doc, "", true, "king")).toEqual([]);
+    expect(sceneOverview(doc, "", false, "king").map(scene => scene.id)).toEqual(["forest"]);
+    expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
 });
