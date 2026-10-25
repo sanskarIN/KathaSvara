@@ -63,3 +63,69 @@ export function sceneOverview(
   }
   return result;
 }
+
+/** A local, source-only breakdown; never infer or certify distinct voice identities. */
+export interface CastCoverage {
+  characterId: string;
+  characterName: string;
+  spokenLines: number;
+  sceneCount: number;
+}
+export interface CastCoverageSummary {
+  characters: CastCoverage[];
+  spokenLines: number;
+  directions: number;
+  unassignedSpeech: number;
+  invalidSpeakerAssignments: number;
+}
+
+/**
+ * Count actual spoken turns per actor, even if no audio has been generated.
+ * Track invalid non-null speaker references separately from explicitly
+ * unassigned speech so malformed documents are not reported as fully cast.
+ * This function must not mutate project data or write any personal dialogue.
+ */
+export function castCoverage(story: StoryV2): CastCoverageSummary {
+  const coverage = new Map(story.characters.map(character => [
+    character.id, {
+      characterId: character.id,
+      characterName: character.name,
+      spokenLines: 0,
+      sceneCount: 0,
+    } satisfies CastCoverage,
+  ]));
+  let spokenLines = 0;
+  let directions = 0;
+  let unassignedSpeech = 0;
+  let invalidSpeakerAssignments = 0;
+  for (const scene of story.scenes) {
+    const appearing = new Set<string>();
+    for (const segment of scene.segments) {
+      if (segment.kind === "direction") {
+        directions += 1;
+        continue;
+      }
+      if (segment.kind !== "speech") continue;
+      spokenLines += 1;
+      if (segment.speaker_id === null) {
+        unassignedSpeech += 1;
+        continue;
+      }
+      const actor = coverage.get(segment.speaker_id);
+      if (!actor) {
+        invalidSpeakerAssignments += 1;
+        continue;
+      }
+      actor.spokenLines += 1;
+      appearing.add(segment.speaker_id);
+    }
+    for (const id of appearing) coverage.get(id)!.sceneCount += 1;
+  }
+  return {
+    characters: [...coverage.values()],
+    spokenLines,
+    directions,
+    unassignedSpeech,
+    invalidSpeakerAssignments,
+  };
+}
