@@ -112,17 +112,19 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   // Never persisted or transferred to the model: only manual QA for the current WAV.
   const [review, setReview] = useState<AudioReview | null>(null);
   const renderRevision = useRef(0);
+  // Synchronous render ownership: a retired async job cannot finish a newer job.
+  const activeRenderJob = useRef<string | null>(null);
   // Invalidates history reads when the story, render or recovery list changes.
   const historyEpoch = useRef(0);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const currentJob = useRef<string | null>(null);
   const currentAudio = useRef<string | null>(null);
-  currentJob.current = jobId;
   currentAudio.current = audio?.audio_id ?? null;
   useEffect(() => () => {
     renderRevision.current += 1;
     historyEpoch.current += 1;
-    if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+    const abandoned = activeRenderJob.current;
+    activeRenderJob.current = null;
+    if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
   }, []);
   useEffect(() => {
@@ -132,7 +134,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setBusy(false);
     historyEpoch.current += 1;
     setLoadingHistory(false);
-    if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+    // A document switch retires its previous render synchronously. The old
+    // promise may settle later; it is forbidden to clear the new job's UI.
+    const abandoned = activeRenderJob.current;
+    activeRenderJob.current = null;
+    setJobId(null);
+    setRendering(false);
+    setProgress({ done: 0, total: 0 });
+    if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     audioEpoch.current += 1;
     setAudio(null);
@@ -148,7 +157,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     let active = true;
     const interval = window.setInterval(() => {
       void invoke<{ done: number; total: number }>("story_render_progress", { jobId })
-        .then(result => { if (active) setProgress(result); }).catch(() => {});
+        .then(result => {
+          if (active && activeRenderJob.current === jobId) setProgress(result);
+        }).catch(() => {});
     }, 500);
     return () => {
       active = false;
@@ -162,7 +173,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     historyEpoch.current += 1;
     setHistory(null);
     setLoadingHistory(false);
-    if (jobId) void invoke("cancel_story_render", { jobId }).catch(() => {});
+    const abandoned = activeRenderJob.current;
+    activeRenderJob.current = null;
+    setJobId(null);
+    setRendering(false);
+    setProgress({ done: 0, total: 0 });
+    if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     audioEpoch.current += 1;
     setAudio(null);
@@ -272,7 +288,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function startRender(sceneId?: string, forceSegmentId?: string, forceAll = false) {
-    if (rendering) return;
+    if (rendering || activeRenderJob.current) return;
     let selection;
     try {
       selection = resolveRenderSelection(document, { sceneId, segmentId: forceSegmentId, forceAll });
@@ -285,6 +301,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     // unrelated scene tab is selected during playback or export.
     const exportLabel = renderExportLabel(document, id, sceneId, forceSegmentId);
     const revision = renderRevision.current;
+    activeRenderJob.current = id;
     historyEpoch.current += 1;
     setLoadingHistory(false);
     setJobId(id);
@@ -305,7 +322,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         jobId: id,
         ...selection,
       });
-      if (revision !== renderRevision.current) {
+      if (revision !== renderRevision.current || activeRenderJob.current !== id) {
         await invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
         return;
       }
@@ -317,12 +334,17 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         ? "Full-length WAV generated on disk. Inline preview is unavailable above 25 MiB; export the WAV to listen and review."
         : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && activeRenderJob.current === id) {
         onMessage("Scene render stopped or failed: " + errorString(error));
       }
     } finally {
-      setJobId(null);
-      setRendering(false);
+      // If a different story has begun rendering, this obsolete promise may
+      // not clear its progress indicator, cancel control or render lock.
+      if (activeRenderJob.current === id) {
+        activeRenderJob.current = null;
+        setJobId(null);
+        setRendering(false);
+      }
     }
   }
   async function inspectRenderPlan(sceneId?: string) {
