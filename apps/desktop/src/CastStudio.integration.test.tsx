@@ -88,6 +88,39 @@ afterEach(() => {
 });
 
 describe("real React/Tauri desktop controls with mocked IPC (no voice model)", () => {
+  it("shows complete local cast coverage without changing project data or pretending voices are distinct", () => {
+    const doc = story();
+    const seed = doc.scenes[0].segments[0];
+    doc.characters.push({ id: "king", name: "राजा", description: "", voice: defaultVoice() });
+    doc.scenes[0].segments.push(
+      { ...seed, id: "king-line", speaker_id: "king", original_text: "नमस्ते।" },
+      { ...seed, id: "unknown-line", speaker_id: null, source_label: "अज्ञात" },
+      { ...seed, id: "invalid-line", speaker_id: "missing-cast" },
+      { ...seed, id: "direction-line", kind: "direction", speaker_id: "king",
+        original_text: "[दरबार का द्वार बंद]", spoken_text: "" },
+    );
+    const { onChange } = mount(doc);
+    const summary = screen.getByText(/Local cast coverage · 4 spoken · 1 directions/);
+    fireEvent.click(summary);
+    const list = screen.getByRole("list", { name: "Cast coverage by character" });
+    const entries = within(list).getAllByRole("listitem");
+    expect(entries).toHaveLength(2);
+    expect(entries[0].textContent).toContain("Narrator");
+    expect(entries[0].textContent).toContain("1 spoken · 1 scene(s)");
+    expect(entries[1].textContent).toContain("राजा");
+    expect(entries[1].textContent).toContain("1 spoken · 1 scene(s)");
+    expect(screen.getByText(/1 unassigned spoken line/)).toBeTruthy();
+    expect(screen.getByText(/1 invalid character assignment/)).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Show scenes for character" }), {
+      target: { value: "king" },
+    });
+    expect(entries[1].textContent).toContain("1 spoken · 1 scene(s)");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[4].kind).toBe("direction");
+    expect(doc.scenes[0].segments[3].speaker_id).toBe("missing-cast");
+  });
+
   it("retires an older story render without clearing the new story render's busy state", async () => {
     const firstJob = "550e8400-e29b-41d4-a716-446655440101";
     const secondJob = "550e8400-e29b-41d4-a716-446655440102";
