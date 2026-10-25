@@ -63,12 +63,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newSceneTitle, setNewSceneTitle] = useState("");
   const [sceneSearch, setSceneSearch] = useState("");
   const [unresolvedScenesOnly, setUnresolvedScenesOnly] = useState(false);
+  const [sceneCharacterFilter, setSceneCharacterFilter] = useState("");
   useEffect(() => {
     // A search belongs to the current story; do not hide a newly loaded story
     // behind the previous author's private dialogue terms or note filters.
     setSceneSearch("");
     setUnresolvedScenesOnly(false);
+    setSceneCharacterFilter("");
   }, [document.id]);
+  useEffect(() => {
+    // If a character is removed while filtering, restore the full outline.
+    if (sceneCharacterFilter && !document.characters.some(char => char.id === sceneCharacterFilter)) {
+      setSceneCharacterFilter("");
+    }
+  }, [document.characters, sceneCharacterFilter]);
   const [busy, setBusy] = useState(false);
   // Only the current parse/save/load operation can own the busy flag.
   const editorOperationEpoch = useRef(0);
@@ -677,9 +685,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
+  const activeCharacterFilter = document.characters.some(char => char.id === sceneCharacterFilter)
+    ? sceneCharacterFilter : "";
   const visibleScenes = useMemo(() =>
-    sceneOverview(document, sceneSearch, unresolvedScenesOnly),
-    [document, sceneSearch, unresolvedScenesOnly]);
+    sceneOverview(document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter || null),
+    [document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter]);
   const unresolvedNow = unresolvedSpeech(document);
   // Derive the alert from the active document, not the one-time parse response:
   // assigning a previously unknown actor must immediately clear stale warnings.
@@ -1006,13 +1016,21 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               placeholder="दृश्य, संवाद, या नोट खोजें"
               value={sceneSearch} onChange={event => setSceneSearch(event.target.value)} />
           </label>
+          <label className="scene-outline-character">
+            Show scenes for character
+            <select aria-label="Show scenes for character" value={activeCharacterFilter}
+              onChange={event => setSceneCharacterFilter(event.target.value)}>
+              <option value="">All characters</option>
+              {document.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
+            </select>
+          </label>
           <label className="scene-outline-checkbox">
             <input type="checkbox" checked={unresolvedScenesOnly}
               onChange={event => setUnresolvedScenesOnly(event.target.checked)} />
             Only scenes with unassigned speech
           </label>
-          <button type="button" className="quiet-button" disabled={!sceneSearch && !unresolvedScenesOnly}
-            onClick={() => { setSceneSearch(""); setUnresolvedScenesOnly(false); }}>
+          <button type="button" className="quiet-button" disabled={!sceneSearch && !unresolvedScenesOnly && !activeCharacterFilter}
+            onClick={() => { setSceneSearch(""); setUnresolvedScenesOnly(false); setSceneCharacterFilter(""); }}>
             Clear scene filters
           </button>
         </div>
