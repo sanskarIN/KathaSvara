@@ -88,6 +88,79 @@ afterEach(() => {
 });
 
 describe("real React/Tauri desktop controls with mocked IPC (no voice model)", () => {
+  it("retires an older story render without clearing the new story render's busy state", async () => {
+    const firstJob = "550e8400-e29b-41d4-a716-446655440101";
+    const secondJob = "550e8400-e29b-41d4-a716-446655440102";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce(firstJob).mockReturnValueOnce(secondJob) });
+    let finishFirst: (value: unknown) => void = () => { throw new Error("First render not started"); };
+    let finishSecond: (value: unknown) => void = () => { throw new Error("Second render not started"); };
+    mocks.invoke.mockImplementation((command: string, args: { project?: StoryV2 }) => {
+      if (command === "render_story_v2") {
+        return new Promise(resolve => {
+          if (args.project?.id === ID) finishFirst = resolve;
+          else finishSecond = resolve;
+        });
+      }
+      if (command === "cancel_story_render" || command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const first = story();
+    const { rerender, onChange, onMessage } = mount(first);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<CastStudio document={{ ...first, id: "new-story", title: "दूसरी कहानी" }}
+      onChange={onChange} onMessage={onMessage} />);
+    expect(mocks.invoke).toHaveBeenCalledWith("cancel_story_render", { jobId: firstJob });
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      finishFirst({ ...generatedAudio(), audio_id: "obsolete-audio" });
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: "obsolete-audio" });
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByLabelText("Generated dialogue preview")).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("obsolete-audio"))).toBe(false);
+    await act(async () => {
+      finishSecond({ ...generatedAudio(), audio_id: "current-audio" });
+    });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not surface a retired render failure or stop its successor", async () => {
+    const firstJob = "550e8400-e29b-41d4-a716-446655440103";
+    const secondJob = "550e8400-e29b-41d4-a716-446655440104";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn()
+      .mockReturnValueOnce(firstJob).mockReturnValueOnce(secondJob) });
+    let failFirst: (error: Error) => void = () => { throw new Error("First render not started"); };
+    let finishSecond: (value: unknown) => void = () => { throw new Error("Second render not started"); };
+    mocks.invoke.mockImplementation((command: string, args: { project?: StoryV2 }) => {
+      if (command === "render_story_v2") {
+        if (args.project?.id === ID) {
+          return new Promise((_resolve, reject) => { failFirst = reject; });
+        }
+        return new Promise(resolve => { finishSecond = resolve; });
+      }
+      if (command === "cancel_story_render" || command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const first = story();
+    const { rerender, onChange, onMessage } = mount(first);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    rerender(<CastStudio document={{ ...first, id: "different-story" }}
+      onChange={onChange} onMessage={onMessage} />);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await act(async () => { failFirst(new Error("Retired story error")); });
+    expect(onMessage.mock.calls.some(([message]) =>
+      typeof message === "string" && message.includes("Retired story error"))).toBe(false);
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { finishSecond({ ...generatedAudio(), audio_id: "current-after-failure" }); });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+  });
+
   it("audits scenes without rendering or voice loading, then exports count-only JSON", async () => {
     const doc = story();
     mocks.invoke.mockImplementation(async (command: string) => {
