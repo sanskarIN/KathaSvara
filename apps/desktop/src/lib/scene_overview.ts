@@ -86,14 +86,14 @@ export interface CastCoverageSummary {
  * This function must not mutate project data or write any personal dialogue.
  */
 export function castCoverage(story: StoryV2): CastCoverageSummary {
-  const coverage = new Map(story.characters.map(character => [
+  const coverage = new Map<string, CastCoverage>(story.characters.map(character => [
     character.id, {
       characterId: character.id,
       characterName: character.name,
       spokenLines: 0,
       sceneCount: 0,
     } satisfies CastCoverage,
-  ]));
+  ] as const));
   let spokenLines = 0;
   let directions = 0;
   let unassignedSpeech = 0;
