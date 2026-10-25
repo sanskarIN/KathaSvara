@@ -1195,4 +1195,77 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(onMessage).not.toHaveBeenCalled();
   });
 
+  it("filters Hindi scenes by actual assigned character dialogue without editing the story", () => {
+    const doc = story();
+    const first = doc.scenes[0].segments[0];
+    doc.characters.push({ id: "king", name: "राजा", voice: defaultVoice(), description: "" });
+    doc.scenes[0].segments.push({
+      ...first, id: "direction-only", kind: "direction", speaker_id: "king",
+      original_text: "[राजा enters]", spoken_text: "",
+    });
+    doc.scenes.push({
+      id: "court", title: "दरबार", notes: "", segments: [{
+        ...first, id: "king-line", speaker_id: "king",
+        original_text: "प्रजा को प्रणाम।", spoken_text: "प्रजा को प्रणाम।",
+      }],
+    });
+    const { rerender, onChange } = mount(doc);
+    const filter = screen.getByRole("combobox", { name: "Show scenes for character" });
+    expect((filter as HTMLSelectElement).value).toBe("");
+    fireEvent.change(filter, { target: { value: "king" } });
+    expect(screen.getByRole("button", { name: "दरबार" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "प्रथम दृश्य" })).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
+      target: { value: "प्रजा" },
+    });
+    expect(screen.getByRole("button", { name: "दरबार" })).toBeTruthy();
+    fireEvent.change(filter, { target: { value: "narrator" } });
+    expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear scene filters" }));
+    expect((filter as HTMLSelectElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "दरबार" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].kind).toBe("direction");
+
+    fireEvent.change(filter, { target: { value: "king" } });
+    rerender(<CastStudio document={{ ...doc, characters: doc.characters.slice(0, 1) }}
+      onChange={onChange} onMessage={vi.fn()} />);
+    expect((screen.getByRole("combobox", { name: "Show scenes for character" }) as HTMLSelectElement).value)
+      .toBe("");
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("combines cast filtering with unresolved review and resets on a different story", () => {
+    const doc = story();
+    const first = doc.scenes[0].segments[0];
+    doc.characters.push({ id: "king", name: "राजा", voice: defaultVoice(), description: "" });
+    doc.scenes[0].segments.push({
+      ...first, id: "unknown", speaker_id: null, source_label: "अनाम",
+      original_text: "कौन है?", spoken_text: "कौन है?",
+    });
+    doc.scenes.push({ id: "court", title: "राजसभा", notes: "", segments: [{
+      ...first, id: "king-line", speaker_id: "king",
+    }] });
+    const { onChange, rerender } = mount(doc);
+    const cast = screen.getByRole("combobox", { name: "Show scenes for character" });
+    fireEvent.change(cast, { target: { value: "king" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }));
+    expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
+    fireEvent.change(cast, { target: { value: "narrator" } });
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" })).toBeTruthy();
+    const second: StoryV2 = {
+      ...doc, id: "new-project", title: "दूसरी कहानी",
+      scenes: [{ id: "another", title: "अगला दृश्य", notes: "", segments: [] }],
+    };
+    rerender(<CastStudio document={second} onChange={onChange} onMessage={vi.fn()} />);
+    expect((screen.getByRole("combobox", { name: "Show scenes for character" }) as HTMLSelectElement).value)
+      .toBe("");
+    expect((screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }) as HTMLInputElement).checked)
+      .toBe(false);
+    expect(screen.getByRole("button", { name: "अगला दृश्य" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
 });
