@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { legacyToStoryV2, type SegmentV2, type StoryV2 } from "./story_v2";
-import { sceneOverview } from "./scene_overview";
+import { castCoverage, sceneOverview } from "./scene_overview";
 
 function line(id: string, kind: "speech" | "direction", text: string): SegmentV2 {
   return {
@@ -126,6 +126,47 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     expect(sceneOverview(doc, "", true, "king")).toEqual([]);
     expect(sceneOverview(doc, "", false, "king").map(scene => scene.id)).toEqual(["forest"]);
     expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
+  it("computes a local cast coverage report without guessing unassigned speech", () => {
+    const doc = fixture();
+    const report = castCoverage(doc);
+    expect(report).toEqual({
+      characters: [{
+        characterId: "narrator", characterName: "Narrator", spokenLines: 2, sceneCount: 2,
+      }],
+      spokenLines: 3,
+      directions: 1,
+      unassignedSpeech: 1,
+      invalidSpeakerAssignments: 0,
+    });
+    expect(doc.scenes[0].segments[2].speaker_id).toBeNull();
+    expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
+  it("counts distinct actor scenes and separates unknown IDs from unassigned lines", () => {
+    const doc = fixture();
+    doc.characters.push({
+      id: "king", name: "राजा", description: "", voice: doc.characters[0].voice,
+    });
+    doc.scenes[0].segments[0].speaker_id = "king";
+    doc.scenes[0].segments[1].speaker_id = "king"; // Direction is unspoken.
+    doc.scenes[1].segments.push({
+      ...line("another-turn", "speech", "राजा लौट आया।"), speaker_id: "king",
+    });
+    expect(castCoverage(doc).characters).toEqual([
+      { characterId: "narrator", characterName: "Narrator", spokenLines: 1, sceneCount: 1 },
+      { characterId: "king", characterName: "राजा", spokenLines: 2, sceneCount: 2 },
+    ]);
+    doc.scenes[1].segments[0].speaker_id = "missing-actor";
+    const report = castCoverage(doc);
+    expect(report.spokenLines).toBe(4);
+    expect(report.directions).toBe(1);
+    expect(report.unassignedSpeech).toBe(1);
+    expect(report.invalidSpeakerAssignments).toBe(1);
+    expect(report.characters[0].spokenLines).toBe(0);
+    expect(report.characters[1].spokenLines).toBe(2);
+    expect(doc.scenes[0].segments[1].kind).toBe("direction");
   });
 
 });
