@@ -14,7 +14,7 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
-import { sceneOverview } from "./lib/scene_overview";
+import { castCoverage, sceneOverview } from "./lib/scene_overview";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
@@ -712,6 +712,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const visibleScenes = useMemo(() =>
     sceneOverview(document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter || null),
     [document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter]);
+  const coverage = useMemo(() => castCoverage(document), [document]);
   const unresolvedNow = unresolvedSpeech(document);
   // Derive the alert from the active document, not the one-time parse response:
   // assigning a previously unknown actor must immediately clear stale warnings.
@@ -1059,6 +1060,22 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <p className="helper scene-outline-count" aria-live="polite">
           Showing {visibleScenes.length} of {document.scenes.length} scenes. Search filters navigation only; the selected scene stays open until you choose another.
         </p>
+        <details className="cast-coverage">
+          <summary>Local cast coverage · {coverage.spokenLines} spoken · {coverage.directions} directions</summary>
+          <p className="helper">Model-free line counts only, not verified different voices.
+            {" "}{coverage.unassignedSpeech} unassigned spoken line(s).
+            {coverage.invalidSpeakerAssignments > 0 &&
+              ` ${coverage.invalidSpeakerAssignments} invalid character assignment(s) require repair before saving.`}
+          </p>
+          <ul aria-label="Cast coverage by character">
+            {coverage.characters.map(actor => (
+              <li key={actor.characterId}>
+                <span>{actor.characterName}</span>
+                <small>{actor.spokenLines} spoken · {actor.sceneCount} scene(s)</small>
+              </li>
+            ))}
+          </ul>
+        </details>
         <div className="scene-navigation" aria-label="Scenes">
           {visibleScenes.map(scene => (
             <button type="button" key={scene.id} aria-label={scene.title}
