@@ -166,6 +166,15 @@ audio { display: block; width: 100%; margin: 13px 0; }
 .cast-layout .scene-navigation { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
 .cast-layout .scene-outline-entry { display: grid; gap: 4px; text-align: left; max-width: min(100%, 270px); overflow-wrap: anywhere; }
 .scene-outline-meta { font-size: 10px; line-height: 1.5; color: var(--muted); font-weight: 400; }
+.cast-coverage { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.cast-coverage summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text); }
+.cast-coverage summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.cast-coverage p { margin: 10px 0; }
+.cast-coverage ul { margin: 8px 0 0; padding: 0; list-style: none; max-height: 210px; overflow-y: auto; }
+.cast-coverage li { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 5px 0; border-top: 1px solid var(--border); }
+.cast-coverage li span { overflow-wrap: anywhere; }
+.cast-coverage li small { color: var(--muted); }
+
 
 .cast-layout .selected-scene { border-color: var(--accent); color: var(--accent); }
 .cast-layout .scene-segments { margin: 14px 0; padding: 0; list-style: none; display: grid; gap: 10px; max-height: 640px; overflow-y: auto; }
