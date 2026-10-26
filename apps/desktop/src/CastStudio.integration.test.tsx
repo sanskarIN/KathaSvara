@@ -152,6 +152,85 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments).toHaveLength(2);
   });
 
+  it("keeps a finished WAV after a duplicate character name is rejected", async () => {
+    const doc = story();
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return generatedAudio();
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    expect(await screen.findByLabelText("Generated dialogue preview")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "New character name" }), {
+      target: { value: "nArRaToR" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add" }));
+    expect(onMessage).toHaveBeenCalledWith("A character with this name already exists.");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "discard_audio")).toBe(false);
+    expect(doc.characters).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "New character name" }), {
+      target: { value: "राजा" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const apply = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const next = apply(doc);
+    expect(next.characters.map(character => character.name)).toEqual(["Narrator", "राजा"]);
+    expect(next.text).toBe(doc.text);
+    expect(doc.characters).toHaveLength(1);
+  });
+
+  it("rejects malformed duplicate source identities synchronously and validates scene creation", () => {
+    const doc = story();
+    doc.characters.push({ ...doc.characters[0], name: "Narrator clone" });
+    const { onChange, onMessage } = mount(doc);
+    fireEvent.click(screen.getAllByRole("button", { name: "Duplicate voice profile" })[0]);
+    expect(onMessage).toHaveBeenCalledWith("Original character must exist exactly once.");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "New scene title" }), {
+      target: { value: "क".repeat(121) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Scene" }));
+    expect(onMessage).toHaveBeenCalledWith("Scene title must contain 1–120 characters.");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "New scene title" }), {
+      target: { value: "अगला दृश्य" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "+ Scene" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const apply = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const next = apply(doc);
+    expect(next.scenes.map(scene => scene.title)).toEqual(["प्रथम दृश्य", "अगला दृश्य"]);
+    expect(next.text).toBe(doc.text);
+    expect(doc.scenes).toHaveLength(1);
+  });
+
+  it("materializes a valid duplicated voice profile exactly once before the React updater", () => {
+    const doc = story();
+    const { onChange } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate voice profile" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const apply = onChange.mock.calls[0][0] as (previous: StoryV2) => StoryV2;
+    const first = apply(doc);
+    const second = apply(doc);
+    expect(first).toBe(second);
+    expect(first.characters.map(character => character.name))
+      .toEqual(["Narrator", "Narrator copy"]);
+    expect(first.characters[1].id).not.toBe("narrator");
+    expect(first.characters[1].voice).toEqual(doc.characters[0].voice);
+    expect(doc.characters).toHaveLength(1);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
   it("locks reviewed Hindi edits while rendering and rejects late blur mutations", async () => {
     const doc = story();
     let finish: (value: unknown) => void = () => {
