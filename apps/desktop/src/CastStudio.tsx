@@ -125,12 +125,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const activeRenderJob = useRef<string | null>(null);
   // Invalidates history reads when the story, render or recovery list changes.
   const historyEpoch = useRef(0);
+  // Forget operations are independent: finishing B before A must still remove
+  // both rows. Tokens prevent an old story's cleanup touching a newer request.
+  const forgetTokens = useRef(new Map<string, number>());
+  const forgetSerial = useRef(0);
+  const forgottenJournalIds = useRef(new Set<string>());
+  const [forgettingIds, setForgettingIds] = useState<string[]>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const currentAudio = useRef<string | null>(null);
   currentAudio.current = audio?.audio_id ?? null;
   useEffect(() => () => {
     renderRevision.current += 1;
     historyEpoch.current += 1;
+    forgetTokens.current.clear();
+    forgottenJournalIds.current.clear();
     planEpoch.current += 1;
     auditEpoch.current += 1;
     const abandoned = activeRenderJob.current;
@@ -146,6 +154,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setBusy(false);
     historyEpoch.current += 1;
     setLoadingHistory(false);
+    forgetTokens.current.clear();
+    forgottenJournalIds.current.clear();
+    setForgettingIds([]);
     planEpoch.current += 1;
     auditEpoch.current += 1;
     setPlanBusy(false);
@@ -191,6 +202,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     historyEpoch.current += 1;
     setHistory(null);
     setLoadingHistory(false);
+    forgetTokens.current.clear();
+    forgottenJournalIds.current.clear();
+    setForgettingIds([]);
     planEpoch.current += 1;
     auditEpoch.current += 1;
     setPlanBusy(false);
@@ -481,7 +495,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       const records = await invoke<RenderHistory[]>("story_render_history", { storyId: document.id });
       if (revision !== renderRevision.current || epoch !== historyEpoch.current) return;
-      setHistory(records.slice(0, 10));
+      setHistory(records.filter(record => !forgottenJournalIds.current.has(record.job_id)).slice(0, 10));
       onMessage("Local history loaded. Retry is manual: the current entire story will be revalidated with a fresh job ID; only unchanged cached speech can be reused.");
     } catch (error) {
       if (revision === renderRevision.current && epoch === historyEpoch.current) {
@@ -505,19 +519,35 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
 
   async function forgetHistory(job: RenderHistory) {
-    if (job.state === "running") return;
+    if (busy || rendering || job.state === "running" ||
+        job.story_id !== document.id || forgetTokens.current.has(job.job_id)) return;
     if (!window.confirm("Forget this inactive render attempt and its temporary progress/cancel markers? The story, finished WAVs, exports and speech cache will remain unchanged.")) return;
     const revision = renderRevision.current;
-    const epoch = ++historyEpoch.current;
+    const token = ++forgetSerial.current;
+    forgetTokens.current.set(job.job_id, token);
+    setForgettingIds(previous => [...previous, job.job_id]);
+    // Cancel old list reads, but do not invalidate a different record's
+    // concurrent deletion when the user forgets multiple failed attempts.
+    historyEpoch.current += 1;
     setLoadingHistory(false);
     try {
       await invoke("forget_render_journal", { jobId: job.job_id, storyId: job.story_id });
-      if (revision !== renderRevision.current || epoch !== historyEpoch.current) return;
+      if (revision !== renderRevision.current ||
+          forgetTokens.current.get(job.job_id) !== token) return;
+      forgottenJournalIds.current.add(job.job_id);
       setHistory(previous => previous?.filter(item => item.job_id !== job.job_id) ?? null);
       onMessage("Render record and matching bookkeeping markers removed. Projects and completed WAV audio were untouched.");
     } catch (error) {
-      if (revision === renderRevision.current && epoch === historyEpoch.current) {
+      if (revision === renderRevision.current &&
+          forgetTokens.current.get(job.job_id) === token) {
         onMessage("Cannot forget render history: " + errorString(error));
+      }
+    } finally {
+      if (forgetTokens.current.get(job.job_id) === token) {
+        forgetTokens.current.delete(job.job_id);
+        if (revision === renderRevision.current) {
+          setForgettingIds(previous => previous.filter(id => id !== job.job_id));
+        }
       }
     }
   }
@@ -984,8 +1014,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     <button className="secondary-button" type="button" disabled={busy || rendering}
                       onClick={() => retryFromHistory(item)}>Retry current full story</button>
                   )}
-                  <button className="quiet-button" type="button" disabled={item.state === "running" || rendering}
-                    onClick={() => void forgetHistory(item)}>Forget record</button>
+                  <button className="quiet-button" type="button"
+                    disabled={busy || item.state === "running" || rendering ||
+                      forgettingIds.includes(item.job_id)}
+                    onClick={() => void forgetHistory(item)}>
+                    {forgettingIds.includes(item.job_id) ? "Forgetting record…" : "Forget record"}
+                  </button>
                 </li>
               ))}</ul>}
           </section>}
