@@ -1027,6 +1027,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
         {unresolvedNow.length > 0 && <p role="alert">{unresolvedNow.length} unknown speaker label(s): {unknownSpeakerLabels.join(", ")}</p>}
+        {coverage.invalidSpeakerAssignments > 0 && (
+          <p role="alert">{coverage.invalidSpeakerAssignments} spoken line(s) reference missing character IDs. Assign a valid speaker before saving or rendering.</p>
+        )}
         <div className="cast-add">
           <input placeholder="New scene title / नया दृश्य" aria-label="New scene title" value={newSceneTitle}
             maxLength={120} onChange={event => setNewSceneTitle(event.target.value)} />
@@ -1050,7 +1053,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           <label className="scene-outline-checkbox">
             <input type="checkbox" checked={unresolvedScenesOnly}
               onChange={event => setUnresolvedScenesOnly(event.target.checked)} />
-            Only scenes with unassigned speech
+            Only scenes needing speaker review
           </label>
           <button type="button" className="quiet-button" disabled={!sceneSearch && !unresolvedScenesOnly && !activeCharacterFilter}
             onClick={() => { setSceneSearch(""); setUnresolvedScenesOnly(false); setSceneCharacterFilter(""); }}>
@@ -1085,6 +1088,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
               <small aria-hidden="true" className="scene-outline-meta">
                 {scene.spoken} spoken · {scene.directions} directions
                 {scene.unresolved > 0 ? ` · ${scene.unresolved} unassigned` : ""}
+                {scene.invalidSpeakers > 0 ? ` · ${scene.invalidSpeakers} invalid speaker ID(s)` : ""}
                 {scene.hasProductionNotes ? " · notes" : ""}
               </small>
             </button>
@@ -1160,6 +1164,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                           } catch (error) { onMessage(errorString(error)); }
                         }}>
                         <option value="">Unassigned — manual correction required</option>
+                        {segment.speaker_id !== null &&
+                          !document.characters.some(char => char.id === segment.speaker_id) && (
+                            <option value={segment.speaker_id} disabled>Invalid character ID — choose a valid speaker</option>
+                          )}
                         {document.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
                       </select>
                     )}
@@ -1230,7 +1238,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             </ol>
           </>
         ) : <p>No scenes parsed yet. The original story text remains unchanged.</p>}
-        <p className="helper">{unresolvedNow.length} unresolved speech segments. Actual distinct-character audio is not yet a supported feature. Source scripts are retained independently of parsed text.</p>
+        <p className="helper">{coverage.unassignedSpeech + coverage.invalidSpeakerAssignments} spoken segment(s) need speaker review ({coverage.unassignedSpeech} unassigned, {coverage.invalidSpeakerAssignments} invalid IDs). Actual distinct-character audio is not yet a supported feature. Source scripts are retained independently of parsed text.</p>
       </div>
     </section>
   );
