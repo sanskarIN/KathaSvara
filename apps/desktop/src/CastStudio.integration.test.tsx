@@ -121,6 +121,37 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments[3].speaker_id).toBe("missing-cast");
   });
 
+  it("blocks model and plan IPC for stale speaker IDs and disables unsafe line retry", () => {
+    const doc = story();
+    doc.scenes[0].segments[0].speaker_id = "deleted-actor";
+    const original = JSON.stringify(doc);
+    const { onMessage, onChange } = mount(doc);
+    const retry = screen.getByRole("button", { name: "Regenerate / retry this line only" });
+    expect((retry as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Invalid speaker ID. Choose a valid character/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate selected scene" }));
+    fireEvent.click(screen.getByRole("button", { name: "Inspect render plan (no model)" }));
+    expect(onMessage.mock.calls.filter(([msg]) => String(msg).includes("missing or duplicate character ID")))
+      .toHaveLength(3);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(JSON.stringify(doc)).toBe(original);
+  });
+
+  it("rejects repeated scene and spoken-line IDs in preflight before any model call", () => {
+    const doc = story();
+    const line = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({ ...line, original_text: "एक और पंक्ति" });
+    const { onMessage, onChange } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate selected scene" }));
+    expect(onMessage.mock.calls.some(([msg]) => String(msg).includes("duplicate ID"))).toBe(true);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments).toHaveLength(2);
+  });
+
   it("locks reviewed Hindi edits while rendering and rejects late blur mutations", async () => {
     const doc = story();
     let finish: (value: unknown) => void = () => {
