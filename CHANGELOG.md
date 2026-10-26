@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Isolate asynchronous model-free render plans and production audits by request epoch. Switching documents cancels their UI ownership without letting a late result overwrite the new story or clear a newer loading indicator. Block story saves while narration owns an active render, and suppress late cancellation responses for retired jobs. Cover these cases with mocked desktop concurrency tests.
+
+
 - Validate **Add character**, **Duplicate voice profile**, and **Add scene** synchronously before updating React state. Report rejected edits without invalidating the current generated WAV, and create new clone IDs once outside state updaters. Add mocked desktop tests for rejected duplicate names, ambiguous profiles, overlong titles and deterministic successful changes.
 
 
