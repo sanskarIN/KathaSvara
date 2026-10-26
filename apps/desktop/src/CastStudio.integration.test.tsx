@@ -978,7 +978,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
       .toContain("1 invalid speaker ID(s)");
     expect(screen.queryByRole("button", { name: "केवल मंच निर्देश" })).toBeNull();
-    expect(screen.getByText(/1 spoken line\\(s\\) reference missing character IDs/)).toBeTruthy();
+    expect(screen.getByText(/1 spoken line\(s\) reference missing character IDs/)).toBeTruthy();
     const invalidOption = screen.getByRole("option", {
       name: "Invalid character ID — choose a valid speaker",
     }) as HTMLOptionElement;
@@ -995,7 +995,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     };
     rerender(<CastStudio document={corrected} onChange={onChange} onMessage={vi.fn()} />);
     expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
-    expect(screen.queryByText(/spoken line\\(s\\) reference missing character IDs/)).toBeNull();
+    expect(screen.queryByText(/spoken line\(s\) reference missing character IDs/)).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
     expect(mocks.invoke).not.toHaveBeenCalled();
     expect(doc.scenes[0].segments[1].speaker_id).toBe("deleted-cast-member");
