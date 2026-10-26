@@ -14,7 +14,7 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
-import { castCoverage, nextSpeakerReviewTarget, sceneOverview, speakerReviewTargets, type SpeakerReviewTarget } from "./lib/scene_overview";
+import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewTargets, type SpeakerReviewTarget } from "./lib/scene_overview";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
@@ -723,6 +723,19 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       speakerReviewSelectRef.current?.focus();
     }
   }, [speakerReviewCursor, activeScene?.id]);
+  function jumpToSpeakerIssue(direction: -1 | 1) {
+    const target = direction === 1
+      ? nextSpeakerReviewTarget(document, speakerReviewCursor)
+      : previousSpeakerReviewTarget(document, speakerReviewCursor);
+    if (!target) return;
+    // Filtering is navigation only, not an edit to the story.
+    setSceneSearch("");
+    setUnresolvedScenesOnly(false);
+    setSceneCharacterFilter("");
+    setSelectedScene(target.sceneId);
+    setSpeakerReviewCursor(target);
+    setRenderPlan(null);
+  }
   const unresolvedNow = unresolvedSpeech(document);
   // Derive the alert from the active document, not the one-time parse response:
   // assigning a previously unknown actor must immediately clear stale warnings.
@@ -1076,17 +1089,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="scene-review-navigation">
           <button type="button" className="secondary-button"
             disabled={busy || rendering || speakerIssues.length === 0}
-            onClick={() => {
-              const next = nextSpeakerReviewTarget(document, speakerReviewCursor);
-              if (!next) return;
-              // A filtered navigator must not conceal the destination.
-              setSceneSearch("");
-              setUnresolvedScenesOnly(false);
-              setSceneCharacterFilter("");
-              setSelectedScene(next.sceneId);
-              setSpeakerReviewCursor(next);
-              setRenderPlan(null);
-            }}>Next speaker issue</button>
+            onClick={() => jumpToSpeakerIssue(-1)}>Previous speaker issue</button>
+          <button type="button" className="secondary-button"
+            disabled={busy || rendering || speakerIssues.length === 0}
+            onClick={() => jumpToSpeakerIssue(1)}>Next speaker issue</button>
           <span role="status" aria-live="polite">
             {speakerIssues.length} spoken line(s) need manual speaker review.
           </span>
