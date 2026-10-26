@@ -316,7 +316,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function startRender(sceneId?: string, forceSegmentId?: string, forceAll = false) {
-    if (rendering || activeRenderJob.current) return;
+    if (busy || rendering || activeRenderJob.current) return;
     let selection;
     try {
       selection = resolveRenderSelection(document, { sceneId, segmentId: forceSegmentId, forceAll });
@@ -331,6 +331,13 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     const revision = renderRevision.current;
     activeRenderJob.current = id;
     historyEpoch.current += 1;
+    // An in-flight model-free plan or audit must not publish a late result
+    // while speech generation owns the current story's snapshot.
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    setPlanBusy(false);
+    setAuditBusy(false);
+    setAudit(null);
     setLoadingHistory(false);
     setJobId(id);
     setProgress({ done: 0, total: 0 });
@@ -424,8 +431,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
 
   async function exportProductionManifest() {
-    if (!audit || auditBusy || rendering) return;
+    if (!audit || busy || auditBusy || rendering || activeRenderJob.current) return;
     const revision = renderRevision.current;
+    const auditRequest = auditEpoch.current;
     try {
       // The export allowlist excludes scene/story IDs, private Hindi dialogue,
       // speaker names, voice settings and generated audio paths.
@@ -436,16 +444,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         filters: [{ name: "Production audit JSON", extensions: ["json"] }],
       });
       if (!destination) return;
-      if (revision !== renderRevision.current) {
-        onMessage("The story changed while choosing the export location. Run the audit again.");
+      if (revision !== renderRevision.current || auditRequest !== auditEpoch.current ||
+          activeRenderJob.current !== null) {
+        // A newer render invalidated this audit while the destination dialog
+        // was open; never export or acknowledge an obsolete readiness report.
         return;
       }
       await invoke("export_production_manifest", { destination, content });
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && auditRequest === auditEpoch.current &&
+          activeRenderJob.current === null) {
         onMessage("Private-text-free production report exported. It does not prove voice quality or model readiness.");
       }
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && auditRequest === auditEpoch.current &&
+          activeRenderJob.current === null) {
         onMessage("Cannot export production report: " + errorString(error));
       }
     }
@@ -910,7 +922,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             <p className="helper">No model loaded and no speech or distinct voices verified.
               Check local model setup and listen to every generated WAV before publishing.</p>
             <button type="button" className="secondary-button"
-              disabled={auditBusy || rendering}
+              disabled={busy || auditBusy || rendering}
               onClick={() => void exportProductionManifest()}>
               Export privacy-safe audit JSON
             </button>
