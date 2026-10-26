@@ -993,6 +993,87 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     await act(async () => { finishRender(generatedAudio()); });
   });
 
+  it("reconciles overlapping journal deletions regardless of completion order", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const records = ["job-a", "job-b"].map(job_id => ({
+      job_id, story_id: ID, state: "failed", done: 0, total: 2,
+      updated_at: "2026-10-25T11:00:00Z",
+    }));
+    const finish = new Map<string, () => void>();
+    mocks.invoke.mockImplementation((command: string, args: { jobId?: string }) => {
+      if (command === "story_render_history") return Promise.resolve(records);
+      if (command === "forget_render_journal") {
+        return new Promise<void>(resolve => { finish.set(args.jobId!, resolve); });
+      }
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage, onChange } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Forget record" })).toHaveLength(2));
+    for (const button of screen.getAllByRole("button", { name: "Forget record" })) {
+      fireEvent.click(button);
+    }
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "forget_render_journal"))
+      .toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Forgetting record…" })).toHaveLength(2);
+    await act(async () => { finish.get("job-b")!(); });
+    expect(screen.getAllByRole("button", { name: "Forgetting record…" })).toHaveLength(1);
+    expect(screen.getByText(/0\/2 segments/)).toBeTruthy();
+    await act(async () => { finish.get("job-a")!(); });
+    expect(screen.queryByRole("button", { name: "Forget record" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Forgetting record…" })).toBeNull();
+    expect(screen.getByText("No recorded renders for this story yet.")).toBeTruthy();
+    expect(onMessage.mock.calls.filter(([msg]) =>
+      String(msg).includes("Render record and matching bookkeeping markers removed"))).toHaveLength(2);
+
+    // Even an eventually consistent history read must not resurrect confirmed
+    // deleted rows during this editor session.
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    await waitFor(() => expect(mocks.invoke.mock.calls.filter(([name]) =>
+      name === "story_render_history")).toHaveLength(2));
+    expect(screen.getByText("No recorded renders for this story yet.")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates an in-flight journal delete and permits retry after IPC failure", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let failFirst: (error: Error) => void = () => { throw new Error("Forget not started"); };
+    let finishSecond: () => void = () => { throw new Error("Retry not started"); };
+    let attempts = 0;
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "story_render_history") return Promise.resolve([{
+        job_id: "recoverable-job", story_id: ID, state: "failed", done: 1, total: 2,
+        updated_at: "2026-10-25T11:00:00Z",
+      }]);
+      if (command === "forget_render_journal") {
+        attempts += 1;
+        if (attempts === 1) return new Promise<void>((_resolve, reject) => { failFirst = reject; });
+        return new Promise<void>(resolve => { finishSecond = resolve; });
+      }
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage, onChange } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Recent render history" }));
+    const forget = await screen.findByRole("button", { name: "Forget record" });
+    fireEvent.click(forget);
+    const pending = screen.getByRole("button", { name: "Forgetting record…" }) as HTMLButtonElement;
+    expect(pending.disabled).toBe(true);
+    fireEvent.click(pending);
+    expect(attempts).toBe(1);
+    await act(async () => { failFirst(new Error("Storage temporarily locked")); });
+    expect(onMessage.mock.calls.some(([msg]) =>
+      String(msg).includes("Cannot forget render history: Storage temporarily locked"))).toBe(true);
+    expect((screen.getByRole("button", { name: "Forget record" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Forget record" }));
+    expect(attempts).toBe(2);
+    await act(async () => { finishSecond(); });
+    expect(screen.getByText("No recorded renders for this story yet.")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "render_story_v2")).toBe(false);
+  });
+
   it("does not show a stale forget response after switching to another story", async () => {
     let finishForget: () => void = () => { throw new Error("Forget not requested"); };
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
