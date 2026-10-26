@@ -28,7 +28,7 @@ if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) {
 $venvPython = Join-Path $inference ".venv\Scripts\python.exe"
 $python = $null
 if ($PythonPath) {
-    if (-not [System.IO.Path]::IsPathFullyQualified($PythonPath) -or
+    if (-not [System.IO.Path]::IsPathRooted($PythonPath) -or
         -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
         Fail "PythonPath must point to an existing absolute Python 3.11 executable."
     }
@@ -101,7 +101,7 @@ if ($DoctorOnly) {
 if (-not $ExecutablePath) {
     Fail "Provide -ExecutablePath with the absolute path to the GitHub-built KathaSvara developer EXE, or use -DoctorOnly."
 }
-if (-not [System.IO.Path]::IsPathFullyQualified($ExecutablePath) -or
+if (-not [System.IO.Path]::IsPathRooted($ExecutablePath) -or
     -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf) -or
     [System.IO.Path]::GetExtension($ExecutablePath).ToLowerInvariant() -ne ".exe") {
     Fail "ExecutablePath must be an existing absolute Windows .exe file."
