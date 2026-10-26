@@ -933,7 +933,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     );
     doc.scenes.push({ id: "second", title: "दूसरा दृश्य", notes: "", segments: [] });
     const { rerender, onChange } = mount(doc);
-    const filter = screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" });
+    const filter = screen.getByRole("checkbox", { name: "Only scenes needing speaker review" });
     fireEvent.click(filter);
     expect((filter as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent).toContain("1 unassigned");
@@ -959,6 +959,48 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
   });
 
+  it("offers review of invalid speaker IDs without treating malformed directions as dialogue", () => {
+    const doc = story();
+    const seed = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...seed, id: "orphaned-speaker", speaker_id: "deleted-cast-member",
+    });
+    doc.scenes.push({
+      id: "directions-only", title: "केवल मंच निर्देश", notes: "",
+      segments: [{
+        ...seed, id: "unspoken-invalid", kind: "direction",
+        speaker_id: "missing-but-unspoken", spoken_text: "",
+      }],
+    });
+    const { onChange, rerender } = mount(doc);
+    const filter = screen.getByRole("checkbox", { name: "Only scenes needing speaker review" });
+    fireEvent.click(filter);
+    expect(screen.getByRole("button", { name: "प्रथम दृश्य" }).textContent)
+      .toContain("1 invalid speaker ID(s)");
+    expect(screen.queryByRole("button", { name: "केवल मंच निर्देश" })).toBeNull();
+    expect(screen.getByText(/1 spoken line\\(s\\) reference missing character IDs/)).toBeTruthy();
+    const invalidOption = screen.getByRole("option", {
+      name: "Invalid character ID — choose a valid speaker",
+    }) as HTMLOptionElement;
+    expect(invalidOption.disabled).toBe(true);
+    expect(invalidOption.selected).toBe(true);
+    const corrected: StoryV2 = {
+      ...doc,
+      scenes: [
+        { ...doc.scenes[0], segments: [
+          seed, { ...doc.scenes[0].segments[1], speaker_id: "narrator" },
+        ] },
+        doc.scenes[1],
+      ],
+    };
+    rerender(<CastStudio document={corrected} onChange={onChange} onMessage={vi.fn()} />);
+    expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
+    expect(screen.queryByText(/spoken line\\(s\\) reference missing character IDs/)).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].speaker_id).toBe("deleted-cast-member");
+  });
+
   it("clears the previous story's private search and unresolved filter after changing stories", () => {
     const doc = story();
     doc.scenes[0].segments[0].speaker_id = null;
@@ -971,7 +1013,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
       target: { value: "प्रथम" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes needing speaker review" }));
     expect(screen.getByText("Showing 1 of 1 scenes.", { exact: false })).toBeTruthy();
     const next: StoryV2 = {
       ...doc, id: "other-story", title: "अलग कहानी",
@@ -980,7 +1022,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     rerender(<CastStudio document={next} onChange={onChange} onMessage={onMessage} />);
     expect((screen.getByRole("searchbox", { name: "Find scenes or dialogue" }) as HTMLInputElement).value)
       .toBe("");
-    expect((screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }) as HTMLInputElement).checked)
+    expect((screen.getByRole("checkbox", { name: "Only scenes needing speaker review" }) as HTMLInputElement).checked)
       .toBe(false);
     expect(screen.getByRole("button", { name: "नई कहानी" })).toBeTruthy();
     expect(screen.getByText("Showing 1 of 1 scenes.", { exact: false })).toBeTruthy();
@@ -1357,7 +1399,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     const { onChange, rerender } = mount(doc);
     const cast = screen.getByRole("combobox", { name: "Show scenes for character" });
     fireEvent.change(cast, { target: { value: "king" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes needing speaker review" }));
     expect(screen.getByText(/No matching scenes. Clear filters/)).toBeTruthy();
     fireEvent.change(cast, { target: { value: "narrator" } });
     expect(screen.getByRole("button", { name: "प्रथम दृश्य" })).toBeTruthy();
@@ -1368,7 +1410,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     rerender(<CastStudio document={second} onChange={onChange} onMessage={vi.fn()} />);
     expect((screen.getByRole("combobox", { name: "Show scenes for character" }) as HTMLSelectElement).value)
       .toBe("");
-    expect((screen.getByRole("checkbox", { name: "Only scenes with unassigned speech" }) as HTMLInputElement).checked)
+    expect((screen.getByRole("checkbox", { name: "Only scenes needing speaker review" }) as HTMLInputElement).checked)
       .toBe(false);
     expect(screen.getByRole("button", { name: "अगला दृश्य" })).toBeTruthy();
     expect(onChange).not.toHaveBeenCalled();
