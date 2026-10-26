@@ -1001,6 +1001,97 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments[1].speaker_id).toBe("deleted-cast-member");
   });
 
+  it("focuses each speaker issue, wraps around, and clears private search filters", () => {
+    const doc = story();
+    const base = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...base, id: "first-issue", speaker_id: null, source_label: "अज्ञात",
+      original_text: "पहला अनजान संवाद", spoken_text: "पहला अनजान संवाद",
+    });
+    doc.scenes[0].segments.push({
+      ...base, id: "direction", kind: "direction", speaker_id: "missing-director",
+      original_text: "[दृश्य बदला]", spoken_text: "",
+    });
+    doc.scenes.push({
+      id: "second-scene", title: "राजमहल", notes: "",
+      segments: [{
+        ...base, id: "second-issue", speaker_id: "deleted-actor",
+        original_text: "दूसरा अनजान संवाद", spoken_text: "दूसरा अनजान संवाद",
+      }],
+    });
+    const { onChange } = mount(doc);
+    const next = screen.getByRole("button", { name: "Next speaker issue" });
+    expect(screen.getByText("2 spoken line(s) need manual speaker review.")).toBeTruthy();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
+      target: { value: "not-present" },
+    });
+    expect(screen.getByText(/No matching scenes/)).toBeTruthy();
+    fireEvent.click(next);
+    expect((screen.getByRole("searchbox", { name: "Find scenes or dialogue" }) as HTMLInputElement).value).toBe("");
+    const firstSelect = screen.getByRole("combobox", { name: "Speaker for पहला अनजान संवाद" });
+    expect(document.activeElement).toBe(firstSelect);
+    expect(firstSelect.closest("li")?.classList.contains("speaker-review-target")).toBe(true);
+    fireEvent.click(next);
+    const secondSelect = screen.getByRole("combobox", { name: "Speaker for दूसरा अनजान संवाद" });
+    expect(document.activeElement).toBe(secondSelect);
+    expect(screen.getByRole("button", { name: "राजमहल" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Invalid character ID — choose a valid speaker" })).toBeTruthy();
+    fireEvent.click(next);
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for पहला अनजान संवाद",
+    }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[2].kind).toBe("direction");
+    expect(doc.text).toBe("Narrator: नमस्कार।");
+  });
+
+  it("advances past a repaired line and resets the review cursor for the next story", () => {
+    const doc = story();
+    const base = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...base, id: "first-issue", speaker_id: null, source_label: "अनजान",
+      original_text: "पहली आवाज़", spoken_text: "पहली आवाज़",
+    });
+    doc.scenes.push({
+      id: "second-scene", title: "जंगल", notes: "",
+      segments: [{
+        ...base, id: "second-issue", speaker_id: null, source_label: "अनाम",
+        original_text: "दूसरी आवाज़", spoken_text: "दूसरी आवाज़",
+      }],
+    });
+    const { onChange, rerender } = mount(doc);
+    fireEvent.click(screen.getByRole("button", { name: "Next speaker issue" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Speaker for पहली आवाज़" }), {
+      target: { value: "narrator" },
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const apply = onChange.mock.calls[0][0] as (current: StoryV2) => StoryV2;
+    const repaired = apply(doc);
+    rerender(<CastStudio document={repaired} onChange={onChange} onMessage={vi.fn()} />);
+    expect(screen.getByText("1 spoken line(s) need manual speaker review.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next speaker issue" }));
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for दूसरी आवाज़",
+    }));
+    const anotherStory: StoryV2 = {
+      ...story(), id: "new-story", title: "नई कहानी",
+      scenes: [{
+        id: "fresh", title: "नया दृश्य", notes: "",
+        segments: [{ ...base, id: "fresh-issue", speaker_id: null,
+          original_text: "तीसरी आवाज़", spoken_text: "तीसरी आवाज़" }],
+      }],
+    };
+    rerender(<CastStudio document={anotherStory} onChange={onChange} onMessage={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Next speaker issue" }));
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for तीसरी आवाज़",
+    }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
+  });
+
   it("clears the previous story's private search and unresolved filter after changing stories", () => {
     const doc = story();
     doc.scenes[0].segments[0].speaker_id = null;
