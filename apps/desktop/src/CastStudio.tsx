@@ -717,9 +717,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     [document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter]);
   const coverage = useMemo(() => castCoverage(document), [document]);
   const speakerIssues = useMemo(() => speakerReviewChoices(document), [document]);
-  const selectedSpeakerIssueIndex = speakerIssues.findIndex(issue =>
-    issue.sceneId === speakerReviewCursor?.sceneId &&
-    issue.segmentId === speakerReviewCursor.segmentId);
+  const selectedSpeakerIssueIndex = speakerReviewCursor === null ? -1 :
+    speakerIssues.findIndex(issue =>
+      issue.sceneId === speakerReviewCursor.sceneId &&
+      issue.segmentId === speakerReviewCursor.segmentId);
   useEffect(() => {
     if (speakerReviewCursor?.sceneId === activeScene?.id) {
       // Focus naturally scrolls the selected speaker control into the scene list.
