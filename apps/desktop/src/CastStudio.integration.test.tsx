@@ -412,6 +412,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "render_story_v2") return new Promise(resolve => { finish = resolve; });
       if (command === "save_story_v2") throw new Error("Save must not run during narration");
+      if (command === "discard_audio") return Promise.resolve();
       throw new Error("Unexpected command: " + command);
     });
     const { onChange } = mount();
@@ -436,6 +437,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
       if (command === "cancel_story_render") {
         return new Promise<void>(resolve => { finishCancel = resolve; });
       }
+      if (command === "discard_audio") return Promise.resolve();
       throw new Error("Unexpected command: " + command);
     });
     const { onMessage } = mount();
