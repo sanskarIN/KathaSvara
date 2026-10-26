@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { legacyToStoryV2, type SegmentV2, type StoryV2 } from "./story_v2";
-import { castCoverage, nextSpeakerReviewTarget, sceneOverview, speakerReviewTargets } from "./scene_overview";
+import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewTargets } from "./scene_overview";
 
 function line(id: string, kind: "speech" | "direction", text: string): SegmentV2 {
   return {
@@ -172,6 +172,12 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     expect(nextSpeakerReviewTarget(doc, targets[0])).toEqual(targets[1]);
     expect(nextSpeakerReviewTarget(doc, targets[1])).toEqual(targets[2]);
     expect(nextSpeakerReviewTarget(doc, targets[2])).toEqual(targets[0]);
+    expect(previousSpeakerReviewTarget(doc)).toEqual(targets[2]);
+    expect(previousSpeakerReviewTarget(doc, targets[0])).toEqual(targets[2]);
+    expect(previousSpeakerReviewTarget(doc, targets[2])).toEqual(targets[1]);
+    expect(previousSpeakerReviewTarget(doc, targets[1])).toEqual(targets[0]);
+    expect(previousSpeakerReviewTarget(doc, { sceneId: "nonexistent", segmentId: "unknown" }))
+      .toEqual(targets[2]);
     expect(nextSpeakerReviewTarget(doc, { sceneId: "nonexistent", segmentId: "unknown" }))
       .toEqual(targets[0]);
     expect(JSON.stringify(doc)).toBe(before);
@@ -180,10 +186,13 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     doc.scenes[0].segments[2].speaker_id = "narrator";
     expect(speakerReviewTargets(doc)).toHaveLength(2);
     expect(nextSpeakerReviewTarget(doc, targets[0])).toEqual(targets[1]);
+    expect(previousSpeakerReviewTarget(doc, targets[0])).toEqual(targets[2]);
+    expect(previousSpeakerReviewTarget(doc, targets[1])).toEqual(targets[2]);
     doc.scenes[1].segments[0].speaker_id = "narrator";
     doc.scenes[1].segments[1].speaker_id = "narrator";
     expect(speakerReviewTargets(doc)).toEqual([]);
     expect(nextSpeakerReviewTarget(doc, targets[2])).toBeNull();
+    expect(previousSpeakerReviewTarget(doc, targets[2])).toBeNull();
     expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
   });
 
@@ -193,6 +202,7 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     doc.scenes[0].segments[1].speaker_id = "deleted-director";
     expect(speakerReviewTargets(doc)).toEqual([]);
     expect(nextSpeakerReviewTarget(doc)).toBeNull();
+    expect(previousSpeakerReviewTarget(doc)).toBeNull();
   });
 
   it("computes a local cast coverage report without guessing unassigned speech", () => {
