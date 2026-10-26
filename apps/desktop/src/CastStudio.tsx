@@ -1299,13 +1299,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                       {document.scenes.map(scene => <option key={scene.id} value={scene.id}>{scene.title}</option>)}
                     </select>
                   </label>
-                  {segment.kind === "speech" && segment.speaker_id && (
-                    <button className="quiet-button" disabled={busy || rendering}
-                      onClick={() => void startRender(activeScene.id, segment.id)}>
-                      Regenerate / retry this line only
-                    </button>
+                  {segment.kind === "speech" && segment.speaker_id !== null && (
+                    <>
+                      <button className="quiet-button"
+                        disabled={busy || rendering ||
+                          document.characters.filter(char => char.id === segment.speaker_id).length !== 1}
+                        onClick={() => void startRender(activeScene.id, segment.id)}>
+                        Regenerate / retry this line only
+                      </button>
+                      {document.characters.filter(char => char.id === segment.speaker_id).length !== 1 &&
+                        <small className="dirty-label">Invalid speaker ID. Choose a valid character before regenerating.</small>}
+                    </>
                   )}
-                  {segment.kind === "speech" && segment.speaker_id === null && <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
+                  {segment.kind === "speech" && segment.speaker_id === null &&
+                    <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
                 </li>
               ))}
             </ol>
