@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Harden local render/preflight selection: refuse nonexistent or duplicate character IDs and ambiguous scene/line IDs (including duplicate stage directions), while allowing independently valid scene scopes. Disable invalid-speaker line retry with an actionable correction hint. Add unit and mocked desktop tests demonstrating invalid requests never reach Tauri/model IPC.
+
+
 - Guard **Reviewed spoken text** during active parsing/save/render: disable the editor and reject stale blur edits so they cannot retire an in-flight narration or overwrite its source snapshot. A mocked render regression verifies preservation and post-render editing availability.
 
 
