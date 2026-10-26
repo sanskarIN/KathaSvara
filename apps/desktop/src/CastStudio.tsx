@@ -87,6 +87,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [cancelStatus, setCancelStatus] = useState<"idle" | "requesting" | "requested">("idle");
+  const cancelRequest = useRef<{ jobId: string; status: "requesting" | "requested" } | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [history, setHistory] = useState<RenderHistory[] | null>(null);
   const [renderPlan, setRenderPlan] = useState<(RenderPlan & { scope: string }) | null>(null);
@@ -133,6 +135,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     auditEpoch.current += 1;
     const abandoned = activeRenderJob.current;
     activeRenderJob.current = null;
+    cancelRequest.current = null;
     if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
   }, []);
@@ -151,6 +154,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     // promise may settle later; it is forbidden to clear the new job's UI.
     const abandoned = activeRenderJob.current;
     activeRenderJob.current = null;
+    cancelRequest.current = null;
+    setCancelStatus("idle");
     setJobId(null);
     setRendering(false);
     setProgress({ done: 0, total: 0 });
@@ -194,6 +199,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setAudit(null);
     const abandoned = activeRenderJob.current;
     activeRenderJob.current = null;
+    cancelRequest.current = null;
+    setCancelStatus("idle");
     setJobId(null);
     setRendering(false);
     setProgress({ done: 0, total: 0 });
@@ -330,6 +337,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     const exportLabel = renderExportLabel(document, id, sceneId, forceSegmentId);
     const revision = renderRevision.current;
     activeRenderJob.current = id;
+    cancelRequest.current = null;
+    setCancelStatus("idle");
     historyEpoch.current += 1;
     // An in-flight model-free plan or audit must not publish a late result
     // while speech generation owns the current story's snapshot.
@@ -377,6 +386,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       // not clear its progress indicator, cancel control or render lock.
       if (activeRenderJob.current === id) {
         activeRenderJob.current = null;
+        cancelRequest.current = null;
+        setCancelStatus("idle");
         setJobId(null);
         setRendering(false);
       }
@@ -513,17 +524,27 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
 
   async function cancelRender() {
     const cancelledId = jobId;
-    if (!cancelledId || activeRenderJob.current !== cancelledId) return;
+    if (!cancelledId || activeRenderJob.current !== cancelledId ||
+        cancelRequest.current?.jobId === cancelledId) return;
     const revision = renderRevision.current;
+    // Own the request synchronously before IPC so rapid repeat clicks cannot
+    // dispatch a second cancellation signal for this job.
+    cancelRequest.current = { jobId: cancelledId, status: "requesting" };
+    setCancelStatus("requesting");
     try {
       await invoke("cancel_story_render", { jobId: cancelledId });
-      // A late cancel response must not report cancellation for a completed
-      // render or for a newer story's unrelated job.
-      if (revision === renderRevision.current && activeRenderJob.current === cancelledId) {
+      if (revision === renderRevision.current && activeRenderJob.current === cancelledId &&
+          cancelRequest.current?.jobId === cancelledId) {
+        cancelRequest.current = { jobId: cancelledId, status: "requested" };
+        setCancelStatus("requested");
         onMessage("Cancellation requested. The current model chunk may need to finish first.");
       }
     } catch (error) {
-      if (revision === renderRevision.current && activeRenderJob.current === cancelledId) {
+      if (revision === renderRevision.current && activeRenderJob.current === cancelledId &&
+          cancelRequest.current?.jobId === cancelledId) {
+        // If the signalling IPC fails, explicitly allow a retry for this job.
+        cancelRequest.current = null;
+        setCancelStatus("idle");
         onMessage("Unable to signal cancellation: " + errorString(error));
       }
     }
@@ -899,7 +920,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             onClick={() => void inspectProductionReadiness()}>
             {auditBusy ? "Checking scenes…" : "Audit scene readiness (no model)"}
           </button>
-          <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
+          <button className="quiet-button" disabled={!rendering || cancelStatus !== "idle"}
+            onClick={() => void cancelRender()}>
+            {cancelStatus === "requesting" ? "Requesting cancellation…" :
+              cancelStatus === "requested" ? "Cancellation requested (waiting)" : "Cancel render"}
+          </button>
           <button className="secondary-button" disabled={loadingHistory}
             onClick={() => void showRenderHistory()}>
             {loadingHistory ? "Reading history…" : "Recent render history"}
