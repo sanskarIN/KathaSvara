@@ -1310,7 +1310,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     doc.scenes[0].segments[0].source_label = "अज्ञात पात्र";
     const { rerender, onChange, onMessage } = mount(doc);
     expect(screen.getByRole("alert").textContent).toContain("अज्ञात पात्र");
-    expect(screen.getByText(/1 unresolved speech segments/)).toBeTruthy();
+    expect(screen.getByText(/1 spoken segment\(s\) need speaker review/)).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: /Speaker for नमस्कार/ }), {
       target: { value: "narrator" },
     });
@@ -1321,7 +1321,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(resolved.scenes[0].segments[0].source_label).toBeNull();
     rerender(<CastStudio document={resolved} onChange={onChange} onMessage={onMessage} />);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText(/0 unresolved speech segments/)).toBeTruthy();
+    expect(screen.getByText(/0 spoken segment\(s\) need speaker review/)).toBeTruthy();
     expect(mocks.invoke.mock.calls.some(([command]) => command === "render_story_v2")).toBe(false);
   });
 
