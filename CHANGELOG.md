@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Add an accessible **Jump to speaker issue** selector with bounded Hindi text previews, clear missing/unassigned speaker labels, and current issue position feedback. Reveal the target despite search filters, focus its speaker dropdown, and disable navigation when resolved. Includes unit and desktop regression tests; no automated character assignments or model calls.
+
+
 - Extend speaker review with a **Previous speaker issue** action: navigate backwards across scenes, wrap to the last pending issue, and continue relative to corrected lines. Reuse the existing focus/highlight and filter-reveal behavior without making edits or invoking speech synthesis. Add reverse-order pure unit and mocked desktop tests.
 
 
