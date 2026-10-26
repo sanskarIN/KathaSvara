@@ -763,6 +763,21 @@ fn inspect_wav(data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+// Keep completed long voice-studio recordings exportable even when the WebView
+// cannot embed a WAV larger than 25 MiB in a base64 data URL.
+fn legacy_wav_preview(path: &Path) -> Result<(String, bool, u64), String> {
+    let mut file = fs::File::open(path)
+        .map_err(|_| "The speech engine did not create a WAV.".to_string())?;
+    let opened = file.metadata().map_err(|e| e.to_string())?;
+    let details = inspect_wav_details(&mut file)?;
+    if details.file_bytes > MAX_GENERATED_WAV {
+        return Ok((String::new(), false, details.file_bytes));
+    }
+    let bytes = read_validated_wav_preview(&mut file, &opened, details.file_bytes)?;
+    Ok((format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+        true, details.file_bytes))
+}
+
 #[tauri::command]
 async fn synthesize(
     app: tauri::AppHandle,
@@ -799,22 +814,22 @@ async fn synthesize(
                 return Err(error);
             }
         };
-        let size = fs::metadata(&path).map_err(|_| "Audio file was not created.".to_string())?.len();
-        if size > MAX_GENERATED_WAV {
-            let _ = fs::remove_file(&path);
-            return Err("Generated audio exceeds the preview limit.".into());
-        }
-        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-        inspect_wav(&bytes)?;
+        let (data_url, preview_available, size) = match legacy_wav_preview(&path) {
+            Ok(preview) => preview,
+            Err(error) => {
+                let _ = fs::remove_file(&path);
+                return Err(error);
+            }
+        };
         let result = data.get("result").ok_or("Missing synthesis metadata.")?;
         Ok(AudioResult {
             audio_id,
-            data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+            data_url,
             duration_seconds: result["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
             segment_timings: Vec::new(),
-            preview_available: true,
+            preview_available,
             file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
