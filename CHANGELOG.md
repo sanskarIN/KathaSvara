@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Validate **Add character**, **Duplicate voice profile**, and **Add scene** synchronously before updating React state. Report rejected edits without invalidating the current generated WAV, and create new clone IDs once outside state updaters. Add mocked desktop tests for rejected duplicate names, ambiguous profiles, overlong titles and deterministic successful changes.
+
+
 - Harden local render/preflight selection: refuse nonexistent or duplicate character IDs and ambiguous scene/line IDs (including duplicate stage directions), while allowing independently valid scene scopes. Disable invalid-speaker line retry with an actionable correction hint. Add unit and mocked desktop tests demonstrating invalid requests never reach Tauri/model IPC.
 
 
