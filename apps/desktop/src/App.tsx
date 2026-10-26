@@ -234,7 +234,8 @@ export default function App() {
     } catch (error) {
       if (revision === generationRevision.current) {
         setStatus("failed");
-        setMessage(errorMessage(error));
+        setMessage("Hindi speech was not generated: " + errorMessage(error) +
+          " This developer EXE does not bundle Python, the inference source, Chatterbox dependencies or model weights. Open Settings → Inspect local TTS setup and follow the audio installation guide.");
       }
     } finally {
       setWorking(false);
@@ -462,6 +463,9 @@ export default function App() {
                   <label className="range-label" htmlFor="cfg">CFG guidance <strong>{cfgWeight.toFixed(2)}</strong></label>
                   <input id="cfg" type="range" min="0" max="1" step="0.05" value={cfgWeight} onChange={(e) => changeGuidance(Number(e.target.value))} />
                   <p className="helper">Only controls supported by the selected model are shown. Generating does not upload your script.</p>
+                  <p className="helper"><strong>Real audio setup required:</strong> this developer EXE does not contain Python, Chatterbox, or model weights. The Windows audio setup guide includes a real Hindi WAV smoke test; a passing dependency check alone is not enough.</p>
+                  <button className="quiet-button" type="button"
+                    onClick={() => setPage("settings")}>Open local TTS diagnostics</button>
                   <button className="primary-button" disabled={working} onClick={() => void generate()}>{working ? "Generating speech…" : "✦ Generate Hindi Voice"}</button>
                 </section>
                 <section className="panel preview-panel">
