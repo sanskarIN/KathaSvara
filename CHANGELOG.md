@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Extend speaker review with a **Previous speaker issue** action: navigate backwards across scenes, wrap to the last pending issue, and continue relative to corrected lines. Reuse the existing focus/highlight and filter-reveal behavior without making edits or invoking speech synthesis. Add reverse-order pure unit and mocked desktop tests.
+
+
 - Add story-wide **Next speaker issue** navigation: jump and focus the next unassigned or invalid spoken line, wrap in original scene order, continue after a repaired line and reset cursor when switching stories. Clear filters that would hide the target; stage directions are excluded and narration/persistence are untouched. Includes model-free and mocked desktop regression tests.
 
 
