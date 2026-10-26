@@ -427,6 +427,79 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("signals cancellation exactly once per job even on rapid repeat clicks", async () => {
+    let finishRender: (value: unknown) => void = () => { throw new Error("Render not started"); };
+    let finishCancel: () => void = () => { throw new Error("Cancel not requested"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "render_story_v2") {
+        return new Promise(resolve => { finishRender = resolve; });
+      }
+      if (command === "cancel_story_render") {
+        return new Promise<void>(resolve => { finishCancel = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage, onChange } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    const cancel = screen.getByRole("button", { name: "Cancel render" });
+    fireEvent.click(cancel);
+    expect((screen.getByRole("button", { name: "Requesting cancellation…" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Requesting cancellation…" }));
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "cancel_story_render")).toHaveLength(1);
+    await act(async () => { finishCancel(); });
+    expect((screen.getByRole("button", { name: "Cancellation requested (waiting)" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancellation requested (waiting)" }));
+    expect(mocks.invoke.mock.calls.filter(([name]) => name === "cancel_story_render")).toHaveLength(1);
+    expect(onMessage.mock.calls.filter(([msg]) =>
+      String(msg).includes("Cancellation requested. The current model chunk"))).toHaveLength(1);
+    await act(async () => { finishRender(generatedAudio()); });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Cancel render" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("unlocks cancellation signalling after an IPC error without retiring the render", async () => {
+    let finishRender: (value: unknown) => void = () => { throw new Error("Render not started"); };
+    let rejectFirst: (error: Error) => void = () => { throw new Error("First cancel not requested"); };
+    let finishSecond: () => void = () => { throw new Error("Second cancel not requested"); };
+    let attempts = 0;
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "render_story_v2") {
+        return new Promise(resolve => { finishRender = resolve; });
+      }
+      if (command === "cancel_story_render") {
+        attempts += 1;
+        if (attempts === 1) return new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+        return new Promise<void>(resolve => { finishSecond = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel render" }));
+    expect(attempts).toBe(1);
+    await act(async () => { rejectFirst(new Error("Temporary cancellation IPC failure")); });
+    expect(onMessage.mock.calls.some(([msg]) =>
+      String(msg).includes("Unable to signal cancellation: Temporary cancellation IPC failure")))
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel render" }) as HTMLButtonElement).disabled)
+      .toBe(false);
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel render" }));
+    expect(attempts).toBe(2);
+    await act(async () => { finishSecond(); });
+    expect(screen.getByRole("button", { name: "Cancellation requested (waiting)" })).toBeTruthy();
+    await act(async () => { finishRender(generatedAudio()); });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect(attempts).toBe(2);
+  });
+
   it("ignores cancellation confirmation received after a job already finished", async () => {
     let finishRender: (value: unknown) => void = () => { throw new Error("Render not started"); };
     let finishCancel: () => void = () => { throw new Error("Cancellation not requested"); };
