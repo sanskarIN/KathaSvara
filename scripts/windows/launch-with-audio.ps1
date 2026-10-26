@@ -7,11 +7,16 @@ param(
     [string]$ExecutablePath = "",
     [string]$PythonPath = "",
     [switch]$InstallDependencies,
-    [switch]$DoctorOnly
+    [switch]$DoctorOnly,
+    [switch]$VerifyHindiSpeech
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+if ($DoctorOnly -and $VerifyHindiSpeech) {
+    Write-Error "Choose either -DoctorOnly (no model) or -VerifyHindiSpeech (real model)."
+    exit 1
+}
 
 function Fail([string]$Message) {
     Write-Error $Message
@@ -98,7 +103,43 @@ if ($DoctorOnly) {
     exit 0
 }
 
+if ($VerifyHindiSpeech) {
+    # This is an EXPLICIT real TTS test: it may download large model weights,
+    # consume RAM/VRAM, and take time. It never runs in no-model CI checks.
+    $output = Join-Path ([System.IO.Path]::GetTempPath()) (
+        "kathasvara-hindi-smoke-" + [guid]::NewGuid().ToString("N") + ".wav")
+    $payload = @{
+        action = "synthesize"
+        text = "नमस्कार। यह कथास्वर की वास्तविक हिंदी आवाज़ जाँच है।"
+        output = $output
+        exaggeration = 0.5
+        cfg_weight = 0.5
+    } | ConvertTo-Json -Compress
+    # Windows PowerShell 5.1 would otherwise send non-ASCII stdin as ASCII.
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    Write-Host "Running a REAL Hindi synthesis test. First use may download model weights."
+    Push-Location $inference
+    try {
+        $rawSmoke = $payload | & $python -m kathasvara.cli
+        if ($LASTEXITCODE -ne 0 -or -not $rawSmoke) {
+            Fail ("Real Hindi speech test failed. Examine the local Python message: " +
+                (($rawSmoke | Select-Object -Last 1) -join ""))
+        }
+        $result = ($rawSmoke | Select-Object -Last 1) | ConvertFrom-Json
+        if (-not $result.ok -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
+            Fail "The model did not create a valid output WAV. Check model access and hardware."
+        }
+        if ((Get-Item -LiteralPath $output).Length -lt 44) {
+            Fail "The model created an invalid or empty WAV."
+        }
+        Write-Host ("A real WAV was generated at: " + $output)
+        Write-Warning "Listen critically to the WAV; this test does not validate Hindi pronunciation or distinct voices."
+    } finally {
+        Pop-Location
+    }
+}
 if (-not $ExecutablePath) {
+    if ($VerifyHindiSpeech) { exit 0 }
     Fail "Provide -ExecutablePath with the absolute path to the GitHub-built KathaSvara developer EXE, or use -DoctorOnly."
 }
 if (-not [System.IO.Path]::IsPathRooted($ExecutablePath) -or
