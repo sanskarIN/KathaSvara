@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Repair a scene-review blind spot: include non-null speaker IDs absent from the cast in the **needs speaker review** filter, show their per-scene counts separately from unassigned dialogue, warn before saving or rendering, and make stale speaker IDs explicitly visible in the assignment selector. Ignore invalid metadata on unspoken stage directions. Add model-free TypeScript and mocked React/Tauri tests; still draft-only, with v0.5.2 main unchanged.
+
 - Show a collapsible local cast-coverage summary with per-character spoken turns and scene appearances, plus separate counts for stage directions, unassigned dialogue and unknown cast references. Exclude directions from actor appearances; never send, persist or synthesize content when viewing the report. Add deterministic TypeScript and mocked desktop UI tests.
 
 - Isolate desktop render jobs across story switches and edits: cooperatively cancel retired jobs, reset their UI lock, scope progress polling to the current job, discard late audio responses, and prevent obsolete success/error/finally callbacks from clearing a newer narration attempt. Add mocked React/Tauri race regressions; this does not certify a clean-Windows end-user render or human-reviewed Hindi voices.
