@@ -154,7 +154,7 @@ jobs:
           [System.IO.File]::WriteAllText("release-assets/SHA256SUMS.txt", "$hash  $name" + [Environment]::NewLine)
           $note = Get-Content release-assets/README.txt -Raw
           if (-not $note.Contains("NOT A COMPLETE INSTALLER") -or -not $note.Contains("Python 3.11")) { throw "Missing runtime warnings" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kathasvara-v0.4.2-release-assets
           path: release-assets/
