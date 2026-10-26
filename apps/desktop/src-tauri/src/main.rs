@@ -1992,6 +1992,10 @@ mod tests {
         data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
         data.extend_from_slice(&samples);
         fs::write(&path, &data).unwrap();
+        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&path).unwrap();
+        assert!(inline);
+        assert_eq!(legacy_size, data.len() as u64);
+        assert_eq!(legacy_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
         let response = json!({"result": {
             "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
             "segments": [{
@@ -2031,6 +2035,11 @@ mod tests {
         writer.set_len(44 + u64::from(sample_bytes)).unwrap();
         drop(writer);
         assert!(fs::metadata(&source).unwrap().len() > MAX_GENERATED_WAV);
+        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&source).unwrap();
+        assert!(!inline);
+        assert!(legacy_url.is_empty());
+        assert_eq!(legacy_size, fs::metadata(&source).unwrap().len());
+        assert!(source.exists(), "Large Voice Studio WAV must survive the preview limit");
         copy_validated_wav(&source, &exported).unwrap();
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
         assert!(copy_validated_wav(&source, &exported).is_err());
