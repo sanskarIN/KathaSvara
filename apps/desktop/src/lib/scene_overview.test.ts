@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { legacyToStoryV2, type SegmentV2, type StoryV2 } from "./story_v2";
-import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewTargets } from "./scene_overview";
+import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewChoices, speakerReviewTargets } from "./scene_overview";
 
 function line(id: string, kind: "speech" | "direction", text: string): SegmentV2 {
   return {
@@ -150,6 +150,28 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     expect(sceneOverview(doc, "", true)).toEqual([]);
     expect(doc.scenes[0].segments[1].speaker_id).toBe("missing-in-direction");
     expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
+  it("makes bounded Hindi issue choices without exposing directions or changing the script", () => {
+    const doc = fixture();
+    doc.scenes[1].segments[0].speaker_id = "missing-king";
+    doc.scenes[0].segments[1].speaker_id = "missing-direction";
+    doc.scenes[0].title = "  सुंदर     जंगल  ";
+    doc.scenes[0].segments[2].original_text = "कौन   वहाँ? ".repeat(25);
+    const snapshot = JSON.stringify(doc);
+    const choices = speakerReviewChoices(doc);
+    expect(choices).toHaveLength(2);
+    expect(choices.map(({ sceneId, segmentId, reason }) => ({
+      sceneId, segmentId, reason,
+    }))).toEqual(speakerReviewTargets(doc));
+    expect(choices[0].label).toContain("1. सुंदर जंगल — Unassigned: कौन वहाँ?");
+    expect(choices[1].label).toContain("2. Royal Palace — Missing character: राजा भोज ने कहा।");
+    expect(choices[0].label.length).toBeLessThanOrEqual(150);
+    expect(choices.every(choice => !choice.label.includes("दरवाज़ा"))).toBe(true);
+    expect(JSON.stringify(doc)).toBe(snapshot);
+    doc.scenes[0].segments[2].speaker_id = "narrator";
+    doc.scenes[1].segments[0].speaker_id = "narrator";
+    expect(speakerReviewChoices(doc)).toEqual([]);
   });
 
   it("cycles all speaker issues in story order, including after the previous line is repaired", () => {
