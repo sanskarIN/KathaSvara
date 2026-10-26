@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Make **Cancel render** signalling one-shot per active job with explicit requesting/requested waiting states; allow manual retry after cancellation IPC errors. Fix recovery-history race where overlapping **Forget record** operations could leave a deleted row visible, add per-row in-flight protection and filter confirmed deletions from stale list responses. Add no-model React/Tauri regression coverage.
+
+
 - Retire pending plan/audit requests when starting narration so late no-model results cannot contaminate active-render status. Prevent export of a privacy-safe audit report after its source audit was invalidated while choosing a destination; check operation ownership before and after I/O. Add mock-Tauri concurrency tests for late plan/audit replies and obsolete exports.
 
 
