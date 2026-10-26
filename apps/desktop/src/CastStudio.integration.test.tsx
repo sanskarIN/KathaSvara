@@ -1001,6 +1001,57 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments[1].speaker_id).toBe("deleted-cast-member");
   });
 
+  it("reviews speaker issues backwards, wraps around, and never invokes rendering", () => {
+    const doc = story();
+    const source = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...source, id: "missing-first", speaker_id: null, source_label: "अजनबी",
+      original_text: "पहले कौन?", spoken_text: "पहले कौन?",
+    });
+    doc.scenes.push({
+      id: "another-scene", title: "अंतिम दृश्य", notes: "",
+      segments: [{
+        ...source, id: "missing-last", speaker_id: "removed-character",
+        original_text: "आखिरी कौन?", spoken_text: "आखिरी कौन?",
+      }],
+    });
+    const { onChange, rerender } = mount(doc);
+    const previous = screen.getByRole("button", { name: "Previous speaker issue" });
+    const next = screen.getByRole("button", { name: "Next speaker issue" });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
+      target: { value: "no-matches" },
+    });
+    fireEvent.click(previous);
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for आखिरी कौन?",
+    }));
+    expect((screen.getByRole("searchbox", { name: "Find scenes or dialogue" }) as HTMLInputElement).value)
+      .toBe("");
+    fireEvent.click(previous);
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for पहले कौन?",
+    }));
+    fireEvent.click(next);
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for आखिरी कौन?",
+    }));
+    const fullyAssigned: StoryV2 = {
+      ...doc,
+      scenes: doc.scenes.map(scene => ({
+        ...scene,
+        segments: scene.segments.map(line => line.kind === "speech"
+          ? { ...line, speaker_id: "narrator" } : line),
+      })),
+    };
+    rerender(<CastStudio document={fullyAssigned} onChange={onChange} onMessage={vi.fn()} />);
+    expect((previous as HTMLButtonElement).disabled).toBe(true);
+    expect((next as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("0 spoken line(s) need manual speaker review.")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
+  });
+
   it("focuses each speaker issue, wraps around, and clears private search filters", () => {
     const doc = story();
     const base = doc.scenes[0].segments[0];
