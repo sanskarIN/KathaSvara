@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Guard **Reviewed spoken text** during active parsing/save/render: disable the editor and reject stale blur edits so they cannot retire an in-flight narration or overwrite its source snapshot. A mocked render regression verifies preservation and post-render editing availability.
+
+
 - Add an accessible **Jump to speaker issue** selector with bounded Hindi text previews, clear missing/unassigned speaker labels, and current issue position feedback. Reveal the target despite search filters, focus its speaker dropdown, and disable navigation when resolved. Includes unit and desktop regression tests; no automated character assignments or model calls.
 
 
