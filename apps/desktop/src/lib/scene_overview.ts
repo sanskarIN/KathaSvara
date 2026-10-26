@@ -136,3 +136,65 @@ export function castCoverage(story: StoryV2): CastCoverageSummary {
     invalidSpeakerAssignments,
   };
 }
+
+/** A single spoken line requiring manual speaker review, in source order. */
+export interface SpeakerReviewTarget {
+  sceneId: string;
+  segmentId: string;
+  reason: "unassigned" | "invalid";
+}
+
+/** Model-free diagnostics: never mutate the story or guess a character. */
+export function speakerReviewTargets(story: StoryV2): SpeakerReviewTarget[] {
+  const known = new Set(story.characters.map(character => character.id));
+  const targets: SpeakerReviewTarget[] = [];
+  for (const scene of story.scenes) {
+    for (const segment of scene.segments) {
+      if (segment.kind !== "speech") continue;
+      const reason = segment.speaker_id === null ? "unassigned" :
+        !known.has(segment.speaker_id) ? "invalid" : null;
+      if (reason) targets.push({ sceneId: scene.id, segmentId: segment.id, reason });
+    }
+  }
+  return targets;
+}
+
+/**
+ * Move forward through the entire story, wrapping back to the first issue.
+ * The cursor can point at a line whose speaker was just repaired; locating it
+ * in all segments (not only the issue queue) ensures the next click proceeds
+ * to the next unresolved line rather than jumping unexpectedly to the start.
+ * Missing or ambiguous cursor identities fall back to the first issue.
+ */
+export function nextSpeakerReviewTarget(
+  story: StoryV2,
+  after: Pick<SpeakerReviewTarget, "sceneId" | "segmentId"> | null = null,
+): SpeakerReviewTarget | null {
+  const issues = speakerReviewTargets(story);
+  if (issues.length === 0) return null;
+  if (after === null) return issues[0];
+
+  let position = 0;
+  let cursorPosition = -1;
+  let cursorMatches = 0;
+  const issuePositions: number[] = [];
+  let issueIndex = 0;
+  for (const scene of story.scenes) {
+    for (const segment of scene.segments) {
+      if (scene.id === after.sceneId && segment.id === after.segmentId) {
+        cursorPosition = position;
+        cursorMatches += 1;
+      }
+      if (issueIndex < issues.length &&
+        issues[issueIndex].sceneId === scene.id &&
+        issues[issueIndex].segmentId === segment.id) {
+        issuePositions.push(position);
+        issueIndex += 1;
+      }
+      position += 1;
+    }
+  }
+  if (cursorMatches !== 1) return issues[0];
+  const nextIndex = issuePositions.findIndex(item => item > cursorPosition);
+  return issues[nextIndex < 0 ? 0 : nextIndex];
+}
