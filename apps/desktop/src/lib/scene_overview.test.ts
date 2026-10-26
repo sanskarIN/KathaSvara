@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { legacyToStoryV2, type SegmentV2, type StoryV2 } from "./story_v2";
-import { castCoverage, sceneOverview } from "./scene_overview";
+import { castCoverage, nextSpeakerReviewTarget, sceneOverview, speakerReviewTargets } from "./scene_overview";
 
 function line(id: string, kind: "speech" | "direction", text: string): SegmentV2 {
   return {
@@ -150,6 +150,49 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     expect(sceneOverview(doc, "", true)).toEqual([]);
     expect(doc.scenes[0].segments[1].speaker_id).toBe("missing-in-direction");
     expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
+  it("cycles all speaker issues in story order, including after the previous line is repaired", () => {
+    const doc = fixture();
+    doc.scenes[1].segments[0].speaker_id = "deleted-king";
+    doc.scenes[1].segments.push({
+      ...line("palace-unknown", "speech", "यहाँ कौन है?"),
+      speaker_id: null, source_label: "अज्ञात",
+    });
+    // Invalid metadata on a silent direction must not enter the queue.
+    doc.scenes[0].segments[1].speaker_id = "missing-direction";
+    const before = JSON.stringify(doc);
+    const targets = speakerReviewTargets(doc);
+    expect(targets).toEqual([
+      { sceneId: "forest", segmentId: "unknown", reason: "unassigned" },
+      { sceneId: "palace", segmentId: "king", reason: "invalid" },
+      { sceneId: "palace", segmentId: "palace-unknown", reason: "unassigned" },
+    ]);
+    expect(nextSpeakerReviewTarget(doc)).toEqual(targets[0]);
+    expect(nextSpeakerReviewTarget(doc, targets[0])).toEqual(targets[1]);
+    expect(nextSpeakerReviewTarget(doc, targets[1])).toEqual(targets[2]);
+    expect(nextSpeakerReviewTarget(doc, targets[2])).toEqual(targets[0]);
+    expect(nextSpeakerReviewTarget(doc, { sceneId: "nonexistent", segmentId: "unknown" }))
+      .toEqual(targets[0]);
+    expect(JSON.stringify(doc)).toBe(before);
+
+    // The previously selected line is still present after assignment.
+    doc.scenes[0].segments[2].speaker_id = "narrator";
+    expect(speakerReviewTargets(doc)).toHaveLength(2);
+    expect(nextSpeakerReviewTarget(doc, targets[0])).toEqual(targets[1]);
+    doc.scenes[1].segments[0].speaker_id = "narrator";
+    doc.scenes[1].segments[1].speaker_id = "narrator";
+    expect(speakerReviewTargets(doc)).toEqual([]);
+    expect(nextSpeakerReviewTarget(doc, targets[2])).toBeNull();
+    expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
+  it("does not mistake unknown IDs in directions for review targets", () => {
+    const doc = fixture();
+    doc.scenes[0].segments[2].speaker_id = "narrator";
+    doc.scenes[0].segments[1].speaker_id = "deleted-director";
+    expect(speakerReviewTargets(doc)).toEqual([]);
+    expect(nextSpeakerReviewTarget(doc)).toBeNull();
   });
 
   it("computes a local cast coverage report without guessing unassigned speech", () => {
