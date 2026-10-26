@@ -8,13 +8,16 @@ export interface SceneOverview {
   spoken: number;
   directions: number;
   unresolved: number;
+  /** Spoken lines assigned to a character ID that is absent from the cast. */
+  invalidSpeakers: number;
   hasProductionNotes: boolean;
 }
 
 /**
  * Search filters the scene navigator only: never edit, persist or synthesize
  * the document. Counts are computed from the current source of truth, so a
- * resolved speaker immediately disappears from the "needs assignment" view.
+ * resolved speaker immediately disappears from the "needs review" view.
+ * Invalid non-null speaker IDs also require review, rather than hiding scenes.
  * An optional cast filter matches assigned spoken lines by stable character ID;
  * it does not treat unspoken directions as actor appearances.
  */
@@ -25,6 +28,7 @@ export function sceneOverview(
   characterId: string | null = null,
 ): SceneOverview[] {
   const term = search.trim().normalize("NFC").toLocaleLowerCase();
+  const knownSpeakerIds = new Set(story.characters.map(character => character.id));
   const matches = (value: string | null | undefined): boolean =>
     typeof value === "string" &&
     value.normalize("NFC").toLocaleLowerCase().includes(term);
@@ -33,6 +37,7 @@ export function sceneOverview(
     let spoken = 0;
     let directions = 0;
     let unresolved = 0;
+    let invalidSpeakers = 0;
     // The character filter only considers actual spoken dialogue, never stage directions.
     let hasCharacterSpeech = characterId === null;
     let found = !term || matches(scene.title) || matches(scene.notes);
@@ -41,6 +46,7 @@ export function sceneOverview(
         spoken += 1;
         if (line.speaker_id === characterId) hasCharacterSpeech = true;
         if (line.speaker_id === null) unresolved += 1;
+        else if (!knownSpeakerIds.has(line.speaker_id)) invalidSpeakers += 1;
       } else if (line.kind === "direction") {
         directions += 1;
       }
@@ -51,13 +57,14 @@ export function sceneOverview(
         found = true;
       }
     }
-    if (!found || !hasCharacterSpeech || (unresolvedOnly && unresolved === 0)) continue;
+    if (!found || !hasCharacterSpeech || (unresolvedOnly && unresolved + invalidSpeakers === 0)) continue;
     result.push({
       id: scene.id,
       title: scene.title,
       spoken,
       directions,
       unresolved,
+      invalidSpeakers,
       hasProductionNotes: Boolean(scene.notes.trim()),
     });
   }
