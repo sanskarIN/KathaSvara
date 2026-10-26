@@ -336,6 +336,96 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
   });
 
+  it("isolates stale model-free plan requests across story switches", async () => {
+    const first = story();
+    let finishOld: (value: unknown) => void = () => { throw new Error("Old plan not requested"); };
+    let finishNew: (value: unknown) => void = () => { throw new Error("New plan not requested"); };
+    mocks.invoke.mockImplementation((command: string, args: { project: StoryV2 }) => {
+      if (command !== "preflight_render") throw new Error("Unexpected command: " + command);
+      return new Promise(resolve => {
+        if (args.project.id === ID) finishOld = resolve;
+        else finishNew = resolve;
+      });
+    });
+    const { rerender, onChange, onMessage } = mount(first);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect render plan (no model)" }));
+    expect(screen.getByRole("button", { name: "Checking plan…" })).toBeTruthy();
+    rerender(<CastStudio document={{ ...first, id: "other-story", title: "नई कहानी" }}
+      onChange={onChange} onMessage={onMessage} />);
+    expect(screen.getByRole("button", { name: "Inspect render plan (no model)" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect render plan (no model)" }));
+    await act(async () => {
+      finishOld({ segments: 99, chunks: 99, spoken_characters: 999 });
+    });
+    expect(screen.getByRole("button", { name: "Checking plan…" })).toBeTruthy();
+    expect(screen.queryByText(/99 dialogue lines/)).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) => String(message).includes("Model-free plan reviewed")))
+      .toBe(false);
+    await act(async () => {
+      finishNew({ segments: 1, chunks: 2, spoken_characters: 10 });
+    });
+    expect(screen.getByText(/Full story preflight: 1 dialogue lines/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Inspect render plan (no model)" })).toBeTruthy();
+    expect(onMessage.mock.calls.filter(([message]) => String(message).includes("Model-free plan reviewed")))
+      .toHaveLength(1);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.every(([name]) => name === "preflight_render")).toBe(true);
+  });
+
+  it("isolates stale production audits without unlocking newer requests", async () => {
+    const first = story();
+    let finishOld: (value: unknown) => void = () => { throw new Error("Old audit not requested"); };
+    let finishNew: (value: unknown) => void = () => { throw new Error("New audit not requested"); };
+    mocks.invoke.mockImplementation((command: string, args: { project: StoryV2 }) => {
+      if (command !== "audit_production") throw new Error("Unexpected command: " + command);
+      return new Promise(resolve => {
+        if (args.project.id === ID) finishOld = resolve;
+        else finishNew = resolve;
+      });
+    });
+    const { rerender, onChange, onMessage } = mount(first);
+    fireEvent.click(screen.getByRole("button", { name: "Audit scene readiness (no model)" }));
+    expect(screen.getByRole("button", { name: "Checking scenes…" })).toBeTruthy();
+    rerender(<CastStudio document={{ ...first, id: "second-audit-story" }}
+      onChange={onChange} onMessage={onMessage} />);
+    expect(screen.getByRole("button", { name: "Audit scene readiness (no model)" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Audit scene readiness (no model)" }));
+    const result = (ready: number) => ({
+      total_scenes: 1, ready_scenes: ready, full_story_ready: ready === 1,
+      full_story_reason: ready ? "ready" : "needs_review", full_story_chunks: ready,
+      scenes: [{ scene_id: "scene-one", ready: ready === 1, reason: "ready", segments: 1, chunks: 1 }],
+      model_loaded: false, audio_verified: false, distinct_voices_verified: false,
+    });
+    await act(async () => { finishOld(result(0)); });
+    expect(screen.getByRole("button", { name: "Checking scenes…" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Production readiness audit" })).toBeNull();
+    await act(async () => { finishNew(result(1)); });
+    expect(screen.getByRole("region", { name: "Production readiness audit" }).textContent)
+      .toContain("1 / 1 scenes ready");
+    expect(onMessage.mock.calls.filter(([message]) => String(message).includes("Model-free production audit complete")))
+      .toHaveLength(1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("prevents saving a story while a narration render owns its snapshot", async () => {
+    let finish: (value: unknown) => void = () => { throw new Error("Render not started"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "render_story_v2") return new Promise(resolve => { finish = resolve; });
+      if (command === "save_story_v2") throw new Error("Save must not run during narration");
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onChange } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    const saveButton = screen.getByRole("button", { name: "Save cast and scenes" }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+    fireEvent.click(saveButton);
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "save_story_v2")).toBe(false);
+    await act(async () => { finish(generatedAudio()); });
+    expect(saveButton.disabled).toBe(false);
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("audits scenes without rendering or voice loading, then exports count-only JSON", async () => {
     const doc = story();
     mocks.invoke.mockImplementation(async (command: string) => {
