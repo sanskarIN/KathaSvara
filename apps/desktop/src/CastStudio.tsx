@@ -1244,7 +1244,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                      <textarea key={segment.id + segment.spoken_text} lang="hi"
                        aria-label={"Reviewed speech for " + segment.id}
                        defaultValue={segment.spoken_text} rows={2} maxLength={100_000}
+                       disabled={busy || rendering}
                        onBlur={event => {
+                         // Reject any delayed blur from an editor locked for a
+                         // render or asynchronous parse/save operation.
+                         if (busy || rendering) {
+                           event.currentTarget.value = segment.spoken_text;
+                           return;
+                         }
                          const next = event.currentTarget.value;
                          if (next === segment.spoken_text) return;
                          try {
