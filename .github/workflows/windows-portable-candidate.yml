@@ -59,7 +59,7 @@ jobs:
           Get-FileHash "$folder/KathaSvara-v0.5.2-dev-win64.exe" -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  KathaSvara-v0.5.2-dev-win64.exe" } |
             Set-Content "$folder/SHA256SUMS.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kathasvara-v0.5.2-windows-unsigned-dev-executable
           path: portable-candidate/
