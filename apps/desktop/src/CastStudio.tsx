@@ -500,11 +500,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
 
   async function cancelRender() {
-    if (jobId) {
-      try {
-        await invoke("cancel_story_render", { jobId });
+    const cancelledId = jobId;
+    if (!cancelledId || activeRenderJob.current !== cancelledId) return;
+    const revision = renderRevision.current;
+    try {
+      await invoke("cancel_story_render", { jobId: cancelledId });
+      // A late cancel response must not report cancellation for a completed
+      // render or for a newer story's unrelated job.
+      if (revision === renderRevision.current && activeRenderJob.current === cancelledId) {
         onMessage("Cancellation requested. The current model chunk may need to finish first.");
-      } catch (error) {
+      }
+    } catch (error) {
+      if (revision === renderRevision.current && activeRenderJob.current === cancelledId) {
         onMessage("Unable to signal cancellation: " + errorString(error));
       }
     }
