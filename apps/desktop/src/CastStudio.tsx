@@ -14,7 +14,7 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
-import { castCoverage, sceneOverview } from "./lib/scene_overview";
+import { castCoverage, nextSpeakerReviewTarget, sceneOverview, speakerReviewTargets, type SpeakerReviewTarget } from "./lib/scene_overview";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
@@ -64,12 +64,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [sceneSearch, setSceneSearch] = useState("");
   const [unresolvedScenesOnly, setUnresolvedScenesOnly] = useState(false);
   const [sceneCharacterFilter, setSceneCharacterFilter] = useState("");
+  const [speakerReviewCursor, setSpeakerReviewCursor] = useState<SpeakerReviewTarget | null>(null);
+  const speakerReviewSelectRef = useRef<HTMLSelectElement | null>(null);
   useEffect(() => {
     // A search belongs to the current story; do not hide a newly loaded story
     // behind the previous author's private dialogue terms or note filters.
     setSceneSearch("");
     setUnresolvedScenesOnly(false);
     setSceneCharacterFilter("");
+    setSpeakerReviewCursor(null);
   }, [document.id]);
   useEffect(() => {
     // If a character is removed while filtering, restore the full outline.
@@ -713,6 +716,13 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     sceneOverview(document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter || null),
     [document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter]);
   const coverage = useMemo(() => castCoverage(document), [document]);
+  const speakerIssues = useMemo(() => speakerReviewTargets(document), [document]);
+  useEffect(() => {
+    if (speakerReviewCursor?.sceneId === activeScene?.id) {
+      // Focus naturally scrolls the selected speaker control into the scene list.
+      speakerReviewSelectRef.current?.focus();
+    }
+  }, [speakerReviewCursor, activeScene?.id]);
   const unresolvedNow = unresolvedSpeech(document);
   // Derive the alert from the active document, not the one-time parse response:
   // assigning a previously unknown actor must immediately clear stale warnings.
@@ -1063,6 +1073,24 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <p className="helper scene-outline-count" aria-live="polite">
           Showing {visibleScenes.length} of {document.scenes.length} scenes. Search filters navigation only; the selected scene stays open until you choose another.
         </p>
+        <div className="scene-review-navigation">
+          <button type="button" className="secondary-button"
+            disabled={busy || rendering || speakerIssues.length === 0}
+            onClick={() => {
+              const next = nextSpeakerReviewTarget(document, speakerReviewCursor);
+              if (!next) return;
+              // A filtered navigator must not conceal the destination.
+              setSceneSearch("");
+              setUnresolvedScenesOnly(false);
+              setSceneCharacterFilter("");
+              setSelectedScene(next.sceneId);
+              setSpeakerReviewCursor(next);
+              setRenderPlan(null);
+            }}>Next speaker issue</button>
+          <span role="status" aria-live="polite">
+            {speakerIssues.length} spoken line(s) need manual speaker review.
+          </span>
+        </div>
         <details className="cast-coverage">
           <summary>Local cast coverage · {coverage.spokenLines} spoken · {coverage.directions} directions</summary>
           <p className="helper">Model-free line counts only, not verified different voices.
@@ -1083,7 +1111,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           {visibleScenes.map(scene => (
             <button type="button" key={scene.id} aria-label={scene.title}
               className={"quiet-button scene-outline-entry " + (activeScene?.id === scene.id ? "selected-scene" : "")}
-              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>
+              onClick={() => { setSelectedScene(scene.id); setSpeakerReviewCursor(null); setRenderPlan(null); }}>
               <span>{scene.title}</span>
               <small aria-hidden="true" className="scene-outline-meta">
                 {scene.spoken} spoken · {scene.directions} directions
@@ -1150,11 +1178,15 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             <p className="helper">Production notes are stored with this scene, not read aloud, and do not alter the original script or dialogue text.</p>
             <ol className="scene-segments">
               {activeScene.segments.map((segment, index) => (
-                <li key={segment.id}>
+                <li key={segment.id} className={speakerReviewCursor?.sceneId === activeScene.id &&
+                  speakerReviewCursor.segmentId === segment.id ? "speaker-review-target" : undefined}>
                   <div className="segment-header">
                     <span>{segment.kind === "direction" ? "Stage direction (not spoken)" : "Spoken segment"}</span>
                     {segment.kind === "speech" && (
-                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""} disabled={busy || rendering}
+                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)}
+                        ref={speakerReviewCursor?.sceneId === activeScene.id &&
+                          speakerReviewCursor.segmentId === segment.id ? speakerReviewSelectRef : undefined}
+                        value={segment.speaker_id ?? ""} disabled={busy || rendering}
                         onChange={event => {
                           const speakerId = event.target.value;
                           if (speakerId === segment.speaker_id && segment.source_label === null) return;
