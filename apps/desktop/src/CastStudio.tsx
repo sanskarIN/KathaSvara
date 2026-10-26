@@ -91,8 +91,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [history, setHistory] = useState<RenderHistory[] | null>(null);
   const [renderPlan, setRenderPlan] = useState<(RenderPlan & { scope: string }) | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
+  // Each plan/audit request owns only its own result and loading indicator.
+  // Older asynchronous operations must not unlock or populate a newer story.
+  const planEpoch = useRef(0);
   const [audit, setAudit] = useState<ProductionAudit | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
+  const auditEpoch = useRef(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const [audioExportLabel, setAudioExportLabel] = useState<AudioExportLabel | null>(null);
@@ -125,6 +129,8 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   useEffect(() => () => {
     renderRevision.current += 1;
     historyEpoch.current += 1;
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
     const abandoned = activeRenderJob.current;
     activeRenderJob.current = null;
     if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
@@ -137,6 +143,10 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setBusy(false);
     historyEpoch.current += 1;
     setLoadingHistory(false);
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    setPlanBusy(false);
+    setAuditBusy(false);
     // A document switch retires its previous render synchronously. The old
     // promise may settle later; it is forbidden to clear the new job's UI.
     const abandoned = activeRenderJob.current;
@@ -176,6 +186,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     historyEpoch.current += 1;
     setHistory(null);
     setLoadingHistory(false);
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    setPlanBusy(false);
+    setAuditBusy(false);
+    setRenderPlan(null);
+    setAudit(null);
     const abandoned = activeRenderJob.current;
     activeRenderJob.current = null;
     setJobId(null);
@@ -360,8 +376,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function inspectRenderPlan(sceneId?: string) {
-    if (rendering || planBusy) return;
+    if (busy || rendering || planBusy) return;
     const revision = renderRevision.current;
+    const request = ++planEpoch.current;
     setPlanBusy(true);
     setRenderPlan(null);
     try {
@@ -369,39 +386,40 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const result = await invoke<RenderPlan>("preflight_render", {
         project: document, ...selection,
       });
-      if (revision !== renderRevision.current) return;
+      if (revision !== renderRevision.current || request !== planEpoch.current) return;
       const scope = sceneId
         ? document.scenes.find(scene => scene.id === sceneId)?.title ?? "Selected scene"
         : "Full story";
       setRenderPlan({ ...result, scope });
       onMessage("Model-free plan reviewed: no model loaded and no speech duration or voice quality assumed.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && request === planEpoch.current) {
         onMessage("Render preflight failed: " + errorString(error));
       }
     } finally {
-      setPlanBusy(false);
+      if (request === planEpoch.current) setPlanBusy(false);
     }
   }
 
   async function inspectProductionReadiness() {
-    if (rendering || auditBusy) return;
+    if (busy || rendering || auditBusy) return;
     const revision = renderRevision.current;
+    const request = ++auditEpoch.current;
     setAuditBusy(true);
     setAudit(null);
     try {
       const result = await invoke<ProductionAudit>("audit_production", {
         project: document,
       });
-      if (revision !== renderRevision.current) return;
+      if (revision !== renderRevision.current || request !== auditEpoch.current) return;
       setAudit(result);
       onMessage("Model-free production audit complete. Review each scene before loading the speech model.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && request === auditEpoch.current) {
         onMessage("Production audit failed: " + errorString(error));
       }
     } finally {
-      setAuditBusy(false);
+      if (request === auditEpoch.current) setAuditBusy(false);
     }
   }
 
@@ -668,7 +686,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function saveDocument() {
-    if (busy) return;
+    // Saving returns a new parent document object; disallow it mid-render so
+    // the parent rerender cannot silently retire the current narration job.
+    if (busy || rendering || activeRenderJob.current) return;
     const revision = renderRevision.current;
     const op = ++editorOperationEpoch.current;
     setBusy(true);
@@ -838,7 +858,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <p>Use labels like <code>राजा भोज: नमस्कार।</code> and scene headings like <code># दरबार</code>. Unknown speaker names are never guessed.</p>
         <div className="cast-actions">
           <button className="secondary-button" disabled={busy || rendering} onClick={() => void parse()}>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
-          <button className="secondary-button" disabled={busy} onClick={() => void saveDocument()}>Save cast and scenes</button>
+          <button className="secondary-button" disabled={busy || rendering} onClick={() => void saveDocument()}>Save cast and scenes</button>
           <button className="quiet-button" disabled={busy || rendering} onClick={() => void loadDocument()}>Load saved v2</button>
         </div>
         <div className="render-tools">
