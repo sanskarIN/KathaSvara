@@ -160,19 +160,20 @@ export function speakerReviewTargets(story: StoryV2): SpeakerReviewTarget[] {
 }
 
 /**
- * Move forward through the entire story, wrapping back to the first issue.
- * The cursor can point at a line whose speaker was just repaired; locating it
- * in all segments (not only the issue queue) ensures the next click proceeds
- * to the next unresolved line rather than jumping unexpectedly to the start.
- * Missing or ambiguous cursor identities fall back to the first issue.
+ * Walk both directions through issues in source order. Keep the cursor on
+ * a just-repaired line by locating that line in the complete document first.
+ * Missing or ambiguous identities reset to a deterministic boundary.
+ * This is navigation only: no project data, audio, or speaker is changed.
  */
-export function nextSpeakerReviewTarget(
+function navigateSpeakerReviewTarget(
   story: StoryV2,
-  after: Pick<SpeakerReviewTarget, "sceneId" | "segmentId"> | null = null,
+  cursor: Pick<SpeakerReviewTarget, "sceneId" | "segmentId"> | null,
+  direction: -1 | 1,
 ): SpeakerReviewTarget | null {
   const issues = speakerReviewTargets(story);
   if (issues.length === 0) return null;
-  if (after === null) return issues[0];
+  const fallback = direction === 1 ? issues[0] : issues[issues.length - 1];
+  if (cursor === null) return fallback;
 
   let position = 0;
   let cursorPosition = -1;
@@ -181,7 +182,7 @@ export function nextSpeakerReviewTarget(
   let issueIndex = 0;
   for (const scene of story.scenes) {
     for (const segment of scene.segments) {
-      if (scene.id === after.sceneId && segment.id === after.segmentId) {
+      if (scene.id === cursor.sceneId && segment.id === cursor.segmentId) {
         cursorPosition = position;
         cursorMatches += 1;
       }
@@ -194,7 +195,29 @@ export function nextSpeakerReviewTarget(
       position += 1;
     }
   }
-  if (cursorMatches !== 1) return issues[0];
-  const nextIndex = issuePositions.findIndex(item => item > cursorPosition);
-  return issues[nextIndex < 0 ? 0 : nextIndex];
+  if (cursorMatches !== 1 || issuePositions.length !== issues.length) return fallback;
+  if (direction === 1) {
+    const nextIndex = issuePositions.findIndex(item => item > cursorPosition);
+    return issues[nextIndex === -1 ? 0 : nextIndex];
+  }
+  for (let i = issuePositions.length - 1; i >= 0; i -= 1) {
+    if (issuePositions[i] < cursorPosition) return issues[i];
+  }
+  return issues[issues.length - 1];
+}
+
+/** Move forward through all speaker issues, wrapping to the first. */
+export function nextSpeakerReviewTarget(
+  story: StoryV2,
+  after: Pick<SpeakerReviewTarget, "sceneId" | "segmentId"> | null = null,
+): SpeakerReviewTarget | null {
+  return navigateSpeakerReviewTarget(story, after, 1);
+}
+
+/** Move backwards through all speaker issues, wrapping to the last. */
+export function previousSpeakerReviewTarget(
+  story: StoryV2,
+  before: Pick<SpeakerReviewTarget, "sceneId" | "segmentId"> | null = null,
+): SpeakerReviewTarget | null {
+  return navigateSpeakerReviewTarget(story, before, -1);
 }
