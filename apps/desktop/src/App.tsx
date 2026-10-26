@@ -230,7 +230,9 @@ export default function App() {
       }
       setAudio(result);
       setStatus("completed");
-      setMessage("Hindi WAV ready. Listen before exporting to check pronunciation and quality.");
+      setMessage(result.preview_available === false
+        ? "Hindi WAV generated and kept locally. It exceeds the 25 MiB inline playback limit; use Export WAV to listen in an audio player."
+        : "Hindi WAV ready. Listen before exporting to check pronunciation and quality.");
     } catch (error) {
       if (revision === generationRevision.current) {
         setStatus("failed");
@@ -473,9 +475,17 @@ export default function App() {
                   <div className={"status status-" + status} role="status" aria-live="polite"><span aria-hidden="true">●</span>{status === "waiting" ? "Waiting" : status === "loading" ? "Model loading / synthesizing" : status === "completed" ? "Completed" : "Failed"}</div>
                   {audio ? (
                     <>
-                      <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated Hindi WAV preview" />
+                      {audio.preview_available === false
+                        ? <p role="status">The generated WAV is saved locally but is too large for an inline preview.
+                          Select <strong>Export WAV</strong> and listen in your audio player. The recording has not been discarded.</p>
+                        : <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated Hindi WAV preview" />}
                       <div className="audio-meta">{audio.duration_seconds.toFixed(1)} sec · {audio.sample_rate} Hz · {audio.chunks} chunk(s)</div>
-                      <div className="preview-actions"><button className="quiet-button" onClick={() => { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } }}>■ Stop</button><button className="quiet-button" onClick={() => void clearPreview()}>Clear preview</button><button className="secondary-button" onClick={() => void exportWav()}>Export WAV ↓</button></div>
+                      <div className="preview-actions">
+                        {audio.preview_available !== false && <button className="quiet-button"
+                          onClick={() => { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } }}>■ Stop</button>}
+                        <button className="quiet-button" onClick={() => void clearPreview()}>Clear preview</button>
+                        <button className="secondary-button" onClick={() => void exportWav()}>Export WAV ↓</button>
+                      </div>
                     </>
                   ) : <div className="empty-preview"><div className="waveform" aria-hidden="true">▂ ▆ ▃ █ ▅ ▇ ▃ ▅ ▂ ▆ ▃</div><span>Your audio preview appears here.</span></div>}
                 </section>
