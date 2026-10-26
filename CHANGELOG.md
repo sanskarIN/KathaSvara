@@ -2,6 +2,9 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- Retire pending plan/audit requests when starting narration so late no-model results cannot contaminate active-render status. Prevent export of a privacy-safe audit report after its source audit was invalidated while choosing a destination; check operation ownership before and after I/O. Add mock-Tauri concurrency tests for late plan/audit replies and obsolete exports.
+
+
 - Isolate asynchronous model-free render plans and production audits by request epoch. Switching documents cancels their UI ownership without letting a late result overwrite the new story or clear a newer loading indicator. Block story saves while narration owns an active render, and suppress late cancellation responses for retired jobs. Cover these cases with mocked desktop concurrency tests.
 
 
