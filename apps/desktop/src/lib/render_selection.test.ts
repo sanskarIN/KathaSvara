@@ -85,6 +85,7 @@ describe("scope selection is shared by model-free preview and rendering", () => 
   it("rejects ambiguous scene and segment identities without affecting valid other scopes", () => {
     const doc = story();
     doc.scenes.push({ ...doc.scenes[1] });
+    expect(() => resolveRenderSelection(doc)).toThrow("Selected scenes share a duplicate ID");
     expect(() => resolveRenderSelection(doc, { sceneId: "s2" })).toThrow("scene ID is ambiguous");
     expect(resolveRenderSelection(doc, { sceneId: "s1" }).selectedSceneIds).toEqual(["s1"]);
 
@@ -96,6 +97,13 @@ describe("scope selection is shared by model-free preview and rendering", () => 
     const sameScene = story();
     sameScene.scenes[0].segments.push({ ...sameScene.scenes[0].segments[0] });
     expect(() => resolveRenderSelection(sameScene, { sceneId: "s1" })).toThrow("duplicate ID");
+    const repeatedDirection = story();
+    repeatedDirection.scenes[0].segments.push({ ...repeatedDirection.scenes[0].segments[1] });
+    expect(() => resolveRenderSelection(repeatedDirection, { sceneId: "s1" }))
+      .toThrow("Selected lines share a duplicate ID");
+    // A valid scene remains independently selectable when another scene is malformed.
+    expect(resolveRenderSelection(repeatedDirection, { sceneId: "s2" }).selectedSceneIds)
+      .toEqual(["s2"]);
     const silentDuplicate = story();
     silentDuplicate.scenes[1].segments[0].id = "stage1";
     expect(() => resolveRenderSelection(silentDuplicate, { sceneId: "s2", segmentId: "stage1" }))
