@@ -121,6 +121,38 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments[3].speaker_id).toBe("missing-cast");
   });
 
+  it("locks reviewed Hindi edits while rendering and rejects late blur mutations", async () => {
+    const doc = story();
+    let finish: (value: unknown) => void = () => {
+      throw new Error("Render was not started");
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "render_story_v2") {
+        return new Promise(resolve => { finish = resolve; });
+      }
+      if (command === "discard_audio" || command === "cancel_story_render") return Promise.resolve();
+      throw new Error("Unexpected Tauri command: " + command);
+    });
+    const { onChange } = mount(doc);
+    const reviewed = screen.getByRole("textbox", {
+      name: "Reviewed speech for line-one",
+    }) as HTMLTextAreaElement;
+    expect(reviewed.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    expect(reviewed.disabled).toBe(true);
+    // A synthetic blur can arrive late from a previously focused editor.
+    fireEvent.blur(reviewed, { target: { value: "अनपेक्षित पाठ" } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[0].spoken_text).toBe("नमस्कार।");
+    await act(async () => { finish(generatedAudio()); });
+    expect(screen.getByRole("textbox", {
+      name: "Reviewed speech for line-one",
+    })).toHaveProperty("disabled", false);
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "cancel_story_render")).toBe(false);
+  });
+
   it("retires an older story render without clearing the new story render's busy state", async () => {
     const firstJob = "550e8400-e29b-41d4-a716-446655440101";
     const secondJob = "550e8400-e29b-41d4-a716-446655440102";
