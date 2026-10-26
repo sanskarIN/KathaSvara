@@ -144,6 +144,39 @@ export interface SpeakerReviewTarget {
   reason: "unassigned" | "invalid";
 }
 
+/** Local UI labels only: never return the entire script for a dropdown entry. */
+export interface SpeakerReviewChoice extends SpeakerReviewTarget {
+  label: string;
+}
+
+/**
+ * Provide a bounded, Hindi-friendly preview of each issue for keyboard and
+ * screen-reader navigation. Labels are derived from the current project
+ * without mutating data or sending text to a model or service.
+ */
+export function speakerReviewChoices(story: StoryV2): SpeakerReviewChoice[] {
+  const known = new Set(story.characters.map(character => character.id));
+  const choices: SpeakerReviewChoice[] = [];
+  for (const scene of story.scenes) {
+    for (const segment of scene.segments) {
+      if (segment.kind !== "speech") continue;
+      const reason = segment.speaker_id === null ? "unassigned" :
+        !known.has(segment.speaker_id) ? "invalid" : null;
+      if (!reason) continue;
+      const title = scene.title.replace(/\s+/gu, " ").trim().slice(0, 48) || "Untitled scene";
+      const excerpt = segment.original_text.replace(/\s+/gu, " ").trim().slice(0, 64) || "Empty dialogue";
+      const kind = reason === "invalid" ? "Missing character" : "Unassigned";
+      choices.push({
+        sceneId: scene.id,
+        segmentId: segment.id,
+        reason,
+        label: `${choices.length + 1}. ${title} — ${kind}: ${excerpt}`,
+      });
+    }
+  }
+  return choices;
+}
+
 /** Model-free diagnostics: never mutate the story or guess a character. */
 export function speakerReviewTargets(story: StoryV2): SpeakerReviewTarget[] {
   const known = new Set(story.characters.map(character => character.id));
