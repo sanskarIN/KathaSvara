@@ -2,6 +2,10 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- **Audio generator usability:** document that the current unsigned Windows EXE is not a standalone synthesizer, provide an opt-in PowerShell launcher that configures Python 3.11 and inference sources, diagnoses missing dependencies without model downloads, and can explicitly run a real Hindi WAV smoke test. Add no-download PowerShell syntax checking on Windows CI.
+- **Real WAV retention fix:** Voice Studio now preserves structurally validated recordings above the 25 MiB inline-preview limit and exposes Export WAV instead of deleting them. Add Windows Rust unit coverage for short/long WAV previews and clarify missing audio setup and errors in the desktop UI.
+
+
 - Make **Cancel render** signalling one-shot per active job with explicit requesting/requested waiting states; allow manual retry after cancellation IPC errors. Fix recovery-history race where overlapping **Forget record** operations could leave a deleted row visible, add per-row in-flight protection and filter confirmed deletions from stale list responses. Add no-model React/Tauri regression coverage.
 
 
