@@ -451,6 +451,89 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
   });
 
+  it("retires pending plan and audit replies when rendering begins", async () => {
+    let finishPlan: (value: unknown) => void = () => { throw new Error("Plan not requested"); };
+    let finishAudit: (value: unknown) => void = () => { throw new Error("Audit not requested"); };
+    let finishRender: (value: unknown) => void = () => { throw new Error("Render not requested"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "preflight_render")
+        return new Promise(resolve => { finishPlan = resolve; });
+      if (command === "audit_production")
+        return new Promise(resolve => { finishAudit = resolve; });
+      if (command === "render_story_v2")
+        return new Promise(resolve => { finishRender = resolve; });
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage, onChange } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect render plan (no model)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Audit scene readiness (no model)" }));
+    expect(screen.getByRole("button", { name: "Checking plan…" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Checking scenes…" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    expect((screen.getByRole("button", { name: "Generate story dialogue WAV" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    await act(async () => {
+      finishPlan({ segments: 44, chunks: 5, spoken_characters: 33 });
+      finishAudit({
+        total_scenes: 1, ready_scenes: 0, full_story_ready: false,
+        full_story_reason: "not_ready", full_story_chunks: 0,
+        scenes: [], model_loaded: false, audio_verified: false, distinct_voices_verified: false,
+      });
+    });
+    expect(screen.queryByText(/44 dialogue lines/)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Production readiness audit" })).toBeNull();
+    expect(onMessage.mock.calls.some(([message]) =>
+      String(message).includes("Model-free plan reviewed") ||
+      String(message).includes("Model-free production audit complete"))).toBe(false);
+
+    await act(async () => { finishRender(generatedAudio()); });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Inspect render plan (no model)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Audit scene readiness (no model)" })).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "export_production_manifest"))
+      .toBe(false);
+  });
+
+  it("does not export an outdated audit while a save destination dialog is open", async () => {
+    let choosePath: (value: string | null) => void = () => { throw new Error("Dialog not opened"); };
+    let finishRender: (value: unknown) => void = () => { throw new Error("Render not requested"); };
+    mocks.save.mockImplementation(() =>
+      new Promise(resolve => { choosePath = resolve; }));
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "audit_production") return Promise.resolve({
+        total_scenes: 1, ready_scenes: 1, full_story_ready: true,
+        full_story_reason: "ready", full_story_chunks: 1,
+        scenes: [{ scene_id: "scene-one", ready: true, reason: "ready",
+          segments: 1, chunks: 1 }],
+        model_loaded: false, audio_verified: false, distinct_voices_verified: false,
+      });
+      if (command === "render_story_v2")
+        return new Promise(resolve => { finishRender = resolve; });
+      if (command === "discard_audio") return Promise.resolve();
+      if (command === "export_production_manifest")
+        throw new Error("Stale audit must never be exported");
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage, onChange } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Audit scene readiness (no model)" }));
+    await screen.findByRole("region", { name: "Production readiness audit" });
+    fireEvent.click(screen.getByRole("button", { name: "Export privacy-safe audit JSON" }));
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    expect(screen.queryByRole("region", { name: "Production readiness audit" })).toBeNull();
+    await act(async () => { choosePath("/tmp/obsolete-production-audit.json"); });
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "export_production_manifest"))
+      .toBe(false);
+    expect(onMessage.mock.calls.some(([message]) =>
+      String(message).includes("production report exported"))).toBe(false);
+    await act(async () => { finishRender(generatedAudio()); });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("audits scenes without rendering or voice loading, then exports count-only JSON", async () => {
     const doc = story();
     mocks.invoke.mockImplementation(async (command: string) => {
