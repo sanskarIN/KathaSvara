@@ -192,23 +192,32 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setDirty(true);
   }
   function addNewCharacter() {
+    if (busy || rendering) return;
     try {
-      edit(previous => addCharacter(previous, newName));
+      // Validate synchronously: deferred state updaters cannot be caught here,
+      // and a rejected edit must not discard an existing WAV preview.
+      const updated = addCharacter(document, newName);
+      edit(() => updated);
       setNewName("");
     } catch (error) {
       onMessage(errorString(error));
     }
   }
   function duplicateProfile(id: string) {
+    if (busy || rendering) return;
     try {
-      edit(previous => duplicateCharacter(previous, id));
+      // Generate the cloned ID only once, outside React's state updater.
+      const updated = duplicateCharacter(document, id);
+      edit(() => updated);
     } catch (error) {
       onMessage(errorString(error));
     }
   }
   function createScene() {
+    if (busy || rendering) return;
     try {
-      edit(previous => addScene(previous, newSceneTitle));
+      const updated = addScene(document, newSceneTitle);
+      edit(() => updated);
       setNewSceneTitle("");
     } catch (error) {
       onMessage(errorString(error));
