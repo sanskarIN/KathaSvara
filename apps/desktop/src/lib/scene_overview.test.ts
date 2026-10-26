@@ -39,11 +39,11 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     const doc = fixture();
     expect(sceneOverview(doc)).toEqual([
       { id: "forest", title: "जंगल का दृश्य", spoken: 2,
-        directions: 1, unresolved: 1, hasProductionNotes: true },
+        directions: 1, unresolved: 1, invalidSpeakers: 0, hasProductionNotes: true },
       { id: "palace", title: "Royal Palace", spoken: 1,
-        directions: 0, unresolved: 0, hasProductionNotes: false },
+        directions: 0, unresolved: 0, invalidSpeakers: 0, hasProductionNotes: false },
       { id: "empty", title: "खाली दृश्य", spoken: 0,
-        directions: 0, unresolved: 0, hasProductionNotes: false },
+        directions: 0, unresolved: 0, invalidSpeakers: 0, hasProductionNotes: false },
     ]);
     expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
     expect(doc.scenes[0].segments[2].speaker_id).toBeNull();
@@ -125,6 +125,30 @@ describe("v0.5.3 local scene outline and Hindi navigation", () => {
     doc.scenes[0].segments[2].speaker_id = "narrator";
     expect(sceneOverview(doc, "", true, "king")).toEqual([]);
     expect(sceneOverview(doc, "", false, "king").map(scene => scene.id)).toEqual(["forest"]);
+    expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
+  });
+
+  it("flags unknown non-null speaker IDs for scene review, but ignores unspoken directions", () => {
+    const doc = fixture();
+    // A deleted/corrupt cast reference is not the same as unassigned speech.
+    doc.scenes[1].segments[0].speaker_id = "missing-character";
+    // An unspoken stage direction must not become a cast-review error.
+    doc.scenes[0].segments[1].speaker_id = "missing-in-direction";
+    const list = sceneOverview(doc);
+    expect(list[0].unresolved).toBe(1);
+    expect(list[0].invalidSpeakers).toBe(0);
+    expect(list[1].unresolved).toBe(0);
+    expect(list[1].invalidSpeakers).toBe(1);
+    expect(sceneOverview(doc, "", true).map(scene => scene.id))
+      .toEqual(["forest", "palace"]);
+    expect(sceneOverview(doc, "Royal", true).map(scene => scene.id)).toEqual(["palace"]);
+    expect(sceneOverview(doc, "", true, "narrator").map(scene => scene.id)).toEqual(["forest"]);
+    // Repairing the bad reference immediately removes its scene from review.
+    doc.scenes[1].segments[0].speaker_id = "narrator";
+    expect(sceneOverview(doc, "", true).map(scene => scene.id)).toEqual(["forest"]);
+    doc.scenes[0].segments[2].speaker_id = "narrator";
+    expect(sceneOverview(doc, "", true)).toEqual([]);
+    expect(doc.scenes[0].segments[1].speaker_id).toBe("missing-in-direction");
     expect(doc.text).toBe("अपरिवर्तित मूल पाठ");
   });
 
