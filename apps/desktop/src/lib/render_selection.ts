@@ -25,6 +25,20 @@ export function resolveRenderSelection(
   if (sceneId && scenes.length !== 1) {
     throw new Error("The selected scene ID is ambiguous. Repair duplicate scene IDs before rendering.");
   }
+  const seenSceneIds = new Set<string>();
+  const seenLineIds = new Set<string>();
+  for (const scene of scenes) {
+    if (seenSceneIds.has(scene.id)) {
+      throw new Error("Selected scenes share a duplicate ID. Repair scene IDs before rendering.");
+    }
+    seenSceneIds.add(scene.id);
+    for (const segment of scene.segments) {
+      if (seenLineIds.has(segment.id)) {
+        throw new Error("Selected lines share a duplicate ID. Repair line IDs before rendering.");
+      }
+      seenLineIds.add(segment.id);
+    }
+  }
   // A scoped render must never silently target multiple lines sharing an ID.
   // Stage directions remain unspoken but still occupy the same ID namespace.
   if (segmentId) {
@@ -48,13 +62,6 @@ export function resolveRenderSelection(
   }
   if (spoken.some(segment => knownSpeakers.get(segment.speaker_id!) !== 1)) {
     throw new Error("Selected dialogue references a missing or duplicate character ID. Repair speaker assignments before rendering.");
-  }
-  const spokenIds = new Set<string>();
-  for (const segment of spoken) {
-    if (spokenIds.has(segment.id)) {
-      throw new Error("Selected spoken lines share a duplicate ID. Repair line IDs before rendering.");
-    }
-    spokenIds.add(segment.id);
   }
   if (spoken.length > 256 || spoken.reduce((n, segment) => n + segment.spoken_text.length, 0) > 100_000) {
     throw new Error("Render limit: 256 spoken segments and 100,000 characters. Choose a scene or split the story.");
