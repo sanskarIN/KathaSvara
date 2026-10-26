@@ -14,7 +14,7 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
-import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewTargets, type SpeakerReviewTarget } from "./lib/scene_overview";
+import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewChoices, type SpeakerReviewTarget } from "./lib/scene_overview";
 import {
   addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
   removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
@@ -716,18 +716,18 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     sceneOverview(document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter || null),
     [document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter]);
   const coverage = useMemo(() => castCoverage(document), [document]);
-  const speakerIssues = useMemo(() => speakerReviewTargets(document), [document]);
+  const speakerIssues = useMemo(() => speakerReviewChoices(document), [document]);
+  const selectedSpeakerIssueIndex = speakerIssues.findIndex(issue =>
+    issue.sceneId === speakerReviewCursor?.sceneId &&
+    issue.segmentId === speakerReviewCursor.segmentId);
   useEffect(() => {
     if (speakerReviewCursor?.sceneId === activeScene?.id) {
       // Focus naturally scrolls the selected speaker control into the scene list.
       speakerReviewSelectRef.current?.focus();
     }
   }, [speakerReviewCursor, activeScene?.id]);
-  function jumpToSpeakerIssue(direction: -1 | 1) {
-    const target = direction === 1
-      ? nextSpeakerReviewTarget(document, speakerReviewCursor)
-      : previousSpeakerReviewTarget(document, speakerReviewCursor);
-    if (!target) return;
+  function focusSpeakerIssue(target: SpeakerReviewTarget) {
+    if (busy || rendering) return;
     // Filtering is navigation only, not an edit to the story.
     setSceneSearch("");
     setUnresolvedScenesOnly(false);
@@ -735,6 +735,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setSelectedScene(target.sceneId);
     setSpeakerReviewCursor(target);
     setRenderPlan(null);
+  }
+  function jumpToSpeakerIssue(direction: -1 | 1) {
+    const target = direction === 1
+      ? nextSpeakerReviewTarget(document, speakerReviewCursor)
+      : previousSpeakerReviewTarget(document, speakerReviewCursor);
+    if (target) focusSpeakerIssue(target);
   }
   const unresolvedNow = unresolvedSpeech(document);
   // Derive the alert from the active document, not the one-time parse response:
@@ -1093,8 +1099,29 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           <button type="button" className="secondary-button"
             disabled={busy || rendering || speakerIssues.length === 0}
             onClick={() => jumpToSpeakerIssue(1)}>Next speaker issue</button>
+          <label className="speaker-review-jump">
+            Jump to speaker issue
+            <select aria-label="Jump to speaker issue"
+              value={selectedSpeakerIssueIndex < 0 ? "" : String(selectedSpeakerIssueIndex)}
+              disabled={busy || rendering || speakerIssues.length === 0}
+              onChange={event => {
+                if (event.target.value === "") return;
+                const index = Number(event.target.value);
+                if (Number.isSafeInteger(index) && speakerIssues[index]) {
+                  focusSpeakerIssue(speakerIssues[index]);
+                }
+              }}>
+              <option value="">Choose dialogue to review…</option>
+              {speakerIssues.map((issue, index) => (
+                <option key={issue.sceneId + ":" + issue.segmentId + ":" + index}
+                  value={String(index)}>{issue.label}</option>
+              ))}
+            </select>
+          </label>
           <span role="status" aria-live="polite">
             {speakerIssues.length} spoken line(s) need manual speaker review.
+            {selectedSpeakerIssueIndex >= 0 &&
+              ` Issue ${selectedSpeakerIssueIndex + 1} of ${speakerIssues.length}: ${speakerIssues[selectedSpeakerIssueIndex].reason === "invalid" ? "missing character" : "unassigned"}.`}
           </span>
         </div>
         <details className="cast-coverage">
