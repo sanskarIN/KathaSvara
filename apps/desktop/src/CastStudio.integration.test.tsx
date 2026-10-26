@@ -1001,6 +1001,65 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(doc.scenes[0].segments[1].speaker_id).toBe("deleted-cast-member");
   });
 
+  it("jumps directly to Hindi speaker issues with accessible progress and no source mutation", () => {
+    const doc = story();
+    const base = doc.scenes[0].segments[0];
+    doc.scenes[0].segments.push({
+      ...base, id: "unknown-one", speaker_id: null, source_label: "अनजान",
+      original_text: "कौन आया है?", spoken_text: "कौन आया है?",
+    });
+    doc.scenes.push({
+      id: "second", title: "अंतिम राजदरबार", notes: "",
+      segments: [{
+        ...base, id: "unknown-two", speaker_id: "removed-cast-member",
+        original_text: "रुको ज़रा", spoken_text: "रुको ज़रा",
+      }],
+    });
+    const { onChange, rerender } = mount(doc);
+    const picker = screen.getByRole("combobox", { name: "Jump to speaker issue" }) as HTMLSelectElement;
+    expect(picker.options.length).toBe(3);
+    expect(picker.options[1].textContent).toContain("प्रथम दृश्य");
+    expect(picker.options[1].textContent).toContain("कौन आया है?");
+    expect(picker.options[2].textContent).toContain("Missing character");
+    expect(picker.value).toBe("");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find scenes or dialogue" }), {
+      target: { value: "no match" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Only scenes needing speaker review" }));
+    fireEvent.change(picker, { target: { value: "1" } });
+    expect(picker.value).toBe("1");
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for रुको ज़रा",
+    }));
+    expect(screen.getByText(/Issue 2 of 2: missing character/)).toBeTruthy();
+    expect((screen.getByRole("searchbox", { name: "Find scenes or dialogue" }) as HTMLInputElement).value)
+      .toBe("");
+    expect((screen.getByRole("checkbox", { name: "Only scenes needing speaker review" }) as HTMLInputElement).checked)
+      .toBe(false);
+    fireEvent.change(picker, { target: { value: "0" } });
+    expect(picker.value).toBe("0");
+    expect(document.activeElement).toBe(screen.getByRole("combobox", {
+      name: "Speaker for कौन आया है?",
+    }));
+    expect(screen.getByText(/Issue 1 of 2: unassigned/)).toBeTruthy();
+
+    const fixed: StoryV2 = {
+      ...doc,
+      scenes: doc.scenes.map(scene => ({
+        ...scene, segments: scene.segments.map(line => line.kind === "speech"
+          ? { ...line, speaker_id: "narrator" } : line),
+      })),
+    };
+    rerender(<CastStudio document={fixed} onChange={onChange} onMessage={vi.fn()} />);
+    expect((screen.getByRole("combobox", { name: "Jump to speaker issue" }) as HTMLSelectElement).disabled)
+      .toBe(true);
+    expect(screen.getByText("0 spoken line(s) need manual speaker review.")).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(doc.scenes[0].segments[1].speaker_id).toBeNull();
+    expect(doc.scenes[1].segments[0].speaker_id).toBe("removed-cast-member");
+  });
+
   it("reviews speaker issues backwards, wraps around, and never invokes rendering", () => {
     const doc = story();
     const source = doc.scenes[0].segments[0];
