@@ -426,6 +426,29 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("ignores cancellation confirmation received after a job already finished", async () => {
+    let finishRender: (value: unknown) => void = () => { throw new Error("Render not started"); };
+    let finishCancel: () => void = () => { throw new Error("Cancellation not requested"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "render_story_v2") {
+        return new Promise(resolve => { finishRender = resolve; });
+      }
+      if (command === "cancel_story_render") {
+        return new Promise<void>(resolve => { finishCancel = resolve; });
+      }
+      throw new Error("Unexpected command: " + command);
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel render" }));
+    await act(async () => { finishRender(generatedAudio()); });
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+    await act(async () => { finishCancel(); });
+    expect(onMessage.mock.calls.some(([message]) =>
+      String(message).includes("Cancellation requested."))).toBe(false);
+    expect(screen.getByLabelText("Generated dialogue preview")).toBeTruthy();
+  });
+
   it("audits scenes without rendering or voice loading, then exports count-only JSON", async () => {
     const doc = story();
     mocks.invoke.mockImplementation(async (command: string) => {
