@@ -697,6 +697,7 @@ async fn check_engine() -> Result<String, String> {
     Ok("Python bridge available. Model weights have not been verified.".into())
 }
 
+#[cfg(test)]
 fn inspect_wav(data: &[u8]) -> Result<(), String> {
     const INVALID: &str = "Generated audio is not valid mono 16-bit PCM WAV.";
     if data.len() < 44 || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
