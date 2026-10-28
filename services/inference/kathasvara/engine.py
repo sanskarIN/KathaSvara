@@ -48,7 +48,7 @@ class ChatterboxHindi:
             device = "cpu"
         try:
             self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
-        except Exception as exc:  # noqa: BLE001 - upstream errors vary by backend
+        except Exception as exc:
             raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
 
     @property
@@ -68,5 +68,5 @@ class ChatterboxHindi:
                 exaggeration=settings.exaggeration,
                 cfg_weight=settings.cfg_weight,
             )
-        except Exception as exc:  # noqa: BLE001 - upstream errors vary by backend
+        except Exception as exc:
             raise RuntimeError(describe_model_failure(exc, stage="generate")) from exc
