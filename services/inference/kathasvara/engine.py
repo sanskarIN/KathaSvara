@@ -9,6 +9,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from .inference_errors import describe_model_failure
+
 
 @dataclass(frozen=True)
 class VoiceSettings:
@@ -44,7 +46,10 @@ class ChatterboxHindi:
             device = "mps"
         else:
             device = "cpu"
-        self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        try:
+            self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        except Exception as exc:  # noqa: BLE001 - upstream errors vary by backend
+            raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
 
     @property
     def sample_rate(self) -> int:
@@ -56,9 +61,12 @@ class ChatterboxHindi:
         if self._model is None:
             raise RuntimeError("Model is not loaded.")
         settings.validate()
-        return self._model.generate(
-            text,
-            language_id="hi",
-            exaggeration=settings.exaggeration,
-            cfg_weight=settings.cfg_weight,
-        )
+        try:
+            return self._model.generate(
+                text,
+                language_id="hi",
+                exaggeration=settings.exaggeration,
+                cfg_weight=settings.cfg_weight,
+            )
+        except Exception as exc:  # noqa: BLE001 - upstream errors vary by backend
+            raise RuntimeError(describe_model_failure(exc, stage="generate")) from exc
