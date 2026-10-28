@@ -53,3 +53,51 @@ def test_multi_sentence_chunking(tmp_path) -> None:
     text = "यह कहानी सन् १०१० की है। " * 40
     result = synthesize(text, tmp_path / "story.wav", VoiceSettings(), FakeEngine())
     assert result["chunks"] > 1
+
+
+def test_synthesis_preserves_racing_destination(tmp_path) -> None:
+    """A file created during model generation must never be overwritten."""
+    output = tmp_path / "raced.wav"
+    original = b"keep the other writer's existing data"
+
+    class RacingEngine(FakeEngine):
+        def generate(self, text: str, settings: VoiceSettings) -> np.ndarray:
+            output.write_bytes(original)
+            return super().generate(text, settings)
+
+    with pytest.raises(FileExistsError):
+        synthesize("नमस्कार।", output, VoiceSettings(), RacingEngine())
+    assert output.read_bytes() == original
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_synthesis_cleans_partial_after_second_chunk_fails(tmp_path) -> None:
+    """A failed second model chunk never publishes an incomplete WAV."""
+    output = tmp_path / "failed.wav"
+
+    class FailingEngine(FakeEngine):
+        calls = 0
+
+        def generate(self, text: str, settings: VoiceSettings) -> np.ndarray:
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("deliberate failure")
+            return super().generate(text, settings)
+
+    with pytest.raises(RuntimeError, match="deliberate failure"):
+        synthesize("नमस्कार। " * 40, output, VoiceSettings(), FailingEngine())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_streamed_synthesis_keeps_measured_pause_and_frame_count(tmp_path) -> None:
+    output = tmp_path / "streamed.wav"
+    result = synthesize("नमस्कार। " * 40, output, VoiceSettings(), FakeEngine())
+    assert result["chunks"] > 1
+    info = sf.info(str(output))
+    assert info.format == "WAV"
+    assert info.subtype == "PCM_16"
+    assert info.frames == (
+        result["chunks"] * 2400 + (result["chunks"] - 1) * int(24000 * 0.14)
+    )
+    assert result["duration_seconds"] == round(info.frames / 24000, 3)
