@@ -68,7 +68,7 @@ describe("local TTS import doctor (no model)", () => {
     }));
     const report = await screen.findByRole("status", { name: "TTS import probe result" });
     expect(within(report).getByText(/Setup needs attention/)).toBeTruthy();
-    expect(within(report).getByText("Import failed")).toBeTruthy();
+    expect(within(report).getByText("torch").parentElement?.textContent).toContain("Import failed");
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
     expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
   });
