@@ -18,6 +18,7 @@ from .production import render_story
 from .production_audit import audit_production_readiness
 from .pronunciation import apply_glossary
 from .render_preflight import inspect_render_plan
+from .runtime_probe import probe_runtime
 from .story import Character, VoiceProfile, from_dict, narrator
 from .synthesis import synthesize
 from .temp_cleanup import cleanup_partial_wavs
@@ -56,6 +57,8 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "engine": "chatterbox-multilingual", "language": "hi"}
     if request.get("action") == "diagnose":
         return {"ok": True, "result": diagnose()}
+    if request.get("action") == "probe_runtime":
+        return {"ok": True, "result": probe_runtime()}
     if request.get("action") == "inspect_generated_wav":
         filename = request.get("path")
         if not isinstance(filename, str):
