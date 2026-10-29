@@ -564,6 +564,8 @@ fn invoke_python(request: Value) -> Result<Value, String> {
         Some("synthesize" | "render_story") => Duration::from_secs(600),
         // PCM inspection scans the entire allowed WAV twice without model weights.
         Some("inspect_generated_wav") => Duration::from_secs(180),
+        // Importing torch/Chatterbox can be slow on Windows; no model weights load.
+        Some("probe_runtime") => Duration::from_secs(90),
         _ => Duration::from_secs(15),
     };
     let started = Instant::now();
@@ -617,6 +619,15 @@ async fn inspect_script(text: String) -> Result<TextInspection, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn probe_tts_runtime() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let response = invoke_python(json!({"action": "probe_runtime"}))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Speech import probe returned no result.".to_string())
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1457,7 +1468,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");

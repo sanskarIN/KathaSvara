@@ -31,6 +31,15 @@ type AbandonedWavReport = {
   removed: number; bytes_removed: number; ignored_entries: number;
   age_hours: number; max_deletions: number;
 };
+type RuntimeImportProbe = {
+  python_311: boolean;
+  checks: Record<string, "ok" | "entrypoint_missing" | "import_failed">;
+  failed_components: string[];
+  imports_ok: boolean;
+  model_weights_verified: false;
+  audio_synthesis_verified: false;
+  help: string;
+};
 const CACHE_TARGET_MIB = 512;
 function asMiB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
@@ -60,6 +69,8 @@ export default function App() {
   const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
+  const [probingImports, setProbingImports] = useState(false);
+  const [importProbe, setImportProbe] = useState<RuntimeImportProbe | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
   const [checkingCache, setCheckingCache] = useState(false);
@@ -289,6 +300,22 @@ export default function App() {
     }
   }
 
+  async function verifyTtsImports() {
+    setProbingImports(true);
+    setImportProbe(null);
+    try {
+      const report = await invoke<RuntimeImportProbe>("probe_tts_runtime");
+      setImportProbe(report);
+      setMessage(report.imports_ok
+        ? "TTS libraries imported successfully. Model weights, Hindi generation, and voice quality are still unverified."
+        : "The speech runtime cannot import every required library. Review the detailed checks in Settings.");
+    } catch (error) {
+      setMessage("TTS import probe could not run: " + errorMessage(error));
+    } finally {
+      setProbingImports(false);
+    }
+  }
+
   async function inspectCache() {
     setCheckingCache(true);
     try {
@@ -514,7 +541,25 @@ export default function App() {
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
                 {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
               </button>
-              <p className="helper">A successful bridge or dependency check does not confirm model weights or a real Hindi voice test.</p>
+              <button className="secondary-button" disabled={probingImports} onClick={() => void verifyTtsImports()}>
+                {probingImports ? "Verifying speech library imports…" : "Verify speech library imports (no model load)"}
+              </button>
+              <p className="helper">Dependency discovery only checks for installed modules. The optional import probe checks whether
+                their Python imports actually work; neither test loads model weights or generates speech.</p>
+              {importProbe && (
+                <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
+                  <h3>TTS import check: {importProbe.imports_ok ? "Imports passed" : "Setup needs attention"}</h3>
+                  <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
+                  <ul>
+                    {Object.entries(importProbe.checks).map(([module, result]) => (
+                      <li key={module}><strong>{module}</strong>: {result === "ok"
+                        ? "Imported" : result === "entrypoint_missing" ? "Required API not found" : "Import failed"}</li>
+                    ))}
+                  </ul>
+                  <p><strong>Model weights / real Hindi audio verified:</strong> No</p>
+                  <p>{importProbe.help}</p>
+                </section>
+              )}
               <section aria-label="Local segment-cache maintenance" className="diagnostic-report">
                 <h3>Generated segment cache</h3>
                 <p>Inspect or explicitly clean old content-addressed speech chunks.
