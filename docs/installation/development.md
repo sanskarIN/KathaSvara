@@ -43,6 +43,30 @@ Install Python 3.11, stable Rust, Node.js 22 and the system packages documented 
 
 Install the Tauri 2 Xcode/Command Line Tools requirements, Node.js 22, stable Rust and Python 3.11. Follow the Linux Python and Node commands, noting that installed PyTorch and model acceleration compatibility vary by macOS release and hardware.
 
+## Windows developer EXE: check real library imports before launching
+
+In a source checkout, the optional development launcher
+`scripts/windows/launch-with-audio.ps1` can use a configured Python 3.11
+environment with an unsigned developer EXE (still **not** a standalone
+installer). An explicit `-InstallDependencies` switch may download large
+third-party Python packages, but does not download model weights.
+
+Run the model-free doctor from the checkout's root with an existing
+`services/inference/.venv`, or provide `-PythonPath`:
+
+```powershell
+.\scripts\windows\launch-with-audio.ps1 -DoctorOnly
+```
+
+Unlike lightweight Settings dependency discovery, the doctor now also calls
+the **opt-in import probe**, rejecting broken native library/DLL imports or a
+missing Chatterbox multilingual entrypoint before a desktop launch. The probe
+does not call `from_pretrained`, start voice synthesis or verify weights.
+It reports fixed status codes, not raw library exception details. A valid
+import is **not** evidence that model loading, Hindi pronunciation, distinct
+voices or Windows playback will work; an explicitly requested real-model smoke
+test and human listening still remain essential.
+
 ## Troubleshooting
 
 - **Python interpreter not found:** set KATHASVARA_PYTHON to the absolute Python executable inside the environment with chatterbox-tts installed.

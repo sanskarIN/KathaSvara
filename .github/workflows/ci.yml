@@ -40,6 +40,11 @@ jobs:
         run: |
           echo '{"action":"diagnose"}' | python -m kathasvara.cli | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'] and r['result']['model_weights_verified'] is False and r['result']['audio_synthesis_verified'] is False"
 
+      - name: Verify the TTS import probe never claims real model verification
+        working-directory: services/inference
+        run: |
+          echo '{"action":"probe_runtime"}' | python -m kathasvara.cli | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok']; p=r['result']; assert set(p['checks']) == {'numpy','soundfile','torch','chatterbox_multilingual'}; assert p['model_weights_verified'] is False and p['audio_synthesis_verified'] is False"
+
   journal-windows:
     name: Windows Python journal atomicity (no model)
     runs-on: windows-latest

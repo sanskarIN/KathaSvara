@@ -95,7 +95,31 @@ if (-not $diagnostic.result.dependencies_present) {
 if (-not $diagnostic.result.temporary_write_test_passed) {
     Fail "Python cannot write temporary files; speech synthesis cannot be used safely."
 }
-Write-Host "Bridge and dependency discovery passed. REAL model inference and Hindi audio are NOT yet verified."
+# Discoverable packages can still fail to import because of incompatible native
+# PyTorch/SoundFile DLLs or a missing Chatterbox multilingual entrypoint.
+# This optional-import command NEVER calls from_pretrained or downloads weights.
+Write-Host "Checking actual speech library imports (no model weights loaded)..."
+Push-Location $inference
+try {
+    $rawProbe = '{"action":"probe_runtime"}' | & $python -m kathasvara.cli
+    if ($LASTEXITCODE -ne 0 -or -not $rawProbe) {
+        Fail "Unable to check speech imports. Verify the configured Python interpreter and inference source."
+    }
+    try { $importProbe = ($rawProbe | Select-Object -Last 1) | ConvertFrom-Json }
+    catch { Fail "The speech import probe returned unreadable JSON." }
+} finally { Pop-Location }
+if (-not $importProbe.ok -or -not $importProbe.result) {
+    Fail "The speech import probe failed. Check your Python 3.11 environment."
+}
+if (-not $importProbe.result.imports_ok) {
+    $failed = @($importProbe.result.checks.PSObject.Properties |
+        Where-Object { $_.Value -ne "ok" } |
+        ForEach-Object { $_.Name + " (" + $_.Value + ")" })
+    if (-not $importProbe.result.python_311) { $failed += "python_311 (required)" }
+    Fail ("Required speech libraries cannot import: " + ($failed -join ", ") +
+        ". Repair your Python 3.11 TTS environment before launching the app.")
+}
+Write-Host "Speech imports passed. Model weights, hardware capability and Hindi audio are NOT verified."
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 
 if ($DoctorOnly) {
