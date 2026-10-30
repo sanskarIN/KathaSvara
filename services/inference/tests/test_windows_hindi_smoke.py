@@ -54,3 +54,4 @@ def test_windows_real_smoke_mode_requires_full_wav_inspection() -> None:
     assert "hindi_listening_verified" in smoke_section
     assert "distinct_voices_verified" in smoke_section
     assert "signal_review_required" in smoke_section
+    assert "near_silence_hint" in smoke_section
