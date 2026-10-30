@@ -180,6 +180,9 @@ if ($VerifyHindiSpeech) {
                 [double]$inspection.result.duration_seconds) -gt 0.02) {
             Fail "Reported synthesis duration does not match the inspected WAV."
         }
+        if ($inspection.result.level_hints.near_silence_hint) {
+            Fail "The Hindi smoke-test WAV is almost silent. Check model output and audio dependencies before accepting it."
+        }
         Write-Host ("Structurally validated WAV: " + $output)
         Write-Host ("Measured length: " + $inspection.result.duration_seconds +
             " seconds; sample rate: " + $inspection.result.sample_rate_hz +
