@@ -19,7 +19,7 @@ def test_smoke_wav_inspector_reports_structure_not_hindi_listening(tmp_path: Pat
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(8_000)
-        wav.writeframes(b"\\x00\\x08" * 8_000)
+        wav.writeframes(b"\x00\x08" * 8_000)
 
     response = handle({"action": "inspect_generated_wav", "path": str(output)})
     assert response["ok"] is True
