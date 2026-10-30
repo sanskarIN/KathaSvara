@@ -98,8 +98,9 @@ memory, disk and time. It generates a new WAV in the temporary directory, then
 runs the read-only `inspect_generated_wav` bridge on the actual bytes. The
 inspector checks RIFF/PCM16 structure, frame count, measured duration and a
 SHA-256 digest; the launcher also compares reported and inspected durations.
-Level or long-pause warnings require closer listening. If the file is corrupt,
-truncated or inconsistent, the command **fails**, even if a file was created.
+A near-silent recording fails the speech smoke test; clipping or long-pause
+warnings require closer listening. If the file is corrupt, truncated or
+inconsistent, the command **fails**, even if a file was created.
 
 Passing these checks is **not** proof of natural Hindi speech, correct
 pronunciation, intelligibility, distinct characters or installation readiness.
