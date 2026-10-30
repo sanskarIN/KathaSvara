@@ -77,6 +77,38 @@ test and human listening still remain essential.
 - **Export failed:** choose a new WAV filename that does not already exist (the exporter deliberately avoids overwriting files).
 - **Windows packaging:** bundle.active is false until a managed Python runtime and validated installer are implemented.
 
+## Windows: explicit real-model Hindi smoke test (v0.5.3 development only)
+
+The unsigned desktop EXE does **not** bundle Python, Chatterbox, or model weights.
+Run the model-free import doctor from the repository root first:
+
+```powershell
+.\\scripts\\windows\\launch-with-audio.ps1 -DoctorOnly
+```
+
+After installing compatible speech libraries in `services/inference/.venv`
+(or passing `-PythonPath`), explicitly run a **real** Hindi generation test:
+
+```powershell
+.\\scripts\\windows\\launch-with-audio.ps1 -VerifyHindiSpeech
+```
+
+`-VerifyHindiSpeech` may download upstream model weights and consume substantial
+memory, disk and time. It generates a new WAV in the temporary directory, then
+runs the read-only `inspect_generated_wav` bridge on the actual bytes. The
+inspector checks RIFF/PCM16 structure, frame count, measured duration and a
+SHA-256 digest; the launcher also compares reported and inspected durations.
+Level or long-pause warnings require closer listening. If the file is corrupt,
+truncated or inconsistent, the command **fails**, even if a file was created.
+
+Passing these checks is **not** proof of natural Hindi speech, correct
+pronunciation, intelligibility, distinct characters or installation readiness.
+Listen to the generated WAV and complete the manual acceptance checklist in
+[issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). The model-free
+unit tests use artificial PCM fixtures and never claim real narration. This
+verification change is proposed for v0.5.3 development and is not present in
+the published v0.5.1 Windows executable.
+
 ## Dev-only standalone speech smoke test
 
 After installing the optional TTS dependencies, use this explicit test. Replace OUTPUT with a unique absolute WAV filename in a directory you own. This runs the actual pretrained model and may download its weights:
