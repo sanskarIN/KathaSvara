@@ -8,6 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import soundfile as sf
+from test_production import FakeEngine
 
 from kathasvara.dialogue import parse_dialogue
 from kathasvara.engine import VoiceSettings
@@ -15,8 +16,6 @@ from kathasvara.pcm_signal import effectively_silent_pcm
 from kathasvara.production import render_story
 from kathasvara.story import narrator
 from kathasvara.synthesis import synthesize
-
-from test_production import FakeEngine
 
 
 def sparse_impulse() -> np.ndarray:
