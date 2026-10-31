@@ -71,3 +71,64 @@ def test_failed_open_does_not_replace_existing_destination(
         pass
     assert output.read_bytes() == b"important existing data"
     assert not writer._partial.exists()
+
+
+def test_preexisting_partial_is_not_deleted_or_opened(
+    tmp_path: Path,
+) -> None:
+    """An existing UUID-named temporary file belongs to someone else."""
+    output = tmp_path / "narrator.wav"
+
+    def should_not_open(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Existing partial must be rejected before libsndfile")
+
+    writer = StreamingWav(
+        output, 24_000, SimpleNamespace(SoundFile=should_not_open), 24_000,
+    )
+    writer._partial.write_bytes(b"someone else's unfinished audio")
+    with pytest.raises(FileExistsError, match="Temporary audio"), writer:
+        pass
+    assert writer._partial.read_bytes() == b"someone else's unfinished audio"
+    assert not output.exists()
+
+
+def test_racing_partial_create_is_not_deleted(
+    tmp_path: Path,
+) -> None:
+    """Exclusive-create failure after preflight cannot remove another file."""
+    output = tmp_path / "narrator.wav"
+
+    def competing_open(path: str, **_kwargs: object) -> None:
+        Path(path).write_bytes(b"competing writer's data")
+        raise FileExistsError("simulated exclusive-create collision")
+
+    writer = StreamingWav(
+        output, 24_000, SimpleNamespace(SoundFile=competing_open), 24_000,
+    )
+    with pytest.raises(FileExistsError, match="exclusive-create"), writer:
+        pass
+    assert writer._partial.read_bytes() == b"competing writer's data"
+    assert not output.exists()
+
+
+def test_preexisting_partial_symlink_is_preserved(
+    tmp_path: Path,
+) -> None:
+    """A symlinked temporary path must not be followed or removed."""
+    output = tmp_path / "narrator.wav"
+    external = tmp_path / "protected.wav"
+    external.write_bytes(b"important content")
+    writer = StreamingWav(
+        output, 24_000,
+        SimpleNamespace(SoundFile=lambda *_args, **_kwargs: None),
+        24_000,
+    )
+    try:
+        writer._partial.symlink_to(external)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable")
+    with pytest.raises(FileExistsError, match="Temporary audio"), writer:
+        pass
+    assert writer._partial.is_symlink()
+    assert external.read_bytes() == b"important content"
+    assert not output.exists()
