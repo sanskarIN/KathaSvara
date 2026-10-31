@@ -26,9 +26,8 @@ def test_failed_audio_library_open_removes_its_partial(
     writer = StreamingWav(
         output, 24_000, SimpleNamespace(SoundFile=failed_native_open), 24_000,
     )
-    with pytest.raises(OSError, match="Native codec"):
-        with writer:
-            pytest.fail("Failed __enter__ must not yield a writer")
+    with pytest.raises(OSError, match="Native codec"), writer:
+        pytest.fail("Failed __enter__ must not yield a writer")
     assert not output.exists()
     assert not writer._partial.exists()
     assert not list(tmp_path.glob("*.partial.wav"))
@@ -49,9 +48,8 @@ def test_failed_audio_library_close_still_removes_its_partial(
     writer = StreamingWav(
         output, 24_000, SimpleNamespace(SoundFile=BrokenClose), 24_000,
     )
-    with pytest.raises(OSError, match="while closing"):
-        with writer:
-            pass
+    with pytest.raises(OSError, match="while closing"), writer:
+        pass
     assert not output.exists()
     assert not writer._partial.exists()
     assert not list(tmp_path.glob("*.partial.wav"))
@@ -69,8 +67,7 @@ def test_failed_open_does_not_replace_existing_destination(
     writer = StreamingWav(
         output, 24_000, SimpleNamespace(SoundFile=should_not_run), 24_000,
     )
-    with pytest.raises(ValueError, match="new absolute WAV"):
-        with writer:
-            pass
+    with pytest.raises(ValueError, match="new absolute WAV"), writer:
+        pass
     assert output.read_bytes() == b"important existing data"
     assert not writer._partial.exists()
