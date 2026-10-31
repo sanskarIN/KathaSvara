@@ -34,19 +34,21 @@ class ChatterboxHindi:
         try:
             import torch
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        except ImportError as exc:
-            raise RuntimeError(
-                'Speech engine missing. Install Python 3.11 and pip install -e ".[tts]".'
-            ) from exc
-        # Not every installed PyTorch build supports the MPS backend.
-        mps = getattr(torch.backends, "mps", None)
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif mps is not None and mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
+        except Exception as exc:
+            # Native extension failures (especially Windows DLL loading) can be
+            # OSError/RuntimeError, not just ImportError. Never send their
+            # potentially private paths to the desktop IPC response.
+            raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
         try:
+            # Device initialization may also fail before from_pretrained runs.
+            # Route those errors through the same privacy-safe classifier.
+            mps = getattr(torch.backends, "mps", None)
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif mps is not None and mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
             self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
         except Exception as exc:
             raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
