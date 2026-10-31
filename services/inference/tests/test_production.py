@@ -299,7 +299,7 @@ def test_chunk_reserves_next_speaker_gap_before_pcm_concatenation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reject an over-budget chunk before assembling a large segment buffer."""
-    import kathasvara.production as production
+    from kathasvara import production
 
     monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
     doc = sample_doc()
@@ -326,7 +326,7 @@ def test_early_frame_budget_allows_valid_dialogue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A tightened intermediate check must not reject a legal story."""
-    import kathasvara.production as production
+    from kathasvara import production
 
     monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
     doc = sample_doc()
