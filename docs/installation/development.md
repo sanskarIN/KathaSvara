@@ -72,7 +72,7 @@ test and human listening still remain essential.
 - **Python interpreter not found:** set KATHASVARA_PYTHON to the absolute Python executable inside the environment with chatterbox-tts installed.
 - **No inference source directory:** set KATHASVARA_INFERENCE_DIR to the absolute path of services/inference.
 - **Module not found:** install inference extras in the same interpreter that the desktop uses.
-- **DLL or GPU backend initialization failure:** a discoverable library is not necessarily usable. Run `-DoctorOnly` to test native imports before launching. Real synthesis now routes native NumPy, SoundFile, PyTorch and Chatterbox initialization failures through fixed, privacy-safe error messages instead of displaying upstream DLL locations. These messages are diagnostic only; they do not prove audio can be generated.
+- **DLL or GPU backend initialization failure:** a discoverable library is not necessarily usable. Run `-DoctorOnly` to test native imports before launching. Both single-voice generation and multi-character story rendering now report native NumPy and SoundFile import failures with fixed, privacy-safe error messages; PyTorch, Chatterbox and device-detection failures use the same approach instead of displaying upstream DLL locations. These messages are diagnostic only; they do not prove audio can be generated.
 - **Model permission/download failure:** check the official upstream model card, connectivity, permissions and available disk. Never bypass gated weights.
 - **Out of memory:** use supported compatible hardware or shorter text. No platform-wide speed or VRAM guarantee is provided.
 - **Export failed:** choose a new WAV filename that does not already exist (the exporter deliberately avoids overwriting files).
