@@ -32,6 +32,8 @@ def test_next_release_is_manual_and_requires_published_previous_version() -> Non
         assert "releases/tags/v0.5.2" in section
         assert "git/ref/tags/v0.5.2" in section
         assert ".prerelease" in section
+        assert '[.assets[].name] | sort | join(",")' in section
+        assert "KathaSvara-v0.5.2-dev-win64.exe,README.txt,SHA256SUMS.txt" in section
     assert 'test "$GITHUB_REF" = "refs/heads/main"' in prepare
     assert 'test "$main_sha" = "$RELEASE_SHA"' in prepare
     assert 'test "$current_main_sha" = "$RELEASE_SHA"' in publish
