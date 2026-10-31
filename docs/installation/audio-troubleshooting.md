@@ -26,6 +26,15 @@ If the Python inference virtual environment doesn't exist, **explicitly opt in**
 powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -InstallDependencies -DoctorOnly
 ```
 
+If CUDA or MPS probing is broken but your Python and CPU PyTorch installations are compatible, opt in to CPU-only inference. This skips GPU availability probes; it is slower and **does not** establish that model weights or Hindi pronunciation work:
+
+```powershell
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -CpuOnly -DoctorOnly
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -CpuOnly -VerifyHindiSpeech
+```
+
+For an already configured environment launched outside this helper, set `KATHASVARA_TTS_DEVICE=cpu` for the Python or EXE child process. The default `auto` retains CUDA → MPS → CPU detection. Invalid overrides fail safely; this option never installs CPU-compatible PyTorch automatically.
+
 To test the **real** model, explicitly request one short Hindi WAV. **This can download substantial model weights** and consumes machine resources. The command reports the unique output WAV path, which you must play and listen to yourself:
 
 ```powershell
@@ -49,7 +58,8 @@ For a Python environment already created elsewhere, add `-PythonPath "C:\PATH\TO
 | App opens but Generate fails immediately with inference directory error | An EXE launched without the inference source directory. Launch it through the script, or set `KATHASVARA_INFERENCE_DIR` to the absolute `services/inference` folder. |
 | Python not found or bridge fails | Select a Python 3.11 interpreter; run the script's DoctorOnly action. |
 | `chatterbox`, `torch`, `numpy` or `soundfile` missing | Use `-InstallDependencies` explicitly with the source checkout. |
-| DoctorOnly passes but real speech test fails | Dependency discovery is not a model smoke test. Inspect the Python response for model downloads, permissions, incompatible PyTorch, network access or insufficient RAM/VRAM. |
+| DoctorOnly passes but real speech test fails | Dependency discovery is not a model smoke test. Review the privacy-safe Python error hint for model access, incompatible PyTorch, network access or insufficient RAM/VRAM; run the explicit smoke test on the configured machine. |
+| Error says "Local file or audio operation failed" | The Python bridge intentionally hides raw operating-system and audio-codec exceptions, which may contain private file paths. Check write permissions, free storage, the selected output folder and the local diagnostic probe. |
 | Generated WAV exists but sounds wrong | Keep the human listening acceptance issue open; do not claim distinct characters or usable Hindi until actually reviewed. |
 | Audio takes a long time or times out | Model loading and synthesis may be slow on CPU. The desktop bridge bounds a single synthesis job to 10 minutes. |
 

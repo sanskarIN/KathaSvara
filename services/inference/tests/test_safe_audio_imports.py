@@ -10,7 +10,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from kathasvara.dialogue import parse_dialogue
 from kathasvara.engine import ChatterboxHindi, VoiceSettings
+from kathasvara.production import render_story
+from kathasvara.story import narrator
 from kathasvara.synthesis import synthesize
 
 
@@ -33,6 +36,7 @@ def _assert_safe_failure(error: pytest.ExceptionInfo[RuntimeError]) -> None:
         "Unable to load the speech model:",
         "Unable to load the speech model.",
         "Audio libraries could not initialize.",
+        "Story audio libraries could not initialize.",
     ))
     assert "private" not in visible
     assert "speech_backend.dll" not in visible
@@ -108,3 +112,19 @@ def test_broken_audio_extension_import_is_sanitized(
         synthesize("नमस्कार, मित्रों!", output, VoiceSettings())
     _assert_safe_failure(failure)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("module", ["numpy", "soundfile"])
+def test_broken_story_audio_extension_import_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object, module: str,
+) -> None:
+    """The multi-character composer must never leak native import errors."""
+    doc = parse_dialogue("परीक्षण", "Narrator: नमस्कार।", [narrator()])
+    _fail_import(monkeypatch, module)
+    output = tmp_path / "story-unwritten.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(RuntimeError) as failure:
+        render_story(doc, output, cache)
+    _assert_safe_failure(failure)
+    assert not output.exists()
+    assert not cache.exists()
