@@ -13,6 +13,7 @@ from .inference_errors import describe_model_failure
 # text (even if it begins with a known phrase) is never sent to the desktop.
 _SAFE_FIXED_MESSAGES = frozenset({
     "Unsupported action.",
+    "Unsupported TTS device override. Use auto or cpu.",
     "Enter Hindi story text before generating.",
     "Invalid render job ID.",
     "Assign every unknown speaker manually before rendering.",
