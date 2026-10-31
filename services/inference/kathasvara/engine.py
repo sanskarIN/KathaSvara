@@ -6,6 +6,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,16 +40,26 @@ class ChatterboxHindi:
             # OSError/RuntimeError, not just ImportError. Never send their
             # potentially private paths to the desktop IPC response.
             raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
+        # A broken GPU probing library can prevent a valid CPU setup from
+        # reaching inference. Only an explicit, documented override bypasses
+        # auto-detection; never silently downgrade or reinterpret a typo.
+        requested = os.getenv("KATHASVARA_TTS_DEVICE", "auto").strip().lower()
+        if requested not in {"auto", "cpu"}:
+            raise RuntimeError(
+                "Unsupported TTS device override. Use auto or cpu."
+            )
         try:
-            # Device initialization may also fail before from_pretrained runs.
-            # Route those errors through the same privacy-safe classifier.
-            mps = getattr(torch.backends, "mps", None)
-            if torch.cuda.is_available():
-                device = "cuda"
-            elif mps is not None and mps.is_available():
-                device = "mps"
-            else:
+            if requested == "cpu":
                 device = "cpu"
+            else:
+                # Auto mode retains the existing CUDA -> MPS -> CPU priority.
+                mps = getattr(torch.backends, "mps", None)
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif mps is not None and mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
             self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
         except Exception as exc:
             raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
