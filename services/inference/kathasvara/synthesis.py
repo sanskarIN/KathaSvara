@@ -35,8 +35,14 @@ def synthesize(
     try:
         import numpy as np
         import soundfile as sf
-    except ImportError as exc:
-        raise RuntimeError('Audio dependencies missing; install pip install -e ".[tts]".') from exc
+    except Exception as exc:
+        # A broken NumPy/SoundFile binary can raise OSError or RuntimeError
+        # containing private DLL locations. Do not forward those details through
+        # CLI/desktop IPC, even when the package is technically installed.
+        raise RuntimeError(
+            "Audio libraries could not initialize. Check Python 3.11, NumPy "
+            "and SoundFile compatibility; run the local TTS import probe."
+        ) from exc
 
     adapter = engine if engine is not None else ChatterboxHindi()
     adapter.load()
