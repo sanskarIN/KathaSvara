@@ -17,6 +17,7 @@ from .hindi import split_for_engine, validate_story
 from .production import render_story
 from .production_audit import audit_production_readiness
 from .pronunciation import apply_glossary
+from .public_errors import public_error_message
 from .render_preflight import inspect_render_plan
 from .runtime_probe import probe_runtime
 from .story import Character, VoiceProfile, from_dict, narrator
@@ -255,7 +256,13 @@ def main() -> int:
         response = handle(request)
         exit_code = 0
     except (ValueError, RuntimeError, OSError, ImportError, TypeError) as exc:
-        response = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+        # Never send raw Python, libsndfile or OS exceptions to desktop IPC:
+        # unexpected errors can include paths, tokens and private script text.
+        response = {
+            "ok": False,
+            "error": type(exc).__name__,
+            "message": public_error_message(exc),
+        }
         exit_code = 1
     except Exception:  # noqa: BLE001 — protect renderer from upstream model errors
         response = {"ok": False, "error": "InferenceFailed", "message": "Speech generation failed. Consult local logs."}

@@ -101,3 +101,19 @@ def test_streamed_synthesis_keeps_measured_pause_and_frame_count(tmp_path) -> No
         result["chunks"] * 2400 + (result["chunks"] - 1) * int(24000 * 0.14)
     )
     assert result["duration_seconds"] == round(info.frames / 24000, 3)
+
+
+@pytest.mark.parametrize("amplitude", [0.0, 1e-8])
+def test_inference_does_not_publish_silent_pcm(
+    tmp_path, amplitude: float,
+) -> None:
+    """A nonempty tensor can still encode no meaningful PCM16 speech."""
+    class SilentEngine(FakeEngine):
+        def generate(self, text: str, settings: VoiceSettings) -> np.ndarray:
+            return np.full(2400, amplitude, dtype=np.float32)
+
+    output = tmp_path / "silent.wav"
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        synthesize("नमस्कार।", output, VoiceSettings(), SilentEngine())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []

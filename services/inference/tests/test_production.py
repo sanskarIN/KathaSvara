@@ -222,3 +222,116 @@ def test_render_journal_cannot_overwrite_existing_file(tmp_path: Path) -> None:
         )
     assert journal.read_text() == "important"
     assert not (tmp_path / "new.wav").exists()
+
+
+@pytest.mark.parametrize("pause_ms", [0, 1])
+def test_short_or_zero_speaker_pause_preserves_pcm_and_timing(
+    tmp_path: Path, pause_ms: int,
+) -> None:
+    """Valid no-gap and 1ms settings must not cause an empty WAV write."""
+    doc = sample_doc()
+    narrator_character = next(c for c in doc.characters if c.id == "narrator")
+    narrator_character.voice.pause_ms = pause_ms
+    output = tmp_path / "short-pause.wav"
+    cache = tmp_path / "cache"
+    report = render_story(doc, output, cache, FakeEngine())
+    pause_frames = int(24_000 * pause_ms / 1_000)
+    expected_frames = 4_800 + pause_frames
+
+    audio_info = sf.info(str(output))
+    assert audio_info.frames == expected_frames
+    assert report["duration_seconds"] == round(expected_frames / 24_000, 3)
+    assert report["segments"][0]["end_seconds"] == 0.1
+    assert report["segments"][1]["start_seconds"] == round(
+        (2_400 + pause_frames) / 24_000, 4,
+    )
+    assert report["segments"][1]["end_seconds"] == round(
+        expected_frames / 24_000, 4,
+    )
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+    retry_engine = FakeEngine()
+    retry = render_story(doc, tmp_path / "retry.wav", cache, retry_engine)
+    assert retry_engine.calls == []
+    assert all(segment["cached"] for segment in retry["segments"])
+    assert sf.info(str(tmp_path / "retry.wav")).frames == expected_frames
+
+
+@pytest.mark.parametrize("amplitude", [0.0, 1e-8])
+def test_story_rejects_silent_model_chunks_without_cache(
+    tmp_path: Path, amplitude: float,
+) -> None:
+    """A structurally valid zero-valued waveform is not a spoken segment."""
+    class SilentEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.full(2400, amplitude, dtype=np.float32)
+
+    output = tmp_path / "silent-story.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        render_story(sample_doc(), output, cache, SilentEngine())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+    assert list(cache.glob("*.wav")) == []
+
+
+def test_silent_cached_segment_is_regenerated_before_reuse(tmp_path: Path) -> None:
+    """A previously poisoned PCM cache must not silently replay on retry."""
+    doc = parse_dialogue(
+        "परीक्षण", "Narrator: नमस्कार।", [narrator()], script_id="silent-cache-test",
+    )
+    cache = tmp_path / "cache"
+    render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
+    cached = list(cache.glob("*.wav"))
+    assert len(cached) == 1
+    sf.write(str(cached[0]), np.zeros(2400, dtype=np.float32), 24_000, subtype="PCM_16")
+
+    engine = FakeEngine()
+    result = render_story(doc, tmp_path / "repaired.wav", cache, engine)
+    assert len(engine.calls) == 1
+    assert result["segments"][0]["cached"] is False
+    data, _rate = sf.read(str(cached[0]), dtype="float32")
+    assert np.max(np.abs(data)) > 1.0 / 32768.0
+    assert sf.info(str(tmp_path / "repaired.wav")).frames == 2400
+
+
+def test_chunk_reserves_next_speaker_gap_before_pcm_concatenation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject an over-budget chunk before assembling a large segment buffer."""
+    from kathasvara import production
+
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
+    doc = sample_doc()
+    doc.characters[0].voice.pause_ms = 200
+
+    class LongEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.full(22_000, 0.12, dtype=np.float32)
+
+    def unexpected_concatenation(_parts: object) -> None:
+        raise AssertionError("Over-budget PCM must be rejected before concatenation.")
+
+    monkeypatch.setattr(np, "concatenate", unexpected_concatenation)
+    output = tmp_path / "too-long.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(ValueError, match="20-minute audio limit"):
+        render_story(doc, output, cache, LongEngine())
+    assert not output.exists()
+    assert not list(tmp_path.glob("*.partial.wav"))
+    assert not list(cache.glob("*.wav"))
+
+
+def test_early_frame_budget_allows_valid_dialogue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tightened intermediate check must not reject a legal story."""
+    from kathasvara import production
+
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
+    doc = sample_doc()
+    doc.characters[0].voice.pause_ms = 200
+    output = tmp_path / "within-budget.wav"
+    report = render_story(doc, output, tmp_path / "cache", FakeEngine())
+    assert len(report["segments"]) == 2
+    assert sf.info(str(output)).frames == 2 * 2_400 + 4_800

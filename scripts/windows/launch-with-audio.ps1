@@ -8,7 +8,8 @@ param(
     [string]$PythonPath = "",
     [switch]$InstallDependencies,
     [switch]$DoctorOnly,
-    [switch]$VerifyHindiSpeech
+    [switch]$VerifyHindiSpeech,
+    [switch]$CpuOnly
 )
 
 Set-StrictMode -Version Latest
@@ -74,6 +75,12 @@ if ($InstallDependencies) {
 # The Windows user's persistent environment and registry are untouched.
 $env:KATHASVARA_PYTHON = $python
 $env:KATHASVARA_INFERENCE_DIR = $inference
+if ($CpuOnly) {
+    # Bypass a failing CUDA/MPS availability probe in the Python adapter.
+    # Applies only to this script and the child EXE, not the user's registry.
+    $env:KATHASVARA_TTS_DEVICE = "cpu"
+    Write-Host "CPU-only TTS selected. Rendering may be slower; real speech is unverified."
+}
 
 Write-Host "Checking the configured Python bridge without loading a speech model..."
 Push-Location $inference
@@ -95,7 +102,31 @@ if (-not $diagnostic.result.dependencies_present) {
 if (-not $diagnostic.result.temporary_write_test_passed) {
     Fail "Python cannot write temporary files; speech synthesis cannot be used safely."
 }
-Write-Host "Bridge and dependency discovery passed. REAL model inference and Hindi audio are NOT yet verified."
+# Discoverable packages can still fail to import because of incompatible native
+# PyTorch/SoundFile DLLs or a missing Chatterbox multilingual entrypoint.
+# This optional-import command NEVER calls from_pretrained or downloads weights.
+Write-Host "Checking actual speech library imports (no model weights loaded)..."
+Push-Location $inference
+try {
+    $rawProbe = '{"action":"probe_runtime"}' | & $python -m kathasvara.cli
+    if ($LASTEXITCODE -ne 0 -or -not $rawProbe) {
+        Fail "Unable to check speech imports. Verify the configured Python interpreter and inference source."
+    }
+    try { $importProbe = ($rawProbe | Select-Object -Last 1) | ConvertFrom-Json }
+    catch { Fail "The speech import probe returned unreadable JSON." }
+} finally { Pop-Location }
+if (-not $importProbe.ok -or -not $importProbe.result) {
+    Fail "The speech import probe failed. Check your Python 3.11 environment."
+}
+if (-not $importProbe.result.imports_ok) {
+    $failed = @($importProbe.result.checks.PSObject.Properties |
+        Where-Object { $_.Value -ne "ok" } |
+        ForEach-Object { $_.Name + " (" + $_.Value + ")" })
+    if (-not $importProbe.result.python_311) { $failed += "python_311 (required)" }
+    Fail ("Required speech libraries cannot import: " + ($failed -join ", ") +
+        ". Repair your Python 3.11 TTS environment before launching the app.")
+}
+Write-Host "Speech imports passed. Model weights, hardware capability and Hindi audio are NOT verified."
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 
 if ($DoctorOnly) {
@@ -129,11 +160,44 @@ if ($VerifyHindiSpeech) {
         if (-not $result.ok -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
             Fail "The model did not create a valid output WAV. Check model access and hardware."
         }
-        if ((Get-Item -LiteralPath $output).Length -lt 44) {
-            Fail "The model created an invalid or empty WAV."
+        # A file larger than 44 bytes is not necessarily valid PCM audio.
+        # Reuse the same bounded, read-only WAV inspector used by the app; it
+        # checks the actual RIFF structure and all declared audio frames.
+        $inspectionPayload = @{
+            action = "inspect_generated_wav"
+            path = $output
+        } | ConvertTo-Json -Compress
+        $rawInspection = $inspectionPayload | & $python -m kathasvara.cli
+        if ($LASTEXITCODE -ne 0 -or -not $rawInspection) {
+            Fail "The generated WAV failed structural inspection; do not use it as a Hindi audio acceptance sample."
         }
-        Write-Host ("A real WAV was generated at: " + $output)
-        Write-Warning "Listen critically to the WAV; this test does not validate Hindi pronunciation or distinct voices."
+        try { $inspection = ($rawInspection | Select-Object -Last 1) | ConvertFrom-Json }
+        catch { Fail "The WAV inspector returned unreadable JSON." }
+        if (-not $inspection.ok -or -not $inspection.result -or
+            -not $inspection.result.structure_valid -or
+            $inspection.result.codec -ne "pcm_s16le" -or
+            $inspection.result.channels -ne 1 -or
+            $inspection.result.frames -le 0 -or
+            $inspection.result.duration_seconds -le 0 -or
+            $inspection.result.hindi_listening_verified -or
+            $inspection.result.distinct_voices_verified) {
+            Fail "The WAV inspector did not confirm valid PCM16 output with manual acceptance still pending."
+        }
+        if ([Math]::Abs([double]$result.result.duration_seconds -
+                [double]$inspection.result.duration_seconds) -gt 0.02) {
+            Fail "Reported synthesis duration does not match the inspected WAV."
+        }
+        if ($inspection.result.level_hints.near_silence_hint) {
+            Fail "The Hindi smoke-test WAV is almost silent. Check model output and audio dependencies before accepting it."
+        }
+        Write-Host ("Structurally validated WAV: " + $output)
+        Write-Host ("Measured length: " + $inspection.result.duration_seconds +
+            " seconds; sample rate: " + $inspection.result.sample_rate_hz +
+            " Hz; SHA-256: " + $inspection.result.sha256)
+        if ($inspection.result.level_hints.signal_review_required) {
+            Write-Warning "The generated WAV has a level or long-pause warning. Review the recorded audio carefully."
+        }
+        Write-Warning "Listen critically to the WAV; structure, duration and levels do not prove Hindi pronunciation, intelligibility or distinct voices."
     } finally {
         Pop-Location
     }
