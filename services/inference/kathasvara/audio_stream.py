@@ -31,14 +31,22 @@ class StreamingWav:
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         if self.destination.exists() or self.destination.is_symlink():
             raise ValueError("Choose a new absolute WAV destination.")
-        # SoundFile may create its target and then fail while initializing
-        # libsndfile. Since __enter__ failed, Python will not call __exit__.
-        # Discard an incomplete temporary WAV immediately in this case.
+        # A conflicting temporary path is not ours to delete, including an
+        # existing symlink. Even with a UUID name, fail closed on collisions.
+        if self._partial.exists() or self._partial.is_symlink():
+            raise FileExistsError("Temporary audio destination already exists.")
+        # SoundFile may create the file and fail while loading libsndfile.
+        # __exit__ never runs if __enter__ raises, so clean up only when the
+        # failure is not an exclusive-create collision with another writer.
         try:
             self._file = self.sf.SoundFile(
                 str(self._partial), mode="x", samplerate=self.rate,
                 channels=1, format="WAV", subtype="PCM_16",
             )
+        except FileExistsError:
+            # A different process may have raced the preflight path check.
+            # Do not unlink a file whose exclusive creation was rejected.
+            raise
         except BaseException:
             self._discard_partial()
             raise
