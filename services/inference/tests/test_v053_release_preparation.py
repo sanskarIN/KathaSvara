@@ -63,8 +63,12 @@ def test_next_release_is_immutable_and_requires_verified_assets() -> None:
         "version = \"0.5.3\"",
     ):
         assert token in workflow, f"Missing v0.5.3 release invariant: {token}"
+    # The older EXE name must appear in the prior-release asset gate.
+    # It must never be packaged or published as the new v0.5.3 artifact.
     assert "gh release create v0.5.2" not in workflow
-    assert "KathaSvara-v0.5.2-dev-win64.exe" not in workflow
+    assert '$name = "KathaSvara-v0.5.2-dev-win64.exe"' not in workflow
+    assert "release-assets/KathaSvara-v0.5.2-dev-win64.exe" not in workflow
+    assert "KathaSvara-v0.5.2-dev-win64.exe,README.txt,SHA256SUMS.txt" in workflow
 
 
 def test_future_release_notes_do_not_claim_audio_acceptance_or_publication() -> None:
