@@ -31,10 +31,17 @@ class StreamingWav:
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         if self.destination.exists() or self.destination.is_symlink():
             raise ValueError("Choose a new absolute WAV destination.")
-        self._file = self.sf.SoundFile(
-            str(self._partial), mode="x", samplerate=self.rate,
-            channels=1, format="WAV", subtype="PCM_16",
-        )
+        # SoundFile may create its target and then fail while initializing
+        # libsndfile. Since __enter__ failed, Python will not call __exit__.
+        # Discard an incomplete temporary WAV immediately in this case.
+        try:
+            self._file = self.sf.SoundFile(
+                str(self._partial), mode="x", samplerate=self.rate,
+                channels=1, format="WAV", subtype="PCM_16",
+            )
+        except BaseException:
+            self._discard_partial()
+            raise
         return self
 
     def write(self, samples: Any) -> None:
@@ -61,8 +68,19 @@ class StreamingWav:
         os.link(self._partial, self.destination)
         self._published = True
 
+    def _discard_partial(self) -> None:
+        # Do not mask the primary model/audio exception if cleanup also fails.
+        # This name is an unpredictable UUID unique to this writer instance.
+        try:
+            self._partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def __exit__(self, *_exc: object) -> None:
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        self._partial.unlink(missing_ok=True)
+        try:
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+        finally:
+            # A close failure must not strand a partial WAV on disk.
+            self._discard_partial()
