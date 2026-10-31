@@ -35,8 +35,14 @@ def synthesize(
     try:
         import numpy as np
         import soundfile as sf
-    except ImportError as exc:
-        raise RuntimeError('Audio dependencies missing; install pip install -e ".[tts]".') from exc
+    except Exception as exc:
+        # A broken NumPy/SoundFile binary can raise OSError or RuntimeError
+        # containing private DLL locations. Do not forward those details through
+        # CLI/desktop IPC, even when the package is technically installed.
+        raise RuntimeError(
+            "Audio libraries could not initialize. Check Python 3.11, NumPy "
+            "and SoundFile compatibility; run the local TTS import probe."
+        ) from exc
 
     adapter = engine if engine is not None else ChatterboxHindi()
     adapter.load()
@@ -54,8 +60,17 @@ def synthesize(
             samples = np.asarray(audio, dtype=np.float32).squeeze()
             if samples.ndim != 1 or samples.size == 0 or not np.isfinite(samples).all():
                 raise RuntimeError("Speech engine returned invalid or empty audio.")
-            if float(np.max(np.abs(samples))) > 2.0:
+            peak = float(np.max(np.abs(samples)))
+            if peak > 2.0:
                 raise RuntimeError("Speech engine returned implausible sample amplitudes.")
+            # A generated chunk below one PCM16 quantization step can become
+            # digital silence in the output file. Never label it as successful
+            # spoken narration; do not publish a partial WAV.
+            if peak < 1.0 / 32768.0:
+                raise RuntimeError(
+                    "Speech engine returned effectively silent audio. "
+                    "Check model weights, hardware and speech generation."
+                )
             if chunks:
                 writer.write(silence)
             writer.write(np.clip(samples, -1.0, 1.0))
