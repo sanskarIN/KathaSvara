@@ -222,3 +222,36 @@ def test_render_journal_cannot_overwrite_existing_file(tmp_path: Path) -> None:
         )
     assert journal.read_text() == "important"
     assert not (tmp_path / "new.wav").exists()
+
+
+@pytest.mark.parametrize("pause_ms", [0, 1])
+def test_short_or_zero_speaker_pause_preserves_pcm_and_timing(
+    tmp_path: Path, pause_ms: int,
+) -> None:
+    """Valid no-gap and 1ms settings must not cause an empty WAV write."""
+    doc = sample_doc()
+    narrator_character = next(c for c in doc.characters if c.id == "narrator")
+    narrator_character.voice.pause_ms = pause_ms
+    output = tmp_path / "short-pause.wav"
+    cache = tmp_path / "cache"
+    report = render_story(doc, output, cache, FakeEngine())
+    pause_frames = int(24_000 * pause_ms / 1_000)
+    expected_frames = 4_800 + pause_frames
+
+    audio_info = sf.info(str(output))
+    assert audio_info.frames == expected_frames
+    assert report["duration_seconds"] == round(expected_frames / 24_000, 3)
+    assert report["segments"][0]["end_seconds"] == 0.1
+    assert report["segments"][1]["start_seconds"] == round(
+        (2_400 + pause_frames) / 24_000, 4,
+    )
+    assert report["segments"][1]["end_seconds"] == round(
+        expected_frames / 24_000, 4,
+    )
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+    retry_engine = FakeEngine()
+    retry = render_story(doc, tmp_path / "retry.wav", cache, retry_engine)
+    assert retry_engine.calls == []
+    assert all(segment["cached"] for segment in retry["segments"])
+    assert sf.info(str(tmp_path / "retry.wav")).frames == expected_frames
