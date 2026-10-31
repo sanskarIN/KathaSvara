@@ -54,6 +54,20 @@ jobs:
             exit 1
           fi
           echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.verify.outputs.sha }}
+          persist-credentials: false
+      - name: Stop before compilation if v0.5.3 versions are not synchronized
+        run: |
+          set -euo pipefail
+          grep -q '"version": "0.5.3"' apps/desktop/package.json
+          grep -q '"version": "0.5.3"' apps/desktop/package-lock.json
+          grep -q '"version": "0.5.3"' apps/desktop/src-tauri/tauri.conf.json
+          grep -q 'version = "0.5.3"' apps/desktop/src-tauri/Cargo.toml
+          grep -q 'version = "0.5.3"' services/inference/pyproject.toml
+          test -s docs/releases/v0.5.3-notes.md
+          test -s docs/installation/portable-windows-v0.5.3.md
 
   python:
     needs: prepare
