@@ -48,16 +48,44 @@ def _samples(audio: Any, np: Any) -> Any:
 
 
 def _atomic_wav(path: Path, audio: Any, rate: int, sf: Any) -> None:
+    """Replace one cache entry without truncating a competing temporary path.
+
+    The cache key may be refreshed on a forced retry; only the UUID-named
+    staging file requires exclusive creation. A collision is not ours to clean.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f"{path.stem}-{uuid.uuid4().hex}.partial.wav")
+    if temp.exists() or temp.is_symlink():
+        raise FileExistsError("Temporary cache WAV already exists.")
+    opened = False
     try:
-        sf.write(str(temp), audio, rate, subtype="PCM_16")
+        try:
+            with sf.SoundFile(
+                str(temp), mode="x", samplerate=rate, channels=1,
+                format="WAV", subtype="PCM_16",
+            ) as stream:
+                opened = True
+                stream.write(audio)
+        except FileExistsError:
+            # A different process may have won the exclusive-create race.
+            # Never unlink its file or follow its symlink.
+            raise
+        except BaseException:
+            # Native initialization can create a partial WAV before failing.
+            # The only non-collision failure path still receives cleanup.
+            temp.unlink(missing_ok=True)
+            raise
         info = sf.info(str(temp))
-        if info.channels != 1 or info.frames <= 0 or info.samplerate != rate:
+        if (info.format != "WAV" or info.subtype != "PCM_16" or
+            info.channels != 1 or info.frames != len(audio) or
+            info.samplerate != rate):
             raise RuntimeError("Rendered WAV header does not match mono PCM16.")
+        # This is an intentional cache refresh, never an exported user WAV.
         temp.replace(path)
     finally:
-        temp.unlink(missing_ok=True)
+        # Files this call successfully opened are owned by this writer.
+        if opened:
+            temp.unlink(missing_ok=True)
 
 
 def render_story(
