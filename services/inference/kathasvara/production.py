@@ -183,11 +183,12 @@ def render_story(
                                 )),
                                 np,
                             ).copy()
-                            # Reject oversized model output before concatenating chunks or
-                            # publishing a potentially huge reusable cache entry.
+                            # Bound every chunk to the actual remaining PCM budget,
+                            # including the next speaker pause reserved above. Checking
+                            # only the overall 20-minute cap can allow an oversized
+                            # segment to be concatenated before a later rejection.
                             join_frames = int(rate * 0.12) if part_index else 0
-                            if (samples_total + generated_frames + join_frames + generated.size >
-                                rate * MAX_OUTPUT_SECONDS):
+                            if generated_frames + join_frames + generated.size > remaining_frames:
                                 raise ValueError("Render exceeds the 20-minute audio limit.")
                             # Fade to zero at edit boundaries to avoid hard-edge clicks
                             # when appending neighboring chunk waveforms or silence.
