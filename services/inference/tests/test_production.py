@@ -255,3 +255,41 @@ def test_short_or_zero_speaker_pause_preserves_pcm_and_timing(
     assert retry_engine.calls == []
     assert all(segment["cached"] for segment in retry["segments"])
     assert sf.info(str(tmp_path / "retry.wav")).frames == expected_frames
+
+
+@pytest.mark.parametrize("amplitude", [0.0, 1e-8])
+def test_story_rejects_silent_model_chunks_without_cache(
+    tmp_path: Path, amplitude: float,
+) -> None:
+    """A structurally valid zero-valued waveform is not a spoken segment."""
+    class SilentEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.full(2400, amplitude, dtype=np.float32)
+
+    output = tmp_path / "silent-story.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        render_story(sample_doc(), output, cache, SilentEngine())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+    assert list(cache.glob("*.wav")) == []
+
+
+def test_silent_cached_segment_is_regenerated_before_reuse(tmp_path: Path) -> None:
+    """A previously poisoned PCM cache must not silently replay on retry."""
+    doc = parse_dialogue(
+        "परीक्षण", "Narrator: नमस्कार।", [narrator()], script_id="silent-cache-test",
+    )
+    cache = tmp_path / "cache"
+    render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
+    cached = list(cache.glob("*.wav"))
+    assert len(cached) == 1
+    sf.write(str(cached[0]), np.zeros(2400, dtype=np.float32), 24_000, subtype="PCM_16")
+
+    engine = FakeEngine()
+    result = render_story(doc, tmp_path / "repaired.wav", cache, engine)
+    assert len(engine.calls) == 1
+    assert result["segments"][0]["cached"] is False
+    data, _rate = sf.read(str(cached[0]), dtype="float32")
+    assert np.max(np.abs(data)) > 1.0 / 32768.0
+    assert sf.info(str(tmp_path / "repaired.wav")).frames == 2400
