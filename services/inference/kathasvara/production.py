@@ -214,10 +214,13 @@ def render_story(
                         # RenderJournal.record deliberately does not persist it.
                         "effective_text": normalized,
                     })
-                    if index != len(speech) - 1:
+                    # A zero-millisecond pause is a valid voice setting.
+                    # StreamingWav deliberately rejects empty writes, so skip
+                    # the inter-speaker buffer when no silence was requested.
+                    if index != len(speech) - 1 and pause_frames > 0:
                         silence = np.zeros(pause_frames, dtype=np.float32)
                         output_stream.write(silence)
-                        samples_total += silence.size
+                        samples_total += pause_frames
                     if journal is not None:
                         journal.record(completed[-1])
                     if on_progress is not None:
