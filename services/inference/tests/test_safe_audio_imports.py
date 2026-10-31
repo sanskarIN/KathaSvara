@@ -29,7 +29,8 @@ def _assert_safe_failure(error: pytest.ExceptionInfo[RuntimeError]) -> None:
     # The underlying exception is retained for local debugging, but no private
     # paths, upstream exception messages or filenames enter the UI-facing text.
     visible = str(error.value)
-    assert visible.startswith("Unable to load speech model.") or (
+    assert visible.startswith("Unable to load the speech model:") or (
+        visible.startswith("Unable to load the speech model.") or
         visible.startswith("Audio libraries could not initialize.")
     )
     assert "private" not in visible
