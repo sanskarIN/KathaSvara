@@ -2,8 +2,10 @@ KathaSvara v0.5.3 — Unsigned Windows x64 experimental developer executable
 ===========================================================================
 
 NOT A COMPLETE INSTALLER. NOT STABLE. v0.5.3 is NOT published merely because
-this documentation exists; always verify the actual GitHub prerelease and its
-assets at https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.3.
+this documentation exists; publish and independently verify the v0.5.2
+prerelease before considering v0.5.3. Always verify the actual GitHub
+prerelease and its assets at
+https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.3.
 
 This Windows x64 developer EXE is UNSIGNED and UNBUNDLED. It does not ship
 Python 3.11, Chatterbox Multilingual TTS, PyTorch, model checkpoints,
