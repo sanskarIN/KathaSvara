@@ -37,6 +37,11 @@ jobs:
           previous_prerelease="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.2" --jq '.prerelease')"
           test "$previous_prerelease" = true || { echo "::error::Publish the v0.5.2 prerelease first"; exit 1; }
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.5.2" > /dev/null
+          previous_assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.2" --jq '[.assets[].name] | sort | join(",")')"
+          test "$previous_assets" = "KathaSvara-v0.5.2-dev-win64.exe,README.txt,SHA256SUMS.txt" || {
+            echo "::error::v0.5.2 must have all three verified release companions"
+            exit 1
+          }
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::A full lowercase SHA is required"; exit 1; }
           main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
           test "$main_sha" = "$RELEASE_SHA" || { echo "::error::Release SHA must match current main"; exit 1; }
@@ -193,6 +198,11 @@ jobs:
           # Guard ordering again at publication, not only at initial dispatch.
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.2" --jq '.prerelease')" = true
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.5.2" > /dev/null
+          previous_assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.2" --jq '[.assets[].name] | sort | join(",")')"
+          test "$previous_assets" = "KathaSvara-v0.5.2-dev-win64.exe,README.txt,SHA256SUMS.txt" || {
+            echo "::error::v0.5.2 release companions changed while building"
+            exit 1
+          }
           # Builds may take time. Do not publish an obsolete head even if it
           # matched main when the prepare job originally started.
           current_main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
