@@ -293,3 +293,45 @@ def test_silent_cached_segment_is_regenerated_before_reuse(tmp_path: Path) -> No
     data, _rate = sf.read(str(cached[0]), dtype="float32")
     assert np.max(np.abs(data)) > 1.0 / 32768.0
     assert sf.info(str(tmp_path / "repaired.wav")).frames == 2400
+
+
+def test_chunk_reserves_next_speaker_gap_before_pcm_concatenation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject an over-budget chunk before assembling a large segment buffer."""
+    import kathasvara.production as production
+
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
+    doc = sample_doc()
+    doc.characters[0].voice.pause_ms = 200
+
+    class LongEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.full(22_000, 0.12, dtype=np.float32)
+
+    def unexpected_concatenation(_parts: object) -> None:
+        raise AssertionError("Over-budget PCM must be rejected before concatenation.")
+
+    monkeypatch.setattr(np, "concatenate", unexpected_concatenation)
+    output = tmp_path / "too-long.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(ValueError, match="20-minute audio limit"):
+        render_story(doc, output, cache, LongEngine())
+    assert not output.exists()
+    assert not list(tmp_path.glob("*.partial.wav"))
+    assert not list(cache.glob("*.wav"))
+
+
+def test_early_frame_budget_allows_valid_dialogue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tightened intermediate check must not reject a legal story."""
+    import kathasvara.production as production
+
+    monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 1)
+    doc = sample_doc()
+    doc.characters[0].voice.pause_ms = 200
+    output = tmp_path / "within-budget.wav"
+    report = render_story(doc, output, tmp_path / "cache", FakeEngine())
+    assert len(report["segments"]) == 2
+    assert sf.info(str(output)).frames == 2 * 2_400 + 4_800
