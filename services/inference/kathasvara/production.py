@@ -34,22 +34,58 @@ def _samples(audio: Any, np: Any) -> Any:
     samples = np.asarray(audio, dtype=np.float32).squeeze()
     if samples.ndim != 1 or samples.size == 0 or not np.isfinite(samples).all():
         raise RuntimeError("Inference returned invalid or empty mono samples.")
-    if float(np.max(np.abs(samples))) > 2.0:
+    peak = float(np.max(np.abs(samples)))
+    if peak > 2.0:
         raise RuntimeError("Inference returned implausible sample amplitude.")
+    # The same gate protects both newly synthesized and reused cached WAVs.
+    # A practically silent PCM16 segment must not poison the reusable cache.
+    if peak < 1.0 / 32768.0:
+        raise RuntimeError(
+            "Speech engine returned effectively silent audio. "
+            "Check model weights, hardware and speech generation."
+        )
     return np.clip(samples, -1.0, 1.0)
 
 
 def _atomic_wav(path: Path, audio: Any, rate: int, sf: Any) -> None:
+    """Replace one cache entry without truncating a competing temporary path.
+
+    The cache key may be refreshed on a forced retry; only the UUID-named
+    staging file requires exclusive creation. A collision is not ours to clean.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f"{path.stem}-{uuid.uuid4().hex}.partial.wav")
+    if temp.exists() or temp.is_symlink():
+        raise FileExistsError("Temporary cache WAV already exists.")
+    opened = False
     try:
-        sf.write(str(temp), audio, rate, subtype="PCM_16")
+        try:
+            with sf.SoundFile(
+                str(temp), mode="x", samplerate=rate, channels=1,
+                format="WAV", subtype="PCM_16",
+            ) as stream:
+                opened = True
+                stream.write(audio)
+        except FileExistsError:
+            # A different process may have won the exclusive-create race.
+            # Never unlink its file or follow its symlink.
+            raise
+        except BaseException:
+            # Native initialization can create a partial WAV before failing.
+            # The only non-collision failure path still receives cleanup.
+            temp.unlink(missing_ok=True)
+            raise
         info = sf.info(str(temp))
-        if info.channels != 1 or info.frames <= 0 or info.samplerate != rate:
+        if (info.format != "WAV" or info.subtype != "PCM_16" or
+            info.channels != 1 or info.frames != len(audio) or
+            info.samplerate != rate):
             raise RuntimeError("Rendered WAV header does not match mono PCM16.")
+        # This is an intentional cache refresh, never an exported user WAV.
         temp.replace(path)
     finally:
-        temp.unlink(missing_ok=True)
+        # Files this call successfully opened are owned by this writer.
+        if opened:
+            temp.unlink(missing_ok=True)
 
 
 def render_story(
@@ -84,8 +120,14 @@ def render_story(
     try:
         import numpy as np
         import soundfile as sf
-    except ImportError as exc:
-        raise RuntimeError("Install numpy and soundfile to render.") from exc
+    except Exception as exc:
+        # A present package can still fail to import its native extension
+        # (e.g. a Windows DLL mismatch). Never send its raw exception text,
+        # local filenames or third-party details to the desktop IPC response.
+        raise RuntimeError(
+            "Story audio libraries could not initialize. Check Python 3.11, "
+            "NumPy and SoundFile compatibility; run the local TTS import probe."
+        ) from exc
     # An OS-managed advisory lock spans model loading, WAV composition and cache writes.
     # The kernel releases it on worker exit; never delete the lock sentinel.
     with exclusive_cache_access(cache_dir):
@@ -169,11 +211,12 @@ def render_story(
                                 )),
                                 np,
                             ).copy()
-                            # Reject oversized model output before concatenating chunks or
-                            # publishing a potentially huge reusable cache entry.
+                            # Bound every chunk to the actual remaining PCM budget,
+                            # including the next speaker pause reserved above. Checking
+                            # only the overall 20-minute cap can allow an oversized
+                            # segment to be concatenated before a later rejection.
                             join_frames = int(rate * 0.12) if part_index else 0
-                            if (samples_total + generated_frames + join_frames + generated.size >
-                                rate * MAX_OUTPUT_SECONDS):
+                            if generated_frames + join_frames + generated.size > remaining_frames:
                                 raise ValueError("Render exceeds the 20-minute audio limit.")
                             # Fade to zero at edit boundaries to avoid hard-edge clicks
                             # when appending neighboring chunk waveforms or silence.
@@ -208,10 +251,13 @@ def render_story(
                         # RenderJournal.record deliberately does not persist it.
                         "effective_text": normalized,
                     })
-                    if index != len(speech) - 1:
+                    # A zero-millisecond pause is a valid voice setting.
+                    # StreamingWav deliberately rejects empty writes, so skip
+                    # the inter-speaker buffer when no silence was requested.
+                    if index != len(speech) - 1 and pause_frames > 0:
                         silence = np.zeros(pause_frames, dtype=np.float32)
                         output_stream.write(silence)
-                        samples_total += silence.size
+                        samples_total += pause_frames
                     if journal is not None:
                         journal.record(completed[-1])
                     if on_progress is not None:

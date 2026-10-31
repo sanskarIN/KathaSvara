@@ -43,15 +43,74 @@ Install Python 3.11, stable Rust, Node.js 22 and the system packages documented 
 
 Install the Tauri 2 Xcode/Command Line Tools requirements, Node.js 22, stable Rust and Python 3.11. Follow the Linux Python and Node commands, noting that installed PyTorch and model acceleration compatibility vary by macOS release and hardware.
 
+## Windows developer EXE: check real library imports before launching
+
+In a source checkout, the optional development launcher
+`scripts/windows/launch-with-audio.ps1` can use a configured Python 3.11
+environment with an unsigned developer EXE (still **not** a standalone
+installer). An explicit `-InstallDependencies` switch may download large
+third-party Python packages, but does not download model weights.
+
+Run the model-free doctor from the checkout's root with an existing
+`services/inference/.venv`, or provide `-PythonPath`:
+
+```powershell
+.\scripts\windows\launch-with-audio.ps1 -DoctorOnly
+```
+
+Unlike lightweight Settings dependency discovery, the doctor now also calls
+the **opt-in import probe**, rejecting broken native library/DLL imports or a
+missing Chatterbox multilingual entrypoint before a desktop launch. The probe
+does not call `from_pretrained`, start voice synthesis or verify weights.
+It reports fixed status codes, not raw library exception details. A valid
+import is **not** evidence that model loading, Hindi pronunciation, distinct
+voices or Windows playback will work; an explicitly requested real-model smoke
+test and human listening still remain essential.
+
 ## Troubleshooting
 
 - **Python interpreter not found:** set KATHASVARA_PYTHON to the absolute Python executable inside the environment with chatterbox-tts installed.
 - **No inference source directory:** set KATHASVARA_INFERENCE_DIR to the absolute path of services/inference.
 - **Module not found:** install inference extras in the same interpreter that the desktop uses.
+- **DLL or GPU backend initialization failure:** a discoverable library is not necessarily usable. Run `-DoctorOnly` to test native imports before launching. Both single-voice generation and multi-character story rendering now report native NumPy and SoundFile import failures with fixed, privacy-safe error messages; PyTorch, Chatterbox and device-detection failures use the same approach instead of displaying upstream DLL locations. These messages are diagnostic only; they do not prove audio can be generated.
+- **Silent output despite a successful model call:** both the short narration and multi-character render path reject a chunk whose peak is below one PCM16 quantization step, avoiding a false "WAV ready" result. A cache entry with only effectively silent audio is treated as invalid and regenerated. This is a minimum signal check only; nonzero audio may still be unintelligible or have poor Hindi pronunciation, and human listening remains mandatory.
 - **Model permission/download failure:** check the official upstream model card, connectivity, permissions and available disk. Never bypass gated weights.
 - **Out of memory:** use supported compatible hardware or shorter text. No platform-wide speed or VRAM guarantee is provided.
 - **Export failed:** choose a new WAV filename that does not already exist (the exporter deliberately avoids overwriting files).
 - **Windows packaging:** bundle.active is false until a managed Python runtime and validated installer are implemented.
+
+## Windows: explicit real-model Hindi smoke test (v0.5.3 development only)
+
+The unsigned desktop EXE does **not** bundle Python, Chatterbox, or model weights.
+Run the model-free import doctor from the repository root first:
+
+```powershell
+.\\scripts\\windows\\launch-with-audio.ps1 -DoctorOnly
+```
+
+After installing compatible speech libraries in `services/inference/.venv`
+(or passing `-PythonPath`), explicitly run a **real** Hindi generation test:
+
+```powershell
+.\\scripts\\windows\\launch-with-audio.ps1 -VerifyHindiSpeech
+```
+
+`-VerifyHindiSpeech` may download upstream model weights and consume substantial
+memory, disk and time. It generates a new WAV in the temporary directory, then
+runs the read-only `inspect_generated_wav` bridge on the actual bytes. The
+inspector checks RIFF/PCM16 structure, frame count, measured duration and a
+SHA-256 digest; the launcher also compares reported and inspected durations.
+A near-silent recording fails the speech smoke test; clipping or long-pause
+warnings require closer listening. If the file is corrupt, truncated or
+inconsistent, the command **fails**, even if a file was created.
+
+Passing these checks is **not** proof of natural Hindi speech, correct
+pronunciation, intelligibility, distinct characters or installation readiness.
+Listen to the generated WAV and complete the manual acceptance checklist in
+[issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). The model-free
+unit tests use artificial PCM fixtures and never claim real narration. This
+verification change is proposed for v0.5.3 development and is not present in
+the published v0.5.1 Windows executable.
 
 ## Dev-only standalone speech smoke test
 

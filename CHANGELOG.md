@@ -1,5 +1,75 @@
 # Changelog
 
+## v0.5.3 draft development (not merged or published)
+
+- **Audio generator usability:** document that the current unsigned Windows EXE is not a standalone synthesizer, provide an opt-in PowerShell launcher that configures Python 3.11 and inference sources, diagnoses missing dependencies without model downloads, and can explicitly run a real Hindi WAV smoke test. Add no-download PowerShell syntax checking on Windows CI.
+- **Real WAV retention fix:** Voice Studio now preserves structurally validated recordings above the 25 MiB inline-preview limit and exposes Export WAV instead of deleting them. Add Windows Rust unit coverage for short/long WAV previews and clarify missing audio setup and errors in the desktop UI.
+
+
+- Make **Cancel render** signalling one-shot per active job with explicit requesting/requested waiting states; allow manual retry after cancellation IPC errors. Fix recovery-history race where overlapping **Forget record** operations could leave a deleted row visible, add per-row in-flight protection and filter confirmed deletions from stale list responses. Add no-model React/Tauri regression coverage.
+
+
+- Retire pending plan/audit requests when starting narration so late no-model results cannot contaminate active-render status. Prevent export of a privacy-safe audit report after its source audit was invalidated while choosing a destination; check operation ownership before and after I/O. Add mock-Tauri concurrency tests for late plan/audit replies and obsolete exports.
+
+
+- Isolate asynchronous model-free render plans and production audits by request epoch. Switching documents cancels their UI ownership without letting a late result overwrite the new story or clear a newer loading indicator. Block story saves while narration owns an active render, and suppress late cancellation responses for retired jobs. Cover these cases with mocked desktop concurrency tests.
+
+
+- Validate **Add character**, **Duplicate voice profile**, and **Add scene** synchronously before updating React state. Report rejected edits without invalidating the current generated WAV, and create new clone IDs once outside state updaters. Add mocked desktop tests for rejected duplicate names, ambiguous profiles, overlong titles and deterministic successful changes.
+
+
+- Harden local render/preflight selection: refuse nonexistent or duplicate character IDs and ambiguous scene/line IDs (including duplicate stage directions), while allowing independently valid scene scopes. Disable invalid-speaker line retry with an actionable correction hint. Add unit and mocked desktop tests demonstrating invalid requests never reach Tauri/model IPC.
+
+
+- Guard **Reviewed spoken text** during active parsing/save/render: disable the editor and reject stale blur edits so they cannot retire an in-flight narration or overwrite its source snapshot. A mocked render regression verifies preservation and post-render editing availability.
+
+
+- Add an accessible **Jump to speaker issue** selector with bounded Hindi text previews, clear missing/unassigned speaker labels, and current issue position feedback. Reveal the target despite search filters, focus its speaker dropdown, and disable navigation when resolved. Includes unit and desktop regression tests; no automated character assignments or model calls.
+
+
+- Extend speaker review with a **Previous speaker issue** action: navigate backwards across scenes, wrap to the last pending issue, and continue relative to corrected lines. Reuse the existing focus/highlight and filter-reveal behavior without making edits or invoking speech synthesis. Add reverse-order pure unit and mocked desktop tests.
+
+
+- Add story-wide **Next speaker issue** navigation: jump and focus the next unassigned or invalid spoken line, wrap in original scene order, continue after a repaired line and reset cursor when switching stories. Clear filters that would hide the target; stage directions are excluded and narration/persistence are untouched. Includes model-free and mocked desktop regression tests.
+
+
+- Repair a scene-review blind spot: include non-null speaker IDs absent from the cast in the **needs speaker review** filter, show their per-scene counts separately from unassigned dialogue, warn before saving or rendering, and make stale speaker IDs explicitly visible in the assignment selector. Ignore invalid metadata on unspoken stage directions. Add model-free TypeScript and mocked React/Tauri tests; still draft-only, with v0.5.2 main unchanged.
+
+- Show a collapsible local cast-coverage summary with per-character spoken turns and scene appearances, plus separate counts for stage directions, unassigned dialogue and unknown cast references. Exclude directions from actor appearances; never send, persist or synthesize content when viewing the report. Add deterministic TypeScript and mocked desktop UI tests.
+
+- Isolate desktop render jobs across story switches and edits: cooperatively cancel retired jobs, reset their UI lock, scope progress polling to the current job, discard late audio responses, and prevent obsolete success/error/finally callbacks from clearing a newer narration attempt. Add mocked React/Tauri race regressions; this does not certify a clean-Windows end-user render or human-reviewed Hindi voices.
+
+- Add a cast-specific filter to the local Hindi scene outline: show scenes containing actual spoken dialogue assigned to a selected character. Combine with existing Unicode search and unresolved-speaker review, exclude stage directions from actor appearances, and clear the filter when switching projects or removing a character. Includes model-free TypeScript and mocked desktop regression coverage; no synthesis, persistence or speech-quality claim.
+
+- Introduce a **local searchable scene outline** in the desktop: find Hindi scene titles, original/reviewed dialogue, source labels, stage directions or production notes; filter scenes with unresolved speech assignments; display counts of spoken lines, directions, unknown speakers and notes. Navigation filtering does not edit/synthesize/transmit project content, and selecting a match opens the full scene. Reset private search/filter state when loading another story. Unit and mocked React tests cover normalized Unicode searches, speaker-resolution updates, empty results, clearing filters, story switching and unchanged story data.
+
+- Extend model-free **native Python round-trip tests** to cover merged Hindi scenes with copied production-note context, preserved dialogue IDs and review/cache metadata, source text equality and render preflight counts; assert 4,000-character notes / 2,000-line scene limits at deserialization. This proves schema interoperability in tests, not real device or voice QA.
+
+- Prevent unsaveable editor documents by validating new scene/character IDs before insertion (nonempty, 80-character cap, no controls/outer spaces) and rejecting cross-scene line moves into a full 2,000-line scene. Test both success cases and rejected edits with the original source untouched.
+
+- Add **Merge with next scene (keep dialogue)** as a confirmed, non-destructive structural edit. Joining adjacent scenes retains every existing line in the same order with its speaker, reviewed text, status and audio metadata; the successor scene's title and production notes are kept in nonspoken production notes. Refuse ambiguous IDs, >2000 combined segments or >4000 combined note characters. The original script remains unchanged and explicit Save is required. Add unit and mocked React desktop tests.
+
+
+- Harden existing cast and scene mutation helpers against ambiguous IDs: reject missing or repeated scene/character/line identities during rename, reorder, speaker reassignments and reviewed-speech edits. Preserve generated audio/metadata on unchanged speaker, text or same-scene moves; do not append a line when moving it to its own scene. Disable invalid scene-boundary buttons and block desktop mutation controls during parsing/rendering. Add model-free and mocked desktop regressions.
+
+- Ensure **Duplicate scene** adds copy suffixes without cutting a UTF-16 surrogate pair in a long emoji/mixed Unicode scene title, consistent with scene-splitting title safety; add a Unicode regression test.
+
+- Add **Split scene here** before any non-first spoken line or stage direction. Keep original Hindi source text, pronunciation glossary, actor assignments, reviewed lines, existing per-line audio metadata and overall order unchanged. Place the new scene immediately after the source, give it a unique bounded `(part 2)` title and empty editorial notes, and make Save explicit. Reject duplicate/invalid scene identities, ambiguous line IDs and 200-scene overflow. Cover pure TypeScript and mocked desktop React flows (without speech synthesis).
+
+- Fail closed on ambiguous scene IDs during cross-scene line moves and in-scene reordering, and on malformed generated scene/line IDs during duplication. Keep long Unicode character names within safe UTF-16 input bounds without splitting emoji surrogate pairs; add regression tests. Draft-only, no changes to v0.5.2 release gate.
+
+- Harden **Duplicate voice profile** and character creation against invalid or conflicting IDs, accidental over-capacity casts (100 characters), and overlong Hindi copy names. The desktop disables add/duplicate controls at the native validation limit or during renders. Copied settings remain a configuration profile, **not proof of a distinct generated speaker**. Include model-free TypeScript and React boundary regressions.
+
+- Fix deferred React editor updates by capturing speaker, destination scene, character name and voice-slider input values immediately rather than later reading a mutable browser event object. Add a queued scene-move regression and resolved-speaker integration coverage.
+
+- Fix stale unknown-speaker warnings: the banner now reflects active, unresolved scene lines instead of permanently showing the parser's earlier unknown-label list. Correcting a speaker clears the warning without synthesis.
+
+- Add 4000-character **production notes** for scenes, explicitly excluded from narration, with validation and unsaved-state tracking. Add a **confirmed Delete Scene** action that removes only the selected parsed scene, preserves the original script and other content, and falls back to a neighboring scene selection; cancellation leaves the story untouched. Cover controls and pure edit helpers with tests.
+
+- Support **Duplicate scene (fresh audio)** to copy reviewed Hindi dialogue, actor assignments and stage directions with new scene/line identities while explicitly clearing cached/generated audio metadata. Insert directly after its source with a distinguishable title. Enforce the 200-scene and 256-spoken-cue limits and reject ID conflicts. Add unit and React regressions without copying any model output.
+
+- Add in-scene ↑/↓ reordering controls for dialogue and stage directions without altering the original script, scene IDs, spoken Hindi text or actor assignments. Guard missing/duplicated segment identities, disable edge controls, preserve local data and reuse the existing editor's stale-WAV invalidation and unsaved-state tracking. Add unit and mocked-Tauri React tests. Source draft only; v0.5.2 publication and real Hindi/Windows manual acceptance remain separate. [Development notes](docs/releases/v0.5.3-development.md).
+
 ## Unreleased — v0.5.2 experimental developer pre-release candidate (not published)
 
 - Prevent delayed dialogue parsing, v2 story saves and stored-story loads from overwriting the **current** editor after a user changes documents or edits content. Ignore stale render failure notifications and audit-export completion messages, without claiming to cancel a filesystem write already in progress. Add mocked-Tauri React races and stale-error regressions; no speech model or published pre-release affected.

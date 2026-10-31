@@ -564,6 +564,8 @@ fn invoke_python(request: Value) -> Result<Value, String> {
         Some("synthesize" | "render_story") => Duration::from_secs(600),
         // PCM inspection scans the entire allowed WAV twice without model weights.
         Some("inspect_generated_wav") => Duration::from_secs(180),
+        // Importing torch/Chatterbox can be slow on Windows; no model weights load.
+        Some("probe_runtime") => Duration::from_secs(90),
         _ => Duration::from_secs(15),
     };
     let started = Instant::now();
@@ -617,6 +619,15 @@ async fn inspect_script(text: String) -> Result<TextInspection, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn probe_tts_runtime() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let response = invoke_python(json!({"action": "probe_runtime"}))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Speech import probe returned no result.".to_string())
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -697,6 +708,7 @@ async fn check_engine() -> Result<String, String> {
     Ok("Python bridge available. Model weights have not been verified.".into())
 }
 
+#[cfg(test)]
 fn inspect_wav(data: &[u8]) -> Result<(), String> {
     const INVALID: &str = "Generated audio is not valid mono 16-bit PCM WAV.";
     if data.len() < 44 || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
@@ -763,6 +775,21 @@ fn inspect_wav(data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+// Keep completed long voice-studio recordings exportable even when the WebView
+// cannot embed a WAV larger than 25 MiB in a base64 data URL.
+fn legacy_wav_preview(path: &Path) -> Result<(String, bool, u64), String> {
+    let mut file = fs::File::open(path)
+        .map_err(|_| "The speech engine did not create a WAV.".to_string())?;
+    let opened = file.metadata().map_err(|e| e.to_string())?;
+    let details = inspect_wav_details(&mut file)?;
+    if details.file_bytes > MAX_GENERATED_WAV {
+        return Ok((String::new(), false, details.file_bytes));
+    }
+    let bytes = read_validated_wav_preview(&mut file, &opened, details.file_bytes)?;
+    Ok((format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+        true, details.file_bytes))
+}
+
 #[tauri::command]
 async fn synthesize(
     app: tauri::AppHandle,
@@ -799,22 +826,22 @@ async fn synthesize(
                 return Err(error);
             }
         };
-        let size = fs::metadata(&path).map_err(|_| "Audio file was not created.".to_string())?.len();
-        if size > MAX_GENERATED_WAV {
-            let _ = fs::remove_file(&path);
-            return Err("Generated audio exceeds the preview limit.".into());
-        }
-        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-        inspect_wav(&bytes)?;
+        let (data_url, preview_available, size) = match legacy_wav_preview(&path) {
+            Ok(preview) => preview,
+            Err(error) => {
+                let _ = fs::remove_file(&path);
+                return Err(error);
+            }
+        };
         let result = data.get("result").ok_or("Missing synthesis metadata.")?;
         Ok(AudioResult {
             audio_id,
-            data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+            data_url,
             duration_seconds: result["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
             segment_timings: Vec::new(),
-            preview_available: true,
+            preview_available,
             file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
@@ -1441,7 +1468,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -1977,6 +2004,10 @@ mod tests {
         data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
         data.extend_from_slice(&samples);
         fs::write(&path, &data).unwrap();
+        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&path).unwrap();
+        assert!(inline);
+        assert_eq!(legacy_size, data.len() as u64);
+        assert_eq!(legacy_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
         let response = json!({"result": {
             "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
             "segments": [{
@@ -2016,6 +2047,11 @@ mod tests {
         writer.set_len(44 + u64::from(sample_bytes)).unwrap();
         drop(writer);
         assert!(fs::metadata(&source).unwrap().len() > MAX_GENERATED_WAV);
+        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&source).unwrap();
+        assert!(!inline);
+        assert!(legacy_url.is_empty());
+        assert_eq!(legacy_size, fs::metadata(&source).unwrap().len());
+        assert!(source.exists(), "Large Voice Studio WAV must survive the preview limit");
         copy_validated_wav(&source, &exported).unwrap();
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
         assert!(copy_validated_wav(&source, &exported).is_err());

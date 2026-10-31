@@ -31,10 +31,25 @@ class StreamingWav:
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         if self.destination.exists() or self.destination.is_symlink():
             raise ValueError("Choose a new absolute WAV destination.")
-        self._file = self.sf.SoundFile(
-            str(self._partial), mode="x", samplerate=self.rate,
-            channels=1, format="WAV", subtype="PCM_16",
-        )
+        # A conflicting temporary path is not ours to delete, including an
+        # existing symlink. Even with a UUID name, fail closed on collisions.
+        if self._partial.exists() or self._partial.is_symlink():
+            raise FileExistsError("Temporary audio destination already exists.")
+        # SoundFile may create the file and fail while loading libsndfile.
+        # __exit__ never runs if __enter__ raises, so clean up only when the
+        # failure is not an exclusive-create collision with another writer.
+        try:
+            self._file = self.sf.SoundFile(
+                str(self._partial), mode="x", samplerate=self.rate,
+                channels=1, format="WAV", subtype="PCM_16",
+            )
+        except FileExistsError:
+            # A different process may have raced the preflight path check.
+            # Do not unlink a file whose exclusive creation was rejected.
+            raise
+        except BaseException:
+            self._discard_partial()
+            raise
         return self
 
     def write(self, samples: Any) -> None:
@@ -61,8 +76,19 @@ class StreamingWav:
         os.link(self._partial, self.destination)
         self._published = True
 
+    def _discard_partial(self) -> None:
+        # Do not mask the primary model/audio exception if cleanup also fails.
+        # This name is an unpredictable UUID unique to this writer instance.
+        try:
+            self._partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def __exit__(self, *_exc: object) -> None:
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        self._partial.unlink(missing_ok=True)
+        try:
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+        finally:
+            # A close failure must not strand a partial WAV on disk.
+            self._discard_partial()

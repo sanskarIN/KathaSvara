@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
@@ -14,9 +14,10 @@ import {
 import { serializeProductionManifest, type ProductionAudit } from "./lib/production_manifest";
 import { recoveryHint } from "./lib/recovery_hints";
 import PronunciationStudio from "./PronunciationStudio";
+import { castCoverage, nextSpeakerReviewTarget, previousSpeakerReviewTarget, sceneOverview, speakerReviewChoices, type SpeakerReviewTarget } from "./lib/scene_overview";
 import {
-  addCharacter, addScene, assignSegment, duplicateCharacter, moveScene, moveSegment, renameCharacter, reassignAndRemoveCharacter,
-  renameScene, reviewSpokenText, unresolvedSpeech, type DialogueParseResponse, type StoryV2,
+  addCharacter, addScene, assignSegment, duplicateCharacter, duplicateScene, mergeSceneWithNext, moveScene, moveSegment, moveSegmentWithinScene, renameCharacter, reassignAndRemoveCharacter,
+  removeScene, renameScene, reviewSpokenText, splitSceneAtSegment, unresolvedSpeech, updateSceneNotes, type DialogueParseResponse, type StoryV2,
 } from "./lib/story_v2";
 
 type RenderPlan = {
@@ -60,20 +61,44 @@ function spokenSubtitleLines(doc: StoryV2) {
 export default function CastStudio({ document, onChange, onMessage }: Props) {
   const [newName, setNewName] = useState("");
   const [newSceneTitle, setNewSceneTitle] = useState("");
+  const [sceneSearch, setSceneSearch] = useState("");
+  const [unresolvedScenesOnly, setUnresolvedScenesOnly] = useState(false);
+  const [sceneCharacterFilter, setSceneCharacterFilter] = useState("");
+  const [speakerReviewCursor, setSpeakerReviewCursor] = useState<SpeakerReviewTarget | null>(null);
+  const speakerReviewSelectRef = useRef<HTMLSelectElement | null>(null);
+  useEffect(() => {
+    // A search belongs to the current story; do not hide a newly loaded story
+    // behind the previous author's private dialogue terms or note filters.
+    setSceneSearch("");
+    setUnresolvedScenesOnly(false);
+    setSceneCharacterFilter("");
+    setSpeakerReviewCursor(null);
+  }, [document.id]);
+  useEffect(() => {
+    // If a character is removed while filtering, restore the full outline.
+    if (sceneCharacterFilter && !document.characters.some(char => char.id === sceneCharacterFilter)) {
+      setSceneCharacterFilter("");
+    }
+  }, [document.characters, sceneCharacterFilter]);
   const [busy, setBusy] = useState(false);
   // Only the current parse/save/load operation can own the busy flag.
   const editorOperationEpoch = useRef(0);
   const [dirty, setDirty] = useState(true);
   const [selectedScene, setSelectedScene] = useState<string | null>(null);
-  const [unresolved, setUnresolved] = useState<string[]>([]);
   const [rendering, setRendering] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [cancelStatus, setCancelStatus] = useState<"idle" | "requesting" | "requested">("idle");
+  const cancelRequest = useRef<{ jobId: string; status: "requesting" | "requested" } | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [history, setHistory] = useState<RenderHistory[] | null>(null);
   const [renderPlan, setRenderPlan] = useState<(RenderPlan & { scope: string }) | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
+  // Each plan/audit request owns only its own result and loading indicator.
+  // Older asynchronous operations must not unlock or populate a newer story.
+  const planEpoch = useRef(0);
   const [audit, setAudit] = useState<ProductionAudit | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
+  const auditEpoch = useRef(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [audio, setAudio] = useState<AudioResult | null>(null);
   const [audioExportLabel, setAudioExportLabel] = useState<AudioExportLabel | null>(null);
@@ -96,17 +121,30 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   // Never persisted or transferred to the model: only manual QA for the current WAV.
   const [review, setReview] = useState<AudioReview | null>(null);
   const renderRevision = useRef(0);
+  // Synchronous render ownership: a retired async job cannot finish a newer job.
+  const activeRenderJob = useRef<string | null>(null);
   // Invalidates history reads when the story, render or recovery list changes.
   const historyEpoch = useRef(0);
+  // Forget operations are independent: finishing B before A must still remove
+  // both rows. Tokens prevent an old story's cleanup touching a newer request.
+  const forgetTokens = useRef(new Map<string, number>());
+  const forgetSerial = useRef(0);
+  const forgottenJournalIds = useRef(new Set<string>());
+  const [forgettingIds, setForgettingIds] = useState<string[]>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const currentJob = useRef<string | null>(null);
   const currentAudio = useRef<string | null>(null);
-  currentJob.current = jobId;
   currentAudio.current = audio?.audio_id ?? null;
   useEffect(() => () => {
     renderRevision.current += 1;
     historyEpoch.current += 1;
-    if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+    forgetTokens.current.clear();
+    forgottenJournalIds.current.clear();
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    const abandoned = activeRenderJob.current;
+    activeRenderJob.current = null;
+    cancelRequest.current = null;
+    if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
   }, []);
   useEffect(() => {
@@ -116,7 +154,23 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setBusy(false);
     historyEpoch.current += 1;
     setLoadingHistory(false);
-    if (currentJob.current) void invoke("cancel_story_render", { jobId: currentJob.current }).catch(() => {});
+    forgetTokens.current.clear();
+    forgottenJournalIds.current.clear();
+    setForgettingIds([]);
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    setPlanBusy(false);
+    setAuditBusy(false);
+    // A document switch retires its previous render synchronously. The old
+    // promise may settle later; it is forbidden to clear the new job's UI.
+    const abandoned = activeRenderJob.current;
+    activeRenderJob.current = null;
+    cancelRequest.current = null;
+    setCancelStatus("idle");
+    setJobId(null);
+    setRendering(false);
+    setProgress({ done: 0, total: 0 });
+    if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (currentAudio.current) void invoke("discard_audio", { audioId: currentAudio.current }).catch(() => {});
     audioEpoch.current += 1;
     setAudio(null);
@@ -132,7 +186,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     let active = true;
     const interval = window.setInterval(() => {
       void invoke<{ done: number; total: number }>("story_render_progress", { jobId })
-        .then(result => { if (active) setProgress(result); }).catch(() => {});
+        .then(result => {
+          if (active && activeRenderJob.current === jobId) setProgress(result);
+        }).catch(() => {});
     }, 500);
     return () => {
       active = false;
@@ -146,7 +202,23 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     historyEpoch.current += 1;
     setHistory(null);
     setLoadingHistory(false);
-    if (jobId) void invoke("cancel_story_render", { jobId }).catch(() => {});
+    forgetTokens.current.clear();
+    forgottenJournalIds.current.clear();
+    setForgettingIds([]);
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    setPlanBusy(false);
+    setAuditBusy(false);
+    setRenderPlan(null);
+    setAudit(null);
+    const abandoned = activeRenderJob.current;
+    activeRenderJob.current = null;
+    cancelRequest.current = null;
+    setCancelStatus("idle");
+    setJobId(null);
+    setRendering(false);
+    setProgress({ done: 0, total: 0 });
+    if (abandoned) void invoke("cancel_story_render", { jobId: abandoned }).catch(() => {});
     if (audio) void invoke("discard_audio", { audioId: audio.audio_id }).catch(() => {});
     audioEpoch.current += 1;
     setAudio(null);
@@ -157,24 +229,101 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     setDirty(true);
   }
   function addNewCharacter() {
+    if (busy || rendering) return;
     try {
-      edit(previous => addCharacter(previous, newName));
+      // Validate synchronously: deferred state updaters cannot be caught here,
+      // and a rejected edit must not discard an existing WAV preview.
+      const updated = addCharacter(document, newName);
+      edit(() => updated);
       setNewName("");
     } catch (error) {
       onMessage(errorString(error));
     }
   }
   function duplicateProfile(id: string) {
+    if (busy || rendering) return;
     try {
-      edit(previous => duplicateCharacter(previous, id));
+      // Generate the cloned ID only once, outside React's state updater.
+      const updated = duplicateCharacter(document, id);
+      edit(() => updated);
     } catch (error) {
       onMessage(errorString(error));
     }
   }
   function createScene() {
+    if (busy || rendering) return;
     try {
-      edit(previous => addScene(previous, newSceneTitle));
+      const updated = addScene(document, newSceneTitle);
+      edit(() => updated);
       setNewSceneTitle("");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function duplicateCurrentScene(sceneId: string) {
+    if (busy || rendering) return;
+    try {
+      // Materialize the IDs before the React state updater is scheduled, so
+      // the newly selected scene is the actual clone, not the source scene.
+      const cloned = duplicateScene(document, sceneId);
+      const originalIndex = document.scenes.findIndex(scene => scene.id === sceneId);
+      const copyId = cloned.scenes[originalIndex + 1].id;
+      edit(() => cloned);
+      setSelectedScene(copyId);
+      onMessage("Copied this scene with new line IDs. Old generated audio was not copied; save the story and review any new narration.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function splitCurrentScene(sceneId: string, segmentId: string) {
+    if (busy || rendering) return;
+    try {
+      // Validate and assign the new scene ID before the deferred React updater.
+      const updated = splitSceneAtSegment(document, sceneId, segmentId);
+      const index = updated.scenes.findIndex(scene => scene.id === sceneId);
+      const newScene = updated.scenes[index + 1];
+      edit(() => updated);
+      setSelectedScene(newScene.id);
+      onMessage("Scene split before the selected line. Dialogue order, original script and reviewed Hindi are preserved. Save the story to keep this change.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function mergeCurrentSceneWithNext(sceneId: string) {
+    if (busy || rendering) return;
+    const position = document.scenes.findIndex(scene => scene.id === sceneId);
+    const following = document.scenes[position + 1];
+    if (!following) return;
+    if (!window.confirm(
+      `Merge this scene with the next scene "${following.title}"? ` +
+      "All dialogue lines, voice assignments and cached line metadata are preserved in order. " +
+      "The next scene title and any notes move to nonspoken production notes. " +
+      "The original script is not edited; Save explicitly to keep this merge."
+    )) return;
+    try {
+      // Preflight the entire merge before invalidating the current preview.
+      const updated = mergeSceneWithNext(document, sceneId);
+      edit(() => updated);
+      setSelectedScene(sceneId);
+      onMessage("Adjacent scenes merged. Original script, dialogue order and voice assignments remain unchanged; save to persist.");
+    } catch (error) {
+      onMessage(errorString(error));
+    }
+  }
+  function deleteCurrentScene(sceneId: string, title: string) {
+    if (busy || rendering) return;
+    if (!window.confirm(
+      `Remove scene "${title}" and all its parsed dialogue lines from this edited version? `
+      + "The original script text and other scenes are kept. This change is not saved until you choose Save."
+    )) return;
+    try {
+      const index = document.scenes.findIndex(scene => scene.id === sceneId);
+      if (index < 0) throw new Error("Scene to remove was not found.");
+      const remaining = document.scenes.filter(scene => scene.id !== sceneId);
+      // Select the next visible scene, otherwise the previous one.
+      setSelectedScene(remaining[Math.min(index, remaining.length - 1)]?.id ?? null);
+      edit(previous => removeScene(previous, sceneId));
+      onMessage("Scene removed from this unsaved project. Original script text remains unchanged.");
     } catch (error) {
       onMessage(errorString(error));
     }
@@ -188,7 +337,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function startRender(sceneId?: string, forceSegmentId?: string, forceAll = false) {
-    if (rendering) return;
+    if (busy || rendering || activeRenderJob.current) return;
     let selection;
     try {
       selection = resolveRenderSelection(document, { sceneId, segmentId: forceSegmentId, forceAll });
@@ -201,7 +350,17 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     // unrelated scene tab is selected during playback or export.
     const exportLabel = renderExportLabel(document, id, sceneId, forceSegmentId);
     const revision = renderRevision.current;
+    activeRenderJob.current = id;
+    cancelRequest.current = null;
+    setCancelStatus("idle");
     historyEpoch.current += 1;
+    // An in-flight model-free plan or audit must not publish a late result
+    // while speech generation owns the current story's snapshot.
+    planEpoch.current += 1;
+    auditEpoch.current += 1;
+    setPlanBusy(false);
+    setAuditBusy(false);
+    setAudit(null);
     setLoadingHistory(false);
     setJobId(id);
     setProgress({ done: 0, total: 0 });
@@ -221,7 +380,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         jobId: id,
         ...selection,
       });
-      if (revision !== renderRevision.current) {
+      if (revision !== renderRevision.current || activeRenderJob.current !== id) {
         await invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
         return;
       }
@@ -233,17 +392,25 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         ? "Full-length WAV generated on disk. Inline preview is unavailable above 25 MiB; export the WAV to listen and review."
         : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && activeRenderJob.current === id) {
         onMessage("Scene render stopped or failed: " + errorString(error));
       }
     } finally {
-      setJobId(null);
-      setRendering(false);
+      // If a different story has begun rendering, this obsolete promise may
+      // not clear its progress indicator, cancel control or render lock.
+      if (activeRenderJob.current === id) {
+        activeRenderJob.current = null;
+        cancelRequest.current = null;
+        setCancelStatus("idle");
+        setJobId(null);
+        setRendering(false);
+      }
     }
   }
   async function inspectRenderPlan(sceneId?: string) {
-    if (rendering || planBusy) return;
+    if (busy || rendering || planBusy) return;
     const revision = renderRevision.current;
+    const request = ++planEpoch.current;
     setPlanBusy(true);
     setRenderPlan(null);
     try {
@@ -251,45 +418,47 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const result = await invoke<RenderPlan>("preflight_render", {
         project: document, ...selection,
       });
-      if (revision !== renderRevision.current) return;
+      if (revision !== renderRevision.current || request !== planEpoch.current) return;
       const scope = sceneId
         ? document.scenes.find(scene => scene.id === sceneId)?.title ?? "Selected scene"
         : "Full story";
       setRenderPlan({ ...result, scope });
       onMessage("Model-free plan reviewed: no model loaded and no speech duration or voice quality assumed.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && request === planEpoch.current) {
         onMessage("Render preflight failed: " + errorString(error));
       }
     } finally {
-      setPlanBusy(false);
+      if (request === planEpoch.current) setPlanBusy(false);
     }
   }
 
   async function inspectProductionReadiness() {
-    if (rendering || auditBusy) return;
+    if (busy || rendering || auditBusy) return;
     const revision = renderRevision.current;
+    const request = ++auditEpoch.current;
     setAuditBusy(true);
     setAudit(null);
     try {
       const result = await invoke<ProductionAudit>("audit_production", {
         project: document,
       });
-      if (revision !== renderRevision.current) return;
+      if (revision !== renderRevision.current || request !== auditEpoch.current) return;
       setAudit(result);
       onMessage("Model-free production audit complete. Review each scene before loading the speech model.");
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && request === auditEpoch.current) {
         onMessage("Production audit failed: " + errorString(error));
       }
     } finally {
-      setAuditBusy(false);
+      if (request === auditEpoch.current) setAuditBusy(false);
     }
   }
 
   async function exportProductionManifest() {
-    if (!audit || auditBusy || rendering) return;
+    if (!audit || busy || auditBusy || rendering || activeRenderJob.current) return;
     const revision = renderRevision.current;
+    const auditRequest = auditEpoch.current;
     try {
       // The export allowlist excludes scene/story IDs, private Hindi dialogue,
       // speaker names, voice settings and generated audio paths.
@@ -300,16 +469,20 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         filters: [{ name: "Production audit JSON", extensions: ["json"] }],
       });
       if (!destination) return;
-      if (revision !== renderRevision.current) {
-        onMessage("The story changed while choosing the export location. Run the audit again.");
+      if (revision !== renderRevision.current || auditRequest !== auditEpoch.current ||
+          activeRenderJob.current !== null) {
+        // A newer render invalidated this audit while the destination dialog
+        // was open; never export or acknowledge an obsolete readiness report.
         return;
       }
       await invoke("export_production_manifest", { destination, content });
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && auditRequest === auditEpoch.current &&
+          activeRenderJob.current === null) {
         onMessage("Private-text-free production report exported. It does not prove voice quality or model readiness.");
       }
     } catch (error) {
-      if (revision === renderRevision.current) {
+      if (revision === renderRevision.current && auditRequest === auditEpoch.current &&
+          activeRenderJob.current === null) {
         onMessage("Cannot export production report: " + errorString(error));
       }
     }
@@ -322,7 +495,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     try {
       const records = await invoke<RenderHistory[]>("story_render_history", { storyId: document.id });
       if (revision !== renderRevision.current || epoch !== historyEpoch.current) return;
-      setHistory(records.slice(0, 10));
+      setHistory(records.filter(record => !forgottenJournalIds.current.has(record.job_id)).slice(0, 10));
       onMessage("Local history loaded. Retry is manual: the current entire story will be revalidated with a fresh job ID; only unchanged cached speech can be reused.");
     } catch (error) {
       if (revision === renderRevision.current && epoch === historyEpoch.current) {
@@ -346,29 +519,62 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
   }
 
   async function forgetHistory(job: RenderHistory) {
-    if (job.state === "running") return;
+    if (busy || rendering || job.state === "running" ||
+        job.story_id !== document.id || forgetTokens.current.has(job.job_id)) return;
     if (!window.confirm("Forget this inactive render attempt and its temporary progress/cancel markers? The story, finished WAVs, exports and speech cache will remain unchanged.")) return;
     const revision = renderRevision.current;
-    const epoch = ++historyEpoch.current;
+    const token = ++forgetSerial.current;
+    forgetTokens.current.set(job.job_id, token);
+    setForgettingIds(previous => [...previous, job.job_id]);
+    // Cancel old list reads, but do not invalidate a different record's
+    // concurrent deletion when the user forgets multiple failed attempts.
+    historyEpoch.current += 1;
     setLoadingHistory(false);
     try {
       await invoke("forget_render_journal", { jobId: job.job_id, storyId: job.story_id });
-      if (revision !== renderRevision.current || epoch !== historyEpoch.current) return;
+      if (revision !== renderRevision.current ||
+          forgetTokens.current.get(job.job_id) !== token) return;
+      forgottenJournalIds.current.add(job.job_id);
       setHistory(previous => previous?.filter(item => item.job_id !== job.job_id) ?? null);
       onMessage("Render record and matching bookkeeping markers removed. Projects and completed WAV audio were untouched.");
     } catch (error) {
-      if (revision === renderRevision.current && epoch === historyEpoch.current) {
+      if (revision === renderRevision.current &&
+          forgetTokens.current.get(job.job_id) === token) {
         onMessage("Cannot forget render history: " + errorString(error));
+      }
+    } finally {
+      if (forgetTokens.current.get(job.job_id) === token) {
+        forgetTokens.current.delete(job.job_id);
+        if (revision === renderRevision.current) {
+          setForgettingIds(previous => previous.filter(id => id !== job.job_id));
+        }
       }
     }
   }
 
   async function cancelRender() {
-    if (jobId) {
-      try {
-        await invoke("cancel_story_render", { jobId });
+    const cancelledId = jobId;
+    if (!cancelledId || activeRenderJob.current !== cancelledId ||
+        cancelRequest.current?.jobId === cancelledId) return;
+    const revision = renderRevision.current;
+    // Own the request synchronously before IPC so rapid repeat clicks cannot
+    // dispatch a second cancellation signal for this job.
+    cancelRequest.current = { jobId: cancelledId, status: "requesting" };
+    setCancelStatus("requesting");
+    try {
+      await invoke("cancel_story_render", { jobId: cancelledId });
+      if (revision === renderRevision.current && activeRenderJob.current === cancelledId &&
+          cancelRequest.current?.jobId === cancelledId) {
+        cancelRequest.current = { jobId: cancelledId, status: "requested" };
+        setCancelStatus("requested");
         onMessage("Cancellation requested. The current model chunk may need to finish first.");
-      } catch (error) {
+      }
+    } catch (error) {
+      if (revision === renderRevision.current && activeRenderJob.current === cancelledId &&
+          cancelRequest.current?.jobId === cancelledId) {
+        // If the signalling IPC fails, explicitly allow a retry for this job.
+        cancelRequest.current = null;
+        setCancelStatus("idle");
         onMessage("Unable to signal cancellation: " + errorString(error));
       }
     }
@@ -536,7 +742,6 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       clearWavInspection();
       renderRevision.current += 1;
       onChange({ ...response.result, pronunciation_glossary: document.pronunciation_glossary ?? [] });
-      setUnresolved(response.unresolved);
       setSelectedScene(response.result.scenes[0]?.id ?? null);
       setDirty(true);
       onMessage(response.unresolved.length
@@ -551,7 +756,9 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   async function saveDocument() {
-    if (busy) return;
+    // Saving returns a new parent document object; disallow it mid-render so
+    // the parent rerender cannot silently retire the current narration job.
+    if (busy || rendering || activeRenderJob.current) return;
     const revision = renderRevision.current;
     const op = ++editorOperationEpoch.current;
     setBusy(true);
@@ -602,7 +809,44 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
     }
   }
   const activeScene = document.scenes.find(scene => scene.id === selectedScene) ?? document.scenes[0];
+  const activeCharacterFilter = document.characters.some(char => char.id === sceneCharacterFilter)
+    ? sceneCharacterFilter : "";
+  const visibleScenes = useMemo(() =>
+    sceneOverview(document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter || null),
+    [document, sceneSearch, unresolvedScenesOnly, activeCharacterFilter]);
+  const coverage = useMemo(() => castCoverage(document), [document]);
+  const speakerIssues = useMemo(() => speakerReviewChoices(document), [document]);
+  const selectedSpeakerIssueIndex = speakerReviewCursor === null ? -1 :
+    speakerIssues.findIndex(issue =>
+      issue.sceneId === speakerReviewCursor.sceneId &&
+      issue.segmentId === speakerReviewCursor.segmentId);
+  useEffect(() => {
+    if (speakerReviewCursor?.sceneId === activeScene?.id) {
+      // Focus naturally scrolls the selected speaker control into the scene list.
+      speakerReviewSelectRef.current?.focus();
+    }
+  }, [speakerReviewCursor, activeScene?.id]);
+  function focusSpeakerIssue(target: SpeakerReviewTarget) {
+    if (busy || rendering) return;
+    // Filtering is navigation only, not an edit to the story.
+    setSceneSearch("");
+    setUnresolvedScenesOnly(false);
+    setSceneCharacterFilter("");
+    setSelectedScene(target.sceneId);
+    setSpeakerReviewCursor(target);
+    setRenderPlan(null);
+  }
+  function jumpToSpeakerIssue(direction: -1 | 1) {
+    const target = direction === 1
+      ? nextSpeakerReviewTarget(document, speakerReviewCursor)
+      : previousSpeakerReviewTarget(document, speakerReviewCursor);
+    if (target) focusSpeakerIssue(target);
+  }
   const unresolvedNow = unresolvedSpeech(document);
+  // Derive the alert from the active document, not the one-time parse response:
+  // assigning a previously unknown actor must immediately clear stale warnings.
+  const unknownSpeakerLabels = Array.from(new Set(unresolvedNow.map(segment =>
+    segment.source_label?.trim() || "Unlabeled dialogue")));
   const activeSubtitlePreview = audio && subtitlePreview?.audioId === audio.audio_id
     ? subtitlePreview : null;
   const subtitlePageSize = 10;
@@ -629,39 +873,49 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <div className="cast-add">
           <input aria-label="New character name" placeholder="नया पात्र — e.g. राजा भोज" maxLength={120} value={newName}
             onChange={event => setNewName(event.target.value)} />
-          <button className="secondary-button" onClick={addNewCharacter} disabled={busy || !newName.trim()}>+ Add</button>
+          <button className="secondary-button" onClick={addNewCharacter} disabled={busy || rendering || document.characters.length >= 100 || !newName.trim()}>+ Add</button>
         </div>
         <ul className="cast-list">
           {document.characters.map(char => (
             <li key={char.id}>
               <label>
                 <span>Character name</span>
-                <input value={char.name} disabled={char.id === "narrator"} maxLength={120}
+                <input value={char.name} disabled={char.id === "narrator" || busy || rendering} maxLength={120}
                   onChange={event => {
-                    try { edit(doc => renameCharacter(doc, char.id, event.target.value)); }
-                    catch (error) { onMessage(errorString(error)); }
+                    const nextName = event.target.value;
+                    if (nextName === char.name) return;
+                    try {
+                      renameCharacter(document, char.id, nextName);
+                      edit(doc => renameCharacter(doc, char.id, nextName));
+                    } catch (error) { onMessage(errorString(error)); }
                   }} />
               </label>
               <div className="cast-voice-row">
                 <label>Expression
-                  <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration}
-                    onChange={event => edit(doc => ({
-                      ...doc, characters: doc.characters.map(item => item.id === char.id
-                        ? { ...item, voice: { ...item.voice, exaggeration: Number(event.target.value) } } : item),
-                    }))} />
+                  <input type="range" min="0.25" max="2" step="0.05" value={char.voice.exaggeration} disabled={busy || rendering}
+                    onChange={event => {
+                      const exaggeration = Number(event.target.value);
+                      edit(doc => ({
+                        ...doc, characters: doc.characters.map(item => item.id === char.id
+                          ? { ...item, voice: { ...item.voice, exaggeration } } : item),
+                      }));
+                    }} />
                 </label>
                 <label>CFG
-                  <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight}
-                    onChange={event => edit(doc => ({
-                      ...doc, characters: doc.characters.map(item => item.id === char.id
-                        ? { ...item, voice: { ...item.voice, cfg_weight: Number(event.target.value) } } : item),
-                    }))} />
+                  <input type="range" min="0" max="1" step="0.05" value={char.voice.cfg_weight} disabled={busy || rendering}
+                    onChange={event => {
+                      const cfg_weight = Number(event.target.value);
+                      edit(doc => ({
+                        ...doc, characters: doc.characters.map(item => item.id === char.id
+                          ? { ...item, voice: { ...item.voice, cfg_weight } } : item),
+                      }));
+                    }} />
                 </label>
               </div>
               <p className="helper">Hindi · Chatterbox Multilingual · pause {char.voice.pause_ms} ms · no distinct speaker verified</p>
               <div className="cast-actions">
-                <button className="quiet-button" onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
-                {char.id !== "narrator" && <button className="quiet-button" onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
+                <button className="quiet-button" disabled={busy || rendering || document.characters.length >= 100} onClick={() => duplicateProfile(char.id)}>Duplicate voice profile</button>
+                {char.id !== "narrator" && <button className="quiet-button" disabled={busy || rendering} onClick={() => removeCharacter(char.id, char.name)}>Delete and reassign to narrator</button>}
               </div>
             </li>
           ))}
@@ -674,7 +928,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
         <p>Use labels like <code>राजा भोज: नमस्कार।</code> and scene headings like <code># दरबार</code>. Unknown speaker names are never guessed.</p>
         <div className="cast-actions">
           <button className="secondary-button" disabled={busy || rendering} onClick={() => void parse()}>{busy ? "Processing…" : "Parse labeled Hindi script"}</button>
-          <button className="secondary-button" disabled={busy} onClick={() => void saveDocument()}>Save cast and scenes</button>
+          <button className="secondary-button" disabled={busy || rendering} onClick={() => void saveDocument()}>Save cast and scenes</button>
           <button className="quiet-button" disabled={busy || rendering} onClick={() => void loadDocument()}>Load saved v2</button>
         </div>
         <div className="render-tools">
@@ -696,7 +950,11 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             onClick={() => void inspectProductionReadiness()}>
             {auditBusy ? "Checking scenes…" : "Audit scene readiness (no model)"}
           </button>
-          <button className="quiet-button" disabled={!rendering} onClick={() => void cancelRender()}>Cancel render</button>
+          <button className="quiet-button" disabled={!rendering || cancelStatus !== "idle"}
+            onClick={() => void cancelRender()}>
+            {cancelStatus === "requesting" ? "Requesting cancellation…" :
+              cancelStatus === "requested" ? "Cancellation requested (waiting)" : "Cancel render"}
+          </button>
           <button className="secondary-button" disabled={loadingHistory}
             onClick={() => void showRenderHistory()}>
             {loadingHistory ? "Reading history…" : "Recent render history"}
@@ -719,7 +977,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
             <p className="helper">No model loaded and no speech or distinct voices verified.
               Check local model setup and listen to every generated WAV before publishing.</p>
             <button type="button" className="secondary-button"
-              disabled={auditBusy || rendering}
+              disabled={busy || auditBusy || rendering}
               onClick={() => void exportProductionManifest()}>
               Export privacy-safe audit JSON
             </button>
@@ -756,8 +1014,12 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                     <button className="secondary-button" type="button" disabled={busy || rendering}
                       onClick={() => retryFromHistory(item)}>Retry current full story</button>
                   )}
-                  <button className="quiet-button" type="button" disabled={item.state === "running" || rendering}
-                    onClick={() => void forgetHistory(item)}>Forget record</button>
+                  <button className="quiet-button" type="button"
+                    disabled={busy || item.state === "running" || rendering ||
+                      forgettingIds.includes(item.job_id)}
+                    onClick={() => void forgetHistory(item)}>
+                    {forgettingIds.includes(item.job_id) ? "Forgetting record…" : "Forget record"}
+                  </button>
                 </li>
               ))}</ul>}
           </section>}
@@ -901,43 +1163,184 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
           </>}
         </div>
         <p role="status" className={dirty ? "dirty-label" : "saved-label"}>{dirty ? "● Unsaved character or scene changes" : "✓ Version 2 story saved"}</p>
-        {unresolved.length > 0 && <p role="alert">{unresolved.length} unknown speaker label(s): {unresolved.join(", ")}</p>}
+        {unresolvedNow.length > 0 && <p role="alert">{unresolvedNow.length} unknown speaker label(s): {unknownSpeakerLabels.join(", ")}</p>}
+        {coverage.invalidSpeakerAssignments > 0 && (
+          <p role="alert">{coverage.invalidSpeakerAssignments} spoken line(s) reference missing character IDs. Assign a valid speaker before saving or rendering.</p>
+        )}
         <div className="cast-add">
           <input placeholder="New scene title / नया दृश्य" aria-label="New scene title" value={newSceneTitle}
             maxLength={120} onChange={event => setNewSceneTitle(event.target.value)} />
           <button className="secondary-button" disabled={!newSceneTitle.trim() || busy || rendering} onClick={createScene}>+ Scene</button>
         </div>
+        <div className="scene-outline-controls" aria-label="Scene navigation filters">
+          <label>
+            Find scenes or dialogue
+            <input type="search" aria-label="Find scenes or dialogue" maxLength={120}
+              placeholder="दृश्य, संवाद, या नोट खोजें"
+              value={sceneSearch} onChange={event => setSceneSearch(event.target.value)} />
+          </label>
+          <label className="scene-outline-character">
+            Show scenes for character
+            <select aria-label="Show scenes for character" value={activeCharacterFilter}
+              onChange={event => setSceneCharacterFilter(event.target.value)}>
+              <option value="">All characters</option>
+              {document.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
+            </select>
+          </label>
+          <label className="scene-outline-checkbox">
+            <input type="checkbox" checked={unresolvedScenesOnly}
+              onChange={event => setUnresolvedScenesOnly(event.target.checked)} />
+            Only scenes needing speaker review
+          </label>
+          <button type="button" className="quiet-button" disabled={!sceneSearch && !unresolvedScenesOnly && !activeCharacterFilter}
+            onClick={() => { setSceneSearch(""); setUnresolvedScenesOnly(false); setSceneCharacterFilter(""); }}>
+            Clear scene filters
+          </button>
+        </div>
+        <p className="helper scene-outline-count" aria-live="polite">
+          Showing {visibleScenes.length} of {document.scenes.length} scenes. Search filters navigation only; the selected scene stays open until you choose another.
+        </p>
+        <div className="scene-review-navigation">
+          <button type="button" className="secondary-button"
+            disabled={busy || rendering || speakerIssues.length === 0}
+            onClick={() => jumpToSpeakerIssue(-1)}>Previous speaker issue</button>
+          <button type="button" className="secondary-button"
+            disabled={busy || rendering || speakerIssues.length === 0}
+            onClick={() => jumpToSpeakerIssue(1)}>Next speaker issue</button>
+          <label className="speaker-review-jump">
+            Jump to speaker issue
+            <select aria-label="Jump to speaker issue"
+              value={selectedSpeakerIssueIndex < 0 ? "" : String(selectedSpeakerIssueIndex)}
+              disabled={busy || rendering || speakerIssues.length === 0}
+              onChange={event => {
+                if (event.target.value === "") return;
+                const index = Number(event.target.value);
+                if (Number.isSafeInteger(index) && speakerIssues[index]) {
+                  focusSpeakerIssue(speakerIssues[index]);
+                }
+              }}>
+              <option value="">Choose dialogue to review…</option>
+              {speakerIssues.map((issue, index) => (
+                <option key={issue.sceneId + ":" + issue.segmentId + ":" + index}
+                  value={String(index)}>{issue.label}</option>
+              ))}
+            </select>
+          </label>
+          <span role="status" aria-live="polite">
+            {speakerIssues.length} spoken line(s) need manual speaker review.
+            {selectedSpeakerIssueIndex >= 0 &&
+              ` Issue ${selectedSpeakerIssueIndex + 1} of ${speakerIssues.length}: ${speakerIssues[selectedSpeakerIssueIndex].reason === "invalid" ? "missing character" : "unassigned"}.`}
+          </span>
+        </div>
+        <details className="cast-coverage">
+          <summary>Local cast coverage · {coverage.spokenLines} spoken · {coverage.directions} directions</summary>
+          <p className="helper">Model-free line counts only, not verified different voices.
+            {" "}{coverage.unassignedSpeech} unassigned spoken line(s).
+            {coverage.invalidSpeakerAssignments > 0 &&
+              ` ${coverage.invalidSpeakerAssignments} invalid character assignment(s) require repair before saving.`}
+          </p>
+          <ul aria-label="Cast coverage by character">
+            {coverage.characters.map(actor => (
+              <li key={actor.characterId}>
+                <span>{actor.characterName}</span>
+                <small>{actor.spokenLines} spoken · {actor.sceneCount} scene(s)</small>
+              </li>
+            ))}
+          </ul>
+        </details>
         <div className="scene-navigation" aria-label="Scenes">
-          {document.scenes.map(scene => (
-            <button key={scene.id} className={"quiet-button " + (activeScene?.id === scene.id ? "selected-scene" : "")}
-              onClick={() => { setSelectedScene(scene.id); setRenderPlan(null); }}>{scene.title}</button>
+          {visibleScenes.map(scene => (
+            <button type="button" key={scene.id} aria-label={scene.title}
+              className={"quiet-button scene-outline-entry " + (activeScene?.id === scene.id ? "selected-scene" : "")}
+              onClick={() => { setSelectedScene(scene.id); setSpeakerReviewCursor(null); setRenderPlan(null); }}>
+              <span>{scene.title}</span>
+              <small aria-hidden="true" className="scene-outline-meta">
+                {scene.spoken} spoken · {scene.directions} directions
+                {scene.unresolved > 0 ? ` · ${scene.unresolved} unassigned` : ""}
+                {scene.invalidSpeakers > 0 ? ` · ${scene.invalidSpeakers} invalid speaker ID(s)` : ""}
+                {scene.hasProductionNotes ? " · notes" : ""}
+              </small>
+            </button>
           ))}
         </div>
+        {visibleScenes.length === 0 && (
+          <p className="helper">No matching scenes. Clear filters to show all scenes; your original story has not changed.</p>
+        )}
         {activeScene ? (
           <>
             <div className="cast-actions">
               <label className="scene-title-label">Scene title
-                <input value={activeScene.title} maxLength={120} onChange={event => {
+                <input value={activeScene.title} disabled={busy || rendering} maxLength={120} onChange={event => {
                   const title = event.target.value;
-                  if (!title.trim()) return;
+                  if (!title.trim() || title.trim() === activeScene.title) return;
                   edit(doc => renameScene(doc, activeScene.id, title));
                 }} />
               </label>
-              <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
-              <button className="quiet-button" onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering || document.scenes[0]?.id === activeScene.id}
+                onClick={() => edit(doc => moveScene(doc, activeScene.id, -1))}>↑ Move up</button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering || document.scenes[document.scenes.length - 1]?.id === activeScene.id}
+                onClick={() => edit(doc => moveScene(doc, activeScene.id, 1))}>↓ Move down</button>
+              <button type="button" className="secondary-button"
+                disabled={busy || rendering || document.scenes.length >= 200}
+                onClick={() => duplicateCurrentScene(activeScene.id)}>
+                Duplicate scene (fresh audio)
+              </button>
+              <button type="button" className="secondary-button"
+                disabled={busy || rendering || document.scenes[document.scenes.length - 1]?.id === activeScene.id}
+                onClick={() => mergeCurrentSceneWithNext(activeScene.id)}>
+                Merge with next scene (keep dialogue)
+              </button>
+              <button type="button" className="quiet-button"
+                disabled={busy || rendering}
+                onClick={() => deleteCurrentScene(activeScene.id, activeScene.title)}>
+                Delete scene (keep original script)
+              </button>
             </div>
+            <label className="reviewed-dialogue-label">
+              Production notes for this scene (not spoken)
+              <textarea lang="hi" rows={3} maxLength={4000}
+                aria-label="Scene production notes (not spoken)"
+                value={activeScene.notes}
+                disabled={busy || rendering}
+                placeholder="Optional staging or editing notes. Never synthesized as speech."
+                onChange={event => {
+                  const next = event.target.value;
+                  if (next === activeScene.notes) return;
+                  try {
+                    updateSceneNotes(document, activeScene.id, next);
+                    edit(previous => updateSceneNotes(previous, activeScene.id, next));
+                  } catch (error) {
+                    onMessage(errorString(error));
+                  }
+                }} />
+            </label>
+            <p className="helper">Production notes are stored with this scene, not read aloud, and do not alter the original script or dialogue text.</p>
             <ol className="scene-segments">
-              {activeScene.segments.map(segment => (
-                <li key={segment.id}>
+              {activeScene.segments.map((segment, index) => (
+                <li key={segment.id} className={speakerReviewCursor?.sceneId === activeScene.id &&
+                  speakerReviewCursor.segmentId === segment.id ? "speaker-review-target" : undefined}>
                   <div className="segment-header">
                     <span>{segment.kind === "direction" ? "Stage direction (not spoken)" : "Spoken segment"}</span>
                     {segment.kind === "speech" && (
-                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)} value={segment.speaker_id ?? ""}
+                      <select aria-label={"Speaker for " + segment.original_text.slice(0, 30)}
+                        ref={speakerReviewCursor?.sceneId === activeScene.id &&
+                          speakerReviewCursor.segmentId === segment.id ? speakerReviewSelectRef : undefined}
+                        value={segment.speaker_id ?? ""} disabled={busy || rendering}
                         onChange={event => {
-                          try { edit(doc => assignSegment(doc, segment.id, event.target.value)); }
-                          catch (error) { onMessage(errorString(error)); }
+                          const speakerId = event.target.value;
+                          if (speakerId === segment.speaker_id && segment.source_label === null) return;
+                          try {
+                            assignSegment(document, segment.id, speakerId);
+                            edit(doc => assignSegment(doc, segment.id, speakerId));
+                          } catch (error) { onMessage(errorString(error)); }
                         }}>
                         <option value="">Unassigned — manual correction required</option>
+                        {segment.speaker_id !== null &&
+                          !document.characters.some(char => char.id === segment.speaker_id) && (
+                            <option value={segment.speaker_id} disabled>Invalid character ID — choose a valid speaker</option>
+                          )}
                         {document.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
                       </select>
                     )}
@@ -948,7 +1351,14 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                      <textarea key={segment.id + segment.spoken_text} lang="hi"
                        aria-label={"Reviewed speech for " + segment.id}
                        defaultValue={segment.spoken_text} rows={2} maxLength={100_000}
+                       disabled={busy || rendering}
                        onBlur={event => {
+                         // Reject any delayed blur from an editor locked for a
+                         // render or asynchronous parse/save operation.
+                         if (busy || rendering) {
+                           event.currentTarget.value = segment.spoken_text;
+                           return;
+                         }
                          const next = event.currentTarget.value;
                          if (next === segment.spoken_text) return;
                          try {
@@ -961,28 +1371,61 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
                          }
                        }} />
                    </label>}
+                  <div className="cast-actions" aria-label={"Order controls for " + segment.id}>
+                    <button type="button" className="quiet-button"
+                      aria-label={"Move line " + segment.id + " up"}
+                      disabled={busy || rendering || index === 0}
+                      onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, -1))}>
+                      ↑ Line up
+                    </button>
+                    <button type="button" className="quiet-button"
+                      aria-label={"Move line " + segment.id + " down"}
+                      disabled={busy || rendering || index === activeScene.segments.length - 1}
+                      onClick={() => edit(doc => moveSegmentWithinScene(doc, segment.id, 1))}>
+                      ↓ Line down
+                    </button>
+                    {index > 0 && (
+                      <button type="button" className="secondary-button"
+                        aria-label={"Split scene before line " + segment.id}
+                        disabled={busy || rendering || document.scenes.length >= 200}
+                        onClick={() => splitCurrentScene(activeScene.id, segment.id)}>
+                        Split scene here
+                      </button>
+                    )}
+                  </div>
                   <label className="move-segment-label">Move line to scene
-                    <select aria-label={"Move line " + segment.id} value={activeScene.id}
+                    <select aria-label={"Move line " + segment.id} value={activeScene.id} disabled={busy || rendering || document.scenes.length < 2}
                       onChange={event => {
-                        try { edit(doc => moveSegment(doc, segment.id, event.target.value)); }
-                        catch (error) { onMessage(errorString(error)); }
+                        const destinationId = event.target.value;
+                        if (destinationId === activeScene.id) return;
+                        try {
+                          moveSegment(document, segment.id, destinationId);
+                          edit(doc => moveSegment(doc, segment.id, destinationId));
+                        } catch (error) { onMessage(errorString(error)); }
                       }}>
                       {document.scenes.map(scene => <option key={scene.id} value={scene.id}>{scene.title}</option>)}
                     </select>
                   </label>
-                  {segment.kind === "speech" && segment.speaker_id && (
-                    <button className="quiet-button" disabled={rendering}
-                      onClick={() => void startRender(activeScene.id, segment.id)}>
-                      Regenerate / retry this line only
-                    </button>
+                  {segment.kind === "speech" && segment.speaker_id !== null && (
+                    <>
+                      <button className="quiet-button"
+                        disabled={busy || rendering ||
+                          document.characters.filter(char => char.id === segment.speaker_id).length !== 1}
+                        onClick={() => void startRender(activeScene.id, segment.id)}>
+                        Regenerate / retry this line only
+                      </button>
+                      {document.characters.filter(char => char.id === segment.speaker_id).length !== 1 &&
+                        <small className="dirty-label">Invalid speaker ID. Choose a valid character before regenerating.</small>}
+                    </>
                   )}
-                  {segment.kind === "speech" && segment.speaker_id === null && <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
+                  {segment.kind === "speech" && segment.speaker_id === null &&
+                    <small className="dirty-label">Unknown speaker: {segment.source_label}. Assign manually.</small>}
                 </li>
               ))}
             </ol>
           </>
         ) : <p>No scenes parsed yet. The original story text remains unchanged.</p>}
-        <p className="helper">{unresolvedNow.length} unresolved speech segments. Actual distinct-character audio is not yet a supported feature. Source scripts are retained independently of parsed text.</p>
+        <p className="helper">{coverage.unassignedSpeech + coverage.invalidSpeakerAssignments} spoken segment(s) need speaker review ({coverage.unassignedSpeech} unassigned, {coverage.invalidSpeakerAssignments} invalid IDs). Actual distinct-character audio is not yet a supported feature. Source scripts are retained independently of parsed text.</p>
       </div>
     </section>
   );

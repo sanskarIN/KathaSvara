@@ -6,8 +6,11 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Any
+
+from .inference_errors import describe_model_failure
 
 
 @dataclass(frozen=True)
@@ -32,19 +35,34 @@ class ChatterboxHindi:
         try:
             import torch
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        except ImportError as exc:
+        except Exception as exc:
+            # Native extension failures (especially Windows DLL loading) can be
+            # OSError/RuntimeError, not just ImportError. Never send their
+            # potentially private paths to the desktop IPC response.
+            raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
+        # A broken GPU probing library can prevent a valid CPU setup from
+        # reaching inference. Only an explicit, documented override bypasses
+        # auto-detection; never silently downgrade or reinterpret a typo.
+        requested = os.getenv("KATHASVARA_TTS_DEVICE", "auto").strip().lower()
+        if requested not in {"auto", "cpu"}:
             raise RuntimeError(
-                'Speech engine missing. Install Python 3.11 and pip install -e ".[tts]".'
-            ) from exc
-        # Not every installed PyTorch build supports the MPS backend.
-        mps = getattr(torch.backends, "mps", None)
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif mps is not None and mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
-        self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+                "Unsupported TTS device override. Use auto or cpu."
+            )
+        try:
+            if requested == "cpu":
+                device = "cpu"
+            else:
+                # Auto mode retains the existing CUDA -> MPS -> CPU priority.
+                mps = getattr(torch.backends, "mps", None)
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif mps is not None and mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
+            self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        except Exception as exc:
+            raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
 
     @property
     def sample_rate(self) -> int:
@@ -56,9 +74,12 @@ class ChatterboxHindi:
         if self._model is None:
             raise RuntimeError("Model is not loaded.")
         settings.validate()
-        return self._model.generate(
-            text,
-            language_id="hi",
-            exaggeration=settings.exaggeration,
-            cfg_weight=settings.cfg_weight,
-        )
+        try:
+            return self._model.generate(
+                text,
+                language_id="hi",
+                exaggeration=settings.exaggeration,
+                cfg_weight=settings.cfg_weight,
+            )
+        except Exception as exc:
+            raise RuntimeError(describe_model_failure(exc, stage="generate")) from exc

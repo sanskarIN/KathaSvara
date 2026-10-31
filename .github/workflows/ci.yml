@@ -40,11 +40,28 @@ jobs:
         run: |
           echo '{"action":"diagnose"}' | python -m kathasvara.cli | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok'] and r['result']['model_weights_verified'] is False and r['result']['audio_synthesis_verified'] is False"
 
+      - name: Verify the TTS import probe never claims real model verification
+        working-directory: services/inference
+        run: |
+          echo '{"action":"probe_runtime"}' | python -m kathasvara.cli | python -c "import json,sys; r=json.load(sys.stdin); assert r['ok']; p=r['result']; assert set(p['checks']) == {'numpy','soundfile','torch','chatterbox_multilingual'}; assert p['model_weights_verified'] is False and p['audio_synthesis_verified'] is False"
+
   journal-windows:
     name: Windows Python journal atomicity (no model)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate Windows audio launcher syntax without installing dependencies
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE 'scripts/windows/launch-with-audio.ps1'),
+            [ref]$null, [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
