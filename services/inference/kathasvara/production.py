@@ -84,8 +84,14 @@ def render_story(
     try:
         import numpy as np
         import soundfile as sf
-    except ImportError as exc:
-        raise RuntimeError("Install numpy and soundfile to render.") from exc
+    except Exception as exc:
+        # A present package can still fail to import its native extension
+        # (e.g. a Windows DLL mismatch). Never send its raw exception text,
+        # local filenames or third-party details to the desktop IPC response.
+        raise RuntimeError(
+            "Story audio libraries could not initialize. Check Python 3.11, "
+            "NumPy and SoundFile compatibility; run the local TTS import probe."
+        ) from exc
     # An OS-managed advisory lock spans model loading, WAV composition and cache writes.
     # The kernel releases it on worker exit; never delete the lock sentinel.
     with exclusive_cache_access(cache_dir):
