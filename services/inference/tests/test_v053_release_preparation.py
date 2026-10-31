@@ -36,6 +36,10 @@ def test_next_release_is_manual_and_requires_published_previous_version() -> Non
         assert "KathaSvara-v0.5.2-dev-win64.exe,README.txt,SHA256SUMS.txt" in section
     assert 'test "$GITHUB_REF" = "refs/heads/main"' in prepare
     assert 'test "$main_sha" = "$RELEASE_SHA"' in prepare
+    assert "Stop before compilation if v0.5.3 versions are not synchronized" in prepare
+    assert 'ref: ${{ steps.verify.outputs.sha }}' in prepare
+    assert 'version = "0.5.3"' in prepare
+    assert '"version": "0.5.3"' in prepare
     assert 'test "$current_main_sha" = "$RELEASE_SHA"' in publish
     assert 'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"' in publish
 
