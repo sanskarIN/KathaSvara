@@ -17,6 +17,7 @@ from typing import Any
 from .audio_stream import StreamingWav
 from .cache_lock import exclusive_cache_access
 from .engine import ChatterboxHindi, VoiceSettings
+from .pcm_signal import effectively_silent_pcm
 from .render_journal import RenderJournal
 from .render_preflight import prepare_render_plan
 from .story import StoryDocument
@@ -37,9 +38,9 @@ def _samples(audio: Any, np: Any) -> Any:
     peak = float(np.max(np.abs(samples)))
     if peak > 2.0:
         raise RuntimeError("Inference returned implausible sample amplitude.")
-    # The same gate protects both newly synthesized and reused cached WAVs.
-    # A practically silent PCM16 segment must not poison the reusable cache.
-    if peak < 1.0 / 32768.0:
+    # Check global RMS, not just peaks: a single impulse amid silence is not
+    # meaningful PCM16 narration. Apply to both fresh and cached segments.
+    if effectively_silent_pcm(samples, np):
         raise RuntimeError(
             "Speech engine returned effectively silent audio. "
             "Check model weights, hardware and speech generation."
