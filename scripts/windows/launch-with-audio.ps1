@@ -75,6 +75,12 @@ if ($InstallDependencies) {
 # The Windows user's persistent environment and registry are untouched.
 $env:KATHASVARA_PYTHON = $python
 $env:KATHASVARA_INFERENCE_DIR = $inference
+if ($CpuOnly) {
+    # Bypass a failing CUDA/MPS availability probe in the Python adapter.
+    # Applies only to this script and the child EXE, not the user's registry.
+    $env:KATHASVARA_TTS_DEVICE = "cpu"
+    Write-Host "CPU-only TTS selected. Rendering may be slower; real speech is unverified."
+}
 
 Write-Host "Checking the configured Python bridge without loading a speech model..."
 Push-Location $inference
