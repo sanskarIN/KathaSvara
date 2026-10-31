@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 PCM16_QUANTIZATION_STEP = 1.0 / 32768.0
 
 
