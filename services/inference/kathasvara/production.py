@@ -34,8 +34,16 @@ def _samples(audio: Any, np: Any) -> Any:
     samples = np.asarray(audio, dtype=np.float32).squeeze()
     if samples.ndim != 1 or samples.size == 0 or not np.isfinite(samples).all():
         raise RuntimeError("Inference returned invalid or empty mono samples.")
-    if float(np.max(np.abs(samples))) > 2.0:
+    peak = float(np.max(np.abs(samples)))
+    if peak > 2.0:
         raise RuntimeError("Inference returned implausible sample amplitude.")
+    # The same gate protects both newly synthesized and reused cached WAVs.
+    # A practically silent PCM16 segment must not poison the reusable cache.
+    if peak < 1.0 / 32768.0:
+        raise RuntimeError(
+            "Speech engine returned effectively silent audio. "
+            "Check model weights, hardware and speech generation."
+        )
     return np.clip(samples, -1.0, 1.0)
 
 
