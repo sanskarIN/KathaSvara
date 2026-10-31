@@ -8,7 +8,8 @@ param(
     [string]$PythonPath = "",
     [switch]$InstallDependencies,
     [switch]$DoctorOnly,
-    [switch]$VerifyHindiSpeech
+    [switch]$VerifyHindiSpeech,
+    [switch]$CpuOnly
 )
 
 Set-StrictMode -Version Latest
