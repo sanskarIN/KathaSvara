@@ -9,6 +9,19 @@ import pytest
 from kathasvara import runtime_probe
 
 
+class CompatibleFakeChatterbox:
+    """Exposes the upstream optional keywords but never loads any model."""
+
+    @classmethod
+    def from_pretrained(cls, *, device: str, t3_model: str | None = None) -> object:
+        raise AssertionError("No model weights may be loaded by the import probe.")
+
+    def generate(
+        self, text: str, language_id: str, audio_prompt_path: str | None = None,
+    ) -> object:
+        raise AssertionError("The import probe may not synthesize audio.")
+
+
 def test_import_probe_reports_all_available_without_claiming_audio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -36,6 +49,8 @@ def test_import_probe_reports_all_available_without_claiming_audio(
     assert report["tts_model_variant"] == "v2"
     assert report["model_configuration_valid"] is True
     assert report["reference_voice_status"] == "not_set"
+    assert report["upstream_api_status"] == "not_requested"
+    assert report["upstream_api_compatible"] is True
     assert report["preflight_ok"] == report["imports_ok"]
     assert report["failed_components"] == []
     assert report["model_weights_verified"] is False
@@ -116,13 +131,16 @@ def test_model_selection_probe_never_echoes_invalid_values_or_loads_weights(
 ) -> None:
     monkeypatch.setattr(
         runtime_probe.importlib, "import_module",
-        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=object()),
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=CompatibleFakeChatterbox),
     )
     monkeypatch.setenv("KATHASVARA_TTS_MODEL", selected)
     monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
     report = runtime_probe.probe_runtime()
     assert report["tts_model_variant"] == expected
     assert report["model_configuration_valid"] is valid
+    assert report["upstream_api_status"] == (
+        "compatible" if selected.strip().lower() == "v3" else "not_requested"
+    )
     assert report["preflight_ok"] == (valid and report["imports_ok"])
     if not valid:
         assert selected not in str(report)
