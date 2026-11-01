@@ -30,8 +30,19 @@ class ChatterboxHindi:
 
     def __init__(self) -> None:
         self._model: Any = None
+        self._model_variant = "v2"
+
+    @property
+    def model_variant(self) -> str:
+        """Checkpoint family loaded into this adapter (used by the segment cache)."""
+        return self._model_variant
 
     def load(self) -> None:
+        # Preserve the original v2 default. v3 is a user-selected experiment,
+        # never an implicit download or a source of mixed-checkpoint cache hits.
+        requested_variant = os.getenv("KATHASVARA_TTS_MODEL", "v2").strip().lower()
+        if requested_variant not in {"v2", "v3"}:
+            raise RuntimeError("Unsupported TTS model variant. Use v2 or v3.")
         try:
             import torch
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
@@ -60,7 +71,17 @@ class ChatterboxHindi:
                     device = "mps"
                 else:
                     device = "cpu"
-            self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+            if requested_variant == "v3":
+                # Upstream multilingual V3 accepts an explicit t3_model selector.
+                # Older chatterbox-tts installations may need updating first.
+                self._model = ChatterboxMultilingualTTS.from_pretrained(
+                    device=device, t3_model="v3",
+                )
+            else:
+                # Do not pass t3_model for legacy runtimes: this preserves
+                # behavior and compatibility with historical v2 installations.
+                self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+            self._model_variant = requested_variant
         except Exception as exc:
             raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
 

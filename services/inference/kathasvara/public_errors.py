@@ -14,6 +14,7 @@ from .inference_errors import describe_model_failure
 _SAFE_FIXED_MESSAGES = frozenset({
     "Unsupported action.",
     "Unsupported TTS device override. Use auto or cpu.",
+    "Unsupported TTS model variant. Use v2 or v3.",
     "Enter Hindi story text before generating.",
     "Invalid render job ID.",
     "Assign every unknown speaker manually before rendering.",

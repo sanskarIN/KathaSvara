@@ -9,7 +9,8 @@ param(
     [switch]$InstallDependencies,
     [switch]$DoctorOnly,
     [switch]$VerifyHindiSpeech,
-    [switch]$CpuOnly
+    [switch]$CpuOnly,
+    [switch]$ModelV3
 )
 
 Set-StrictMode -Version Latest
@@ -81,6 +82,11 @@ if ($CpuOnly) {
     $env:KATHASVARA_TTS_DEVICE = "cpu"
     Write-Host "CPU-only TTS selected. Rendering may be slower; real speech is unverified."
 }
+if ($ModelV3) {
+    # An explicitly opted-in multilingual checkpoint, not a silent migration.
+    $env:KATHASVARA_TTS_MODEL = "v3"
+    Write-Warning "Experimental multilingual V3 selected. First generation may download additional model weights; your chatterbox-tts must support t3_model=v3."
+}
 
 Write-Host "Checking the configured Python bridge without loading a speech model..."
 Push-Location $inference
@@ -126,10 +132,14 @@ if (-not $importProbe.result.preflight_ok) {
     if (-not $importProbe.result.device_configuration_valid) {
         $failed += "KATHASVARA_TTS_DEVICE (must be auto or cpu)"
     }
+    if (-not $importProbe.result.model_configuration_valid) {
+        $failed += "KATHASVARA_TTS_MODEL (must be v2 or v3)"
+    }
     Fail ("Speech runtime preflight failed: " + ($failed -join ", ") +
-        ". Repair your Python 3.11 TTS environment or device override before launching the app.")
+        ". Repair the Python TTS environment or override before launching the app.")
 }
 Write-Host ("Speech preflight passed (device: " + $importProbe.result.tts_device_mode +
+    "; model: " + $importProbe.result.tts_model_variant +
     "). Model weights, hardware capability and Hindi audio are NOT verified.")
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 

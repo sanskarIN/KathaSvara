@@ -38,6 +38,8 @@ type RuntimeImportProbe = {
   imports_ok: boolean;
   tts_device_mode: "auto" | "cpu" | "invalid";
   device_configuration_valid: boolean;
+  tts_model_variant: "v2" | "v3" | "invalid";
+  model_configuration_valid: boolean;
   preflight_ok: boolean;
   model_weights_verified: false;
   audio_synthesis_verified: false;
@@ -311,7 +313,7 @@ export default function App() {
       setImportProbe(report);
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
-        : "TTS preflight needs attention: check dependency imports and the requested speech device in Settings.");
+        : "TTS preflight needs attention: check dependency imports, model variant and speech device in Settings.");
     } catch (error) {
       setMessage("TTS import probe could not run: " + errorMessage(error));
     } finally {
@@ -548,7 +550,7 @@ export default function App() {
                 {probingImports ? "Verifying speech library imports…" : "Verify speech library imports (no model load)"}
               </button>
               <p className="helper">Dependency discovery only checks for installed modules. The optional import preflight checks whether
-                their Python imports work and whether the device override is valid; neither test loads model weights or generates speech.</p>
+                their Python imports work and whether the device and model overrides are valid; neither test loads model weights or generates speech.</p>
               {importProbe && (
                 <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
                   <h3>TTS import check: {importProbe.preflight_ok ? "Imports passed" : "Setup needs attention"}</h3>
@@ -557,6 +559,13 @@ export default function App() {
                     ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
                     {" "}({importProbe.device_configuration_valid ? "configuration accepted" : "fix before generating"})
                   </p>
+                  <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "invalid"
+                    ? "Invalid override — use v2 or v3" : importProbe.tts_model_variant}
+                    {" "}({importProbe.model_configuration_valid ? "selection accepted" : "fix before generating"})
+                  </p>
+                  <p className="helper">V3 is opt-in through KATHASVARA_TTS_MODEL=v3 and may need updated
+                    Chatterbox software and additional weights. This selection check does not download
+                    weights or establish real Hindi generation quality.</p>
                   <ul>
                     {Object.entries(importProbe.checks).map(([module, result]) => (
                       <li key={module}><strong>{module}</strong>: {result === "ok"

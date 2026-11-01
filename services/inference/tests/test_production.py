@@ -77,6 +77,36 @@ def test_second_render_reuses_cache_without_regenerating(tmp_path: Path) -> None
     assert first_report["duration_seconds"] == second_report["duration_seconds"]
 
 
+def test_different_checkpoints_never_reuse_speech_cache(tmp_path: Path) -> None:
+    doc = sample_doc()
+    cache = tmp_path / "cache"
+    v2 = FakeEngine()
+    first = render_story(doc, tmp_path / "v2-first.wav", cache, v2)
+    assert len(v2.calls) == 2
+
+    # The engine adapter exposes its exact loaded checkpoint family, rather
+    # than inferring it from character profiles or the model ID string.
+    v3 = FakeEngine()
+    v3.model_variant = "v3"
+    second = render_story(doc, tmp_path / "v3-first.wav", cache, v3)
+    assert len(v3.calls) == 2
+    assert {part["cache_key"] for part in first["segments"]}.isdisjoint(
+        {part["cache_key"] for part in second["segments"]}
+    )
+
+    v3_again = FakeEngine()
+    v3_again.model_variant = "v3"
+    third = render_story(doc, tmp_path / "v3-again.wav", cache, v3_again)
+    assert v3_again.calls == []
+    assert all(part["cached"] for part in third["segments"])
+
+    v2_again = FakeEngine()
+    fourth = render_story(doc, tmp_path / "v2-again.wav", cache, v2_again)
+    assert v2_again.calls == []
+    assert all(part["cached"] for part in fourth["segments"])
+    assert len(list(cache.glob("*.wav"))) == 4
+
+
 def test_render_rejects_unresolved_speaker_before_loading_model(tmp_path: Path) -> None:
     doc = parse_dialogue("A", "अज्ञात: नमस्ते।", [narrator()])
     mock = FakeEngine()

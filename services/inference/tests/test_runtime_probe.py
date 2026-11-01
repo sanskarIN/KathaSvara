@@ -22,6 +22,7 @@ def test_import_probe_reports_all_available_without_claiming_audio(
 
     monkeypatch.setattr(runtime_probe.importlib, "import_module", import_ok)
     monkeypatch.delenv("KATHASVARA_TTS_DEVICE", raising=False)
+    monkeypatch.delenv("KATHASVARA_TTS_MODEL", raising=False)
     report = runtime_probe.probe_runtime()
     assert requested == ["numpy", "soundfile", "torch", "chatterbox.mtl_tts"]
     assert report["checks"] == {
@@ -31,6 +32,8 @@ def test_import_probe_reports_all_available_without_claiming_audio(
     assert report["imports_ok"] == (sys.version_info[:2] == (3, 11))
     assert report["tts_device_mode"] == "auto"
     assert report["device_configuration_valid"] is True
+    assert report["tts_model_variant"] == "v2"
+    assert report["model_configuration_valid"] is True
     assert report["preflight_ok"] == report["imports_ok"]
     assert report["failed_components"] == []
     assert report["model_weights_verified"] is False
@@ -97,6 +100,30 @@ def test_cpu_override_passes_configuration_check_without_loading_model(
     assert report["tts_device_mode"] == "cpu"
     assert report["device_configuration_valid"] is True
     assert report["preflight_ok"] == report["imports_ok"]
+    assert report["model_weights_verified"] is False
+    assert report["audio_synthesis_verified"] is False
+
+
+@pytest.mark.parametrize(("selected", "expected", "valid"), [
+    ("v2", "v2", True),
+    (" V3 ", "v3", True),
+    (r"C:\private\model", "invalid", False),
+])
+def test_model_selection_probe_never_echoes_invalid_values_or_loads_weights(
+    monkeypatch: pytest.MonkeyPatch, selected: str, expected: str, valid: bool,
+) -> None:
+    monkeypatch.setattr(
+        runtime_probe.importlib, "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=object()),
+    )
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", selected)
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    report = runtime_probe.probe_runtime()
+    assert report["tts_model_variant"] == expected
+    assert report["model_configuration_valid"] is valid
+    assert report["preflight_ok"] == (valid and report["imports_ok"])
+    if not valid:
+        assert selected not in str(report)
     assert report["model_weights_verified"] is False
     assert report["audio_synthesis_verified"] is False
 

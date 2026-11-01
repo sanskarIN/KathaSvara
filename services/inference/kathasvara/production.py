@@ -160,11 +160,20 @@ def render_story(
                     normalized, chunks = line.effective_text, line.chunks
                     # Cache key represents model ID and all *supported* settings only.
                     # The model ID should incorporate the exact revision when known.
-                    fingerprint = json.dumps({
+                    cache_contract = {
                         "v": 2, "model": profile.model_id, "engine": profile.engine_id,
                         "text": normalized, "exaggeration": profile.exaggeration,
                         "cfg_weight": profile.cfg_weight, "rate": rate,
-                    }, sort_keys=True, ensure_ascii=False)
+                    }
+                    # Existing v2 caches remain addressable. Alternate
+                    # checkpoints MUST NOT reuse the default model's speech,
+                    # even with identical story text and voice sliders.
+                    checkpoint = getattr(adapter, "model_variant", "v2")
+                    if checkpoint != "v2":
+                        cache_contract["checkpoint"] = checkpoint
+                    fingerprint = json.dumps(
+                        cache_contract, sort_keys=True, ensure_ascii=False,
+                    )
                     key = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
                     cached = cache_dir / f"{key}.wav"
                     # Reserve the next silence before reading a reusable WAV into

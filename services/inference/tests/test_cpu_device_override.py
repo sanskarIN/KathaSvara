@@ -33,8 +33,8 @@ def _install_fake_runtime(
             raise OSError("MPS probe failed")
         return mps_available
 
-    def from_pretrained(*, device: str) -> object:
-        selected.append(device)
+    def from_pretrained(*, device: str, t3_model: str | None = None) -> object:
+        selected.append(device if t3_model is None else f"{device}/{t3_model}")
         return SimpleNamespace(sr=24_000)
 
     torch = types.ModuleType("torch")
@@ -91,6 +91,50 @@ def test_invalid_device_override_is_safe_and_does_not_load_weights(
         monkeypatch, cuda_available=False, mps_available=False,
     )
     with pytest.raises(RuntimeError, match="Unsupported TTS device override") as caught:
+        ChatterboxHindi().load()
+    assert selected == []
+    assert public_error_message(caught.value) == str(caught.value)
+    assert invalid not in str(caught.value)
+
+
+def test_v3_explicitly_selects_new_checkpoint_and_tracks_variant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", " V3 ")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=True, mps_available=True,
+        fail_gpu_probe=True,
+    )
+    adapter = ChatterboxHindi()
+    adapter.load()
+    assert selected == ["cpu/v3"]
+    assert adapter.model_variant == "v3"
+
+
+def test_v2_does_not_pass_new_checkpoint_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v2")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+    )
+    adapter = ChatterboxHindi()
+    adapter.load()
+    assert selected == ["cpu"]
+    assert adapter.model_variant == "v2"
+
+
+@pytest.mark.parametrize("invalid", ["v4", "custom", "v3;secrets", r"C:\private\model"])
+def test_invalid_checkpoint_selection_never_loads_weights(
+    monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", invalid)
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+    )
+    with pytest.raises(RuntimeError, match="Unsupported TTS model variant") as caught:
         ChatterboxHindi().load()
     assert selected == []
     assert public_error_message(caught.value) == str(caught.value)
