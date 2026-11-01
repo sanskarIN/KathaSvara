@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // SPDX-License-Identifier: MPL-2.0
 // The Settings TTS doctor must never silently trigger speech generation.
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -105,6 +105,59 @@ describe("session-only consented reference selection (no model)", () => {
       "synthesize", expect.objectContaining({ referenceWavPath: privatePath }),
     ));
     expect(document.body.textContent).not.toContain(privatePath);
+  });
+
+  it("does not restore a cleared session reference from a late dialog", async () => {
+    const original = "C:\\Users\\private\\original.wav";
+    const obsolete = "C:\\Users\\private\\obsolete.wav";
+    let completePicker: (value: string) => void = () => {
+      throw new Error("Picker was not started");
+    };
+    mocks.open.mockResolvedValueOnce(original).mockImplementationOnce(() =>
+      new Promise<string>(resolve => { completePicker = resolve; }));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Clear session voice selection" }));
+    await act(async () => { completePicker(obsolete); });
+    expect(screen.queryByRole("button", { name: "Clear session voice selection" })).toBeNull();
+    expect(screen.getByText(/Launcher default \(if available\)/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain(original);
+    expect(document.body.textContent).not.toContain(obsolete);
+  });
+
+  it("ignores a completed probe for a superseded local voice reference", async () => {
+    let completeProbe: (value: typeof GOOD_IMPORTS) => void = () => {
+      throw new Error("Probe was not started");
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "probe_tts_runtime") {
+        return new Promise<typeof GOOD_IMPORTS>(resolve => { completeProbe = resolve; });
+      }
+      throw new Error("Unexpected command: " + command);
+    });
+    mocks.open.mockResolvedValue("C:\\Users\\private\\latest.wav");
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime", {
+      referenceWavPath: null,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    await act(async () => { completeProbe(GOOD_IMPORTS); });
+    expect(screen.queryByRole("status", { name: "TTS import probe result" })).toBeNull();
+    expect(screen.getByText(/Run the no-model TTS preflight before generating/)).toBeTruthy();
+    expect(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    })).not.toHaveProperty("disabled", true);
   });
 
   it("keeps prior selection when the reference picker is cancelled", async () => {
