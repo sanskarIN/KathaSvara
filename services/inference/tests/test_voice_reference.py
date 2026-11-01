@@ -100,7 +100,6 @@ def test_reference_sha_tracks_contents_not_path(tmp_path: Path) -> None:
     assert inspect_reference_wav(b) != inspect_reference_wav(a)
 
 
-@pytest.mark.parametrize("bad", ["missing", "relative", "text", "short", "truncated"])
 def test_same_size_reference_rewrite_during_hash_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,6 +147,7 @@ def test_same_size_reference_replacement_during_hash_is_rejected(
     assert str(tmp_path) not in str(caught.value)
 
 
+@pytest.mark.parametrize("bad", ["missing", "relative", "text", "short", "truncated"])
 def test_invalid_reference_never_leaks_file_path(
     tmp_path: Path, bad: str,
 ) -> None:
