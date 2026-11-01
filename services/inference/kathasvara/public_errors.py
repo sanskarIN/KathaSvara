@@ -8,7 +8,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 from .inference_errors import describe_model_failure
-from .voice_reference import REFERENCE_ERROR
+from .voice_reference import REFERENCE_CHANGED_ERROR, REFERENCE_ERROR
 
 # These strings are complete KathaSvara-owned messages, not prefixes. Unknown
 # text (even if it begins with a known phrase) is never sent to the desktop.
@@ -17,6 +17,7 @@ _SAFE_FIXED_MESSAGES = frozenset({
     "Unsupported TTS device override. Use auto or cpu.",
     "Unsupported TTS model variant. Use v2 or v3.",
     REFERENCE_ERROR,
+    REFERENCE_CHANGED_ERROR,
     ("Model has no built-in voice conditioning. Supply your own "
      "consented reference WAV with the Windows audio helper."),
     "Enter Hindi story text before generating.",
