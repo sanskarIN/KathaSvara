@@ -45,6 +45,11 @@ def verify_smoke_output(output: Path, synthesis: dict[str, Any]) -> dict[str, An
             "Real Hindi smoke WAV is near-silent. "
             "Check the model, output audio and speech runtime."
         )
+    if report["level_hints"]["dc_only_hint"]:
+        raise RuntimeError(
+            "Real Hindi smoke WAV contains only a constant signal. "
+            "Check the model, output audio and speech runtime."
+        )
     return report
 
 
