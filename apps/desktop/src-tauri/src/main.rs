@@ -10,7 +10,7 @@ use std::{
     fs,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
@@ -588,6 +588,24 @@ fn apply_reference_selection(
     Ok(())
 }
 
+/// Write potentially large Hindi story requests without blocking the caller's
+/// watchdog before the Python process has finished importing its modules.
+fn spawn_request_writer<W: Write + Send + 'static>(
+    mut stdin: W,
+    payload: Vec<u8>,
+) -> thread::JoinHandle<Result<(), String>> {
+    thread::spawn(move || {
+        stdin.write_all(&payload)
+            .map_err(|_| "Unable to send synthesis request.".to_string())
+        // Drop stdin here to signal EOF to Python's bounded sys.stdin.read().
+    })
+}
+
+fn stop_inference_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn invoke_python(request: Value) -> Result<Value, String> {
     invoke_python_with_reference(request, None)
 }
@@ -615,15 +633,20 @@ fn invoke_python_with_reference(
     )?;
     let mut child = command.spawn()
         .map_err(|_| "Python 3.11 runtime not found. Configure KATHASVARA_PYTHON.".to_string())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(request.to_string().as_bytes())
-            .map_err(|_| "Unable to send synthesis request.".to_string())?;
-    }
-    // Drain child stdout concurrently to avoid a full pipe deadlocking JSON IPC.
-    let stdout = child.stdout.take()
-        .ok_or_else(|| "Python stdout was not connected.".to_string())?;
+    // Both pipes must be acquired before launching I/O. If Python startup is
+    // slow and the request exceeds the OS pipe buffer, a synchronous write
+    // would block here BEFORE the timeout loop could ever start.
+    let Some(stdin) = child.stdin.take() else {
+        stop_inference_child(&mut child);
+        return Err("Python stdin was not connected.".into());
+    };
+    let Some(stdout) = child.stdout.take() else {
+        drop(stdin);
+        stop_inference_child(&mut child);
+        return Err("Python stdout was not connected.".into());
+    };
     let output_reader = thread::spawn(move || read_bounded_response(stdout));
+    let input_writer = spawn_request_writer(stdin, request.to_string().into_bytes());
     let configured_timeout = std::env::var("KATHASVARA_TTS_JOB_TIMEOUT_SECONDS").ok();
     let max_wait = python_job_timeout(
         request.get("action").and_then(Value::as_str),
@@ -635,21 +658,25 @@ fn invoke_python_with_reference(
             Ok(Some(_)) => break,
             Ok(None) => {}
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop_inference_child(&mut child);
+                // Closing the child pipes also unblocks the I/O workers.
                 return Err("Unable to monitor the local inference process.".into());
             }
         }
         if started.elapsed() >= max_wait {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_inference_child(&mut child);
+            // Never wait for the writer/reader on this failure path; their
+            // pipes close after termination, preventing a stuck UI job.
             return Err("Local inference timed out. Check model installation or hardware.".into());
         }
         thread::sleep(Duration::from_millis(100));
     }
     let status = child.wait().map_err(|_| "Cannot collect inference process status.".to_string())?;
+    let request_status = input_writer.join()
+        .map_err(|_| "Inference input writer terminated unexpectedly.".to_string())?;
     let response = output_reader.join()
         .map_err(|_| "Inference output reader terminated unexpectedly.".to_string())??;
+    request_status?;
     // Upstream model libraries may print progress to stdout. The final JSON
     // response is a complete line, not necessarily the entire output stream.
     let data: Value = response
