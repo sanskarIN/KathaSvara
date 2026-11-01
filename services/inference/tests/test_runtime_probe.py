@@ -21,6 +21,7 @@ def test_import_probe_reports_all_available_without_claiming_audio(
         return SimpleNamespace()
 
     monkeypatch.setattr(runtime_probe.importlib, "import_module", import_ok)
+    monkeypatch.delenv("KATHASVARA_TTS_DEVICE", raising=False)
     report = runtime_probe.probe_runtime()
     assert requested == ["numpy", "soundfile", "torch", "chatterbox.mtl_tts"]
     assert report["checks"] == {
@@ -28,6 +29,9 @@ def test_import_probe_reports_all_available_without_claiming_audio(
         "chatterbox_multilingual": "ok",
     }
     assert report["imports_ok"] == (sys.version_info[:2] == (3, 11))
+    assert report["tts_device_mode"] == "auto"
+    assert report["device_configuration_valid"] is True
+    assert report["preflight_ok"] == report["imports_ok"]
     assert report["failed_components"] == []
     assert report["model_weights_verified"] is False
     assert report["audio_synthesis_verified"] is False
@@ -60,6 +64,41 @@ def test_wrong_chatterbox_api_is_detected(monkeypatch: pytest.MonkeyPatch) -> No
     assert report["checks"]["chatterbox_multilingual"] == "entrypoint_missing"
     assert report["failed_components"] == ["chatterbox_multilingual"]
     assert report["imports_ok"] is False
+
+
+def test_invalid_device_override_is_safe_and_blocks_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_probe.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=object()),
+    )
+    secret = r"C:\Users\private\device-value"
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", secret)
+    report = runtime_probe.probe_runtime()
+    assert report["imports_ok"] == (sys.version_info[:2] == (3, 11))
+    assert report["device_configuration_valid"] is False
+    assert report["tts_device_mode"] == "invalid"
+    assert report["preflight_ok"] is False
+    assert secret not in str(report)
+
+
+def test_cpu_override_passes_configuration_check_without_loading_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_probe.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=object()),
+    )
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", " CPU ")
+    report = runtime_probe.probe_runtime()
+    assert report["tts_device_mode"] == "cpu"
+    assert report["device_configuration_valid"] is True
+    assert report["preflight_ok"] == report["imports_ok"]
+    assert report["model_weights_verified"] is False
+    assert report["audio_synthesis_verified"] is False
 
 
 def test_cli_exposes_probe_without_speech_generation(monkeypatch: pytest.MonkeyPatch) -> None:
