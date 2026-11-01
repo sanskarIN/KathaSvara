@@ -34,18 +34,23 @@ def _dbfs(amplitude: float) -> float | None:
 
 
 def _level_hints(
-    *, peak: int, squared_sum: int, clipped: int, frames: int, rate: int,
+    *, peak: int, squared_sum: int, sample_sum: int, clipped: int, frames: int, rate: int,
     longest_internal_pause_frames: int, longest_internal_pause_start: int | None,
 ) -> dict[str, object]:
     rms = math.sqrt(squared_sum / frames)
     rms_dbfs = _dbfs(rms)
     quiet = rms_dbfs is None or rms_dbfs <= QUIET_RMS_DBFS
+    # PCM16 integer variance avoids subtractive floating-point cancellation.
+    # A loud constant/DC-only WAV has a healthy raw RMS but no AC speech signal.
+    centered_energy = squared_sum * frames - sample_sum * sample_sum
+    dc_only = not quiet and centered_energy < frames * frames
     possible_clipping = clipped / frames >= CLIPPING_SAMPLE_FRACTION
     long_pause = longest_internal_pause_frames >= rate * LONG_INTERNAL_PAUSE_SECONDS
     return {
         "peak_dbfs": _dbfs(peak),
         "rms_dbfs": rms_dbfs,
         "near_silence_hint": quiet,
+        "dc_only_hint": dc_only,
         "possible_clipping_hint": possible_clipping,
         "clipped_sample_percentage": round(100 * clipped / frames, 3),
         # Report the *longest internal* quiet span only. Leading and trailing
@@ -61,7 +66,7 @@ def _level_hints(
         "long_internal_pause_hint": long_pause,
         # These simple PCM statistics are never evidence of Hindi narration
         # quality, even when every automated signal hint is false.
-        "signal_review_required": quiet or possible_clipping or long_pause,
+        "signal_review_required": quiet or dc_only or possible_clipping or long_pause,
     }
 
 
@@ -166,6 +171,7 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                 # in bounded chunks to confirm all claimed PCM samples exist.
                 seen = 0
                 squared_sum = 0
+                sample_sum = 0
                 peak = 0
                 clipped = 0
                 # Stream across block boundaries; do not retain audio arrays.
@@ -191,6 +197,7 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                     for value in pcm:
                         amplitude = abs(value)
                         squared_sum += value * value
+                        sample_sum += value
                         peak = max(peak, amplitude)
                         if amplitude >= 32767:
                             clipped += 1
@@ -211,7 +218,8 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
                 if seen != frames:
                     raise ValueError("WAV audio is truncated or the frame count is incorrect.")
                 levels = _level_hints(
-                    peak=peak, squared_sum=squared_sum, clipped=clipped, frames=seen,
+                    peak=peak, squared_sum=squared_sum, sample_sum=sample_sum,
+                    clipped=clipped, frames=seen,
                     rate=rate, longest_internal_pause_frames=longest_internal_pause_frames,
                     longest_internal_pause_start=longest_internal_pause_start,
                 )
