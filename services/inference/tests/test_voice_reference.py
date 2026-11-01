@@ -97,6 +97,24 @@ def test_invalid_reference_never_leaks_file_path(
     assert "private-voice.wav" not in str(caught.value)
 
 
+def test_silent_voice_reference_is_rejected(tmp_path: Path) -> None:
+    silent = tmp_path / "silent.wav"
+    make_reference(silent, value=0)
+    with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
+        inspect_reference_wav(silent)
+
+
+def test_sparse_spike_voice_reference_is_rejected(tmp_path: Path) -> None:
+    filename = tmp_path / "spike.wav"
+    make_reference(filename, value=0)
+    raw = bytearray(filename.read_bytes())
+    # Change one PCM16 sample while leaving the WAV header intact.
+    raw[44:46] = (50).to_bytes(2, "little", signed=True)
+    filename.write_bytes(raw)
+    with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
+        inspect_reference_wav(filename)
+
+
 def test_reference_symlink_not_followed(tmp_path: Path) -> None:
     original = tmp_path / "original.wav"
     link = tmp_path / "reference.wav"
