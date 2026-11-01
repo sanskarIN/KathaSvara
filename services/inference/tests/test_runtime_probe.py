@@ -208,6 +208,33 @@ def test_installed_legacy_chatterbox_cannot_claim_reference_support(
     assert str(local_voice) not in str(report)
 
 
+def test_kwargs_only_chatterbox_wrapper_is_unverifiable_for_v3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OpaqueChatterbox:
+        @classmethod
+        def from_pretrained(cls, **kwargs: object) -> None:
+            raise AssertionError("No model loading during preflight.")
+
+        def generate(self, **kwargs: object) -> None:
+            raise AssertionError("No generation during preflight.")
+
+    monkeypatch.setattr(
+        runtime_probe.importlib, "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=OpaqueChatterbox),
+    )
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v3")
+    monkeypatch.delenv("KATHASVARA_TTS_REFERENCE_WAV", raising=False)
+    report = runtime_probe.probe_runtime()
+    assert report["imports_ok"] == (sys.version_info[:2] == (3, 11))
+    assert report["upstream_api_status"] == "unverifiable"
+    assert report["upstream_api_compatible"] is False
+    assert report["preflight_ok"] is False
+    assert report["model_weights_verified"] is False
+    assert report["audio_synthesis_verified"] is False
+
+
 def test_reference_probe_never_returns_private_local_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path,
 ) -> None:
