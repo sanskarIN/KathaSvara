@@ -16,6 +16,11 @@ _SAFE_FIXED_MESSAGES = frozenset({
     "Unsupported action.",
     "Unsupported TTS device override. Use auto or cpu.",
     "Unsupported TTS model variant. Use v2 or v3.",
+    ("Installed Chatterbox does not support the selected V3 checkpoint. "
+     "Update Chatterbox or choose V2."),
+    ("Installed Chatterbox does not support reference voice WAVs. "
+     "Update Chatterbox or clear the session reference."),
+    "Chatterbox model API is unavailable. Check speech package installation.",
     REFERENCE_ERROR,
     REFERENCE_CHANGED_ERROR,
     ("Model has no built-in voice conditioning. Supply your own "
