@@ -44,6 +44,10 @@ powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -ModelV3 -Ve
 
 The first command checks Python imports, the requested checkpoint name **and whether the installed Chatterbox API declares the V3 `t3_model` option**, without downloading weights; the second intentionally runs real generation and may download large V3 weights. On an already configured environment use `KATHASVARA_TTS_MODEL=v3` in the **child process environment**. The default `v2` continues to call the legacy API without a new `t3_model` keyword. V2 and V3 have separate speech cache entries so switching does not silently reuse a prior checkpoint's WAV. The Settings preflight and DoctorOnly inspect the selected optional API keywords, but they cannot verify model loading or checkpoint access; if actual V3 loading fails, review the upstream Chatterbox version, approved model access, and local hardware.
 
+### Python startup and large story requests
+
+If Chatterbox/PyTorch imports are slow or a long story produces a large JSON request, the desktop bridge now sends Python stdin and drains stdout on worker threads **before enforcing the configured job timeout**. A full stdin pipe therefore cannot block the main watchdog; an unresponsive worker is terminated and reaped when the job's deadline expires. Diagnostics remain separately bounded, and a timeout still does not prove whether models, checkpoint weights or actual Hindi audio work. Retry a short sentence, inspect Settings diagnostics, and only then attempt the longer render or explicitly opt in to a longer supported timeout.
+
 ### Longer local generation jobs on slow CPUs
 
 The desktop normally limits an individual speech job to **10 minutes of wall-clock time**. That is not a guaranteed completion time: genuine model downloads, CPU inference and longer story renders can take more. If you deliberately want a longer limit for the **desktop EXE launched from this helper**, choose 10–120 minutes:
