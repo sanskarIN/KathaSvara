@@ -1496,7 +1496,7 @@ fn main() {
 mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
-    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new();
+    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn speech_timeout_is_opt_in_bounded_and_defaults_to_ten_minutes() {
