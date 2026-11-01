@@ -57,7 +57,9 @@ class WrappedApi:
     (V3OnlyApi, True, True, "reference_unsupported"),
     (CompatibleApi, True, True, "compatible"),
     (CompatibleApi, False, True, "compatible"),
-    (WrappedApi, True, True, "compatible"),
+    (WrappedApi, True, True, "unverifiable"),
+    (WrappedApi, True, False, "unverifiable"),
+    (WrappedApi, False, True, "unverifiable"),
     (None, True, False, "unavailable"),
     (SimpleNamespace(), True, False, "v3_unsupported"),
 ])
@@ -67,6 +69,15 @@ def test_opt_in_api_signature_diagnostics(
     assert inspect_chatterbox_api(
         api, needs_v3=v3, needs_reference=reference,
     ) == expected
+
+
+def test_opaque_wrapper_does_not_certify_optional_checkpoint_or_prompt() -> None:
+    assert inspect_chatterbox_api(
+        WrappedApi, needs_v3=True, needs_reference=True,
+    ) == "unverifiable"
+    assert inspect_chatterbox_api(
+        WrappedApi, needs_v3=False, needs_reference=False,
+    ) == "not_requested"
 
 
 def test_default_v2_does_not_require_new_api_signature() -> None:

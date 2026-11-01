@@ -116,6 +116,24 @@ describe("local TTS import doctor (no model)", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
   });
 
+  it("does not certify an opaque Chatterbox wrapper as V3-compatible", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      tts_model_variant: "v3",
+      upstream_api_status: "unverifiable",
+      upstream_api_compatible: false,
+      preflight_ok: false,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/Setup needs attention/)).toBeTruthy();
+    expect(within(report).getByText(/Cannot verify the installed API signatures/)).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
   it("detects an installed Chatterbox version missing reference prompts", async () => {
     mocks.invoke.mockResolvedValue({
       ...GOOD_IMPORTS,
