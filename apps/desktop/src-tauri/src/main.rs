@@ -1548,14 +1548,15 @@ mod tests {
 
     #[test]
     fn selected_reference_is_child_scoped_and_restricted_to_audio_actions() {
-        let folder = tempfile::tempdir().unwrap();
-        let path = folder.path().join("consented-voice.wav");
+        let path = std::env::temp_dir().join(format!(
+            "kathasvara-consented-{}.wav", Uuid::new_v4(),
+        ));
         fs::write(&path, b"placeholder: Python validates actual PCM").unwrap();
         let path_text = path.to_str().unwrap();
         let mut command = Command::new("python");
         apply_reference_selection(&mut command, Some("synthesize"), Some(path_text)).unwrap();
         let child_env = command.get_envs().find(|(name, _)| {
-            name == "KATHASVARA_TTS_REFERENCE_WAV"
+            *name == "KATHASVARA_TTS_REFERENCE_WAV"
         });
         assert_eq!(
             child_env.and_then(|(_, value)| value).map(std::path::Path::new),
@@ -1567,12 +1568,14 @@ mod tests {
             &mut other_command, Some("diagnose"), Some(path_text),
         ).is_err());
         assert!(other_command.get_envs().next().is_none());
+        fs::remove_file(&path).unwrap();
     }
 
     #[test]
     fn selected_reference_rejects_missing_non_wav_and_relative_paths_without_leaking() {
-        let folder = tempfile::tempdir().unwrap();
-        let path = folder.path().join("private-note.wav");
+        let path = std::env::temp_dir().join(format!(
+            "kathasvara-missing-private-{}.wav", Uuid::new_v4(),
+        ));
         let source = path.to_str().unwrap();
         let mut command = Command::new("python");
         let error = apply_reference_selection(
