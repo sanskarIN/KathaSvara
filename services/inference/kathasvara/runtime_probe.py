@@ -8,6 +8,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 
 _MODULES = (
@@ -35,18 +36,28 @@ def probe_runtime() -> dict[str, object]:
 
     incompatible_python = sys.version_info[:2] != (3, 11)
     failed = [name for name, result in checks.items() if result != "ok"]
+    # Never echo an arbitrary environment value into the UI: it could contain
+    # private paths or tokens. Validate configuration without loading weights.
+    requested_device = os.getenv("KATHASVARA_TTS_DEVICE", "auto").strip().lower()
+    device_valid = requested_device in {"auto", "cpu"}
+    imports_ok = not incompatible_python and not failed
     return {
         "python_311": not incompatible_python,
         "checks": checks,
         "failed_components": failed,
-        "imports_ok": not incompatible_python and not failed,
+        "imports_ok": imports_ok,
+        "tts_device_mode": requested_device if device_valid else "invalid",
+        "device_configuration_valid": device_valid,
+        # Import checks and device configuration are NOT a model readiness test.
+        "preflight_ok": imports_ok and device_valid,
         "model_weights_verified": False,
         "audio_synthesis_verified": False,
         "help": (
             "Use Python 3.11 and install the inference project with "
             '`python -m pip install -e ".[tts]"`. Repair the listed library imports '
-            "inside the interpreter selected by KATHASVARA_PYTHON. A successful "
-            "probe does not verify downloaded weights or audible Hindi; run the "
+            "inside the interpreter selected by KATHASVARA_PYTHON. If the "
+            "TTS device is invalid, use KATHASVARA_TTS_DEVICE=auto or cpu. "
+            "A successful probe does not verify downloaded weights or audible Hindi; run the "
             "explicit real-model smoke test and listen to its WAV separately."
         ),
     }
