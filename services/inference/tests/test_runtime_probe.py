@@ -148,6 +148,66 @@ def test_model_selection_probe_never_echoes_invalid_values_or_loads_weights(
     assert report["audio_synthesis_verified"] is False
 
 
+def test_installed_legacy_chatterbox_cannot_claim_v3_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LegacyChatterbox:
+        @classmethod
+        def from_pretrained(cls, *, device: str) -> None:
+            raise AssertionError("No weights should load in preflight.")
+
+        def generate(self, text: str, language_id: str) -> None:
+            raise AssertionError("No audio should generate in preflight.")
+
+    monkeypatch.setattr(
+        runtime_probe.importlib, "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=LegacyChatterbox),
+    )
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v3")
+    monkeypatch.delenv("KATHASVARA_TTS_REFERENCE_WAV", raising=False)
+    report = runtime_probe.probe_runtime()
+    assert report["imports_ok"] == (sys.version_info[:2] == (3, 11))
+    assert report["model_configuration_valid"] is True
+    assert report["upstream_api_status"] == "v3_unsupported"
+    assert report["upstream_api_compatible"] is False
+    assert report["preflight_ok"] is False
+    assert report["model_weights_verified"] is False
+
+
+def test_installed_legacy_chatterbox_cannot_claim_reference_support(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    import wave
+
+    class LegacyChatterbox:
+        @classmethod
+        def from_pretrained(cls, *, device: str) -> None:
+            raise AssertionError("No weights should load in preflight.")
+
+        def generate(self, text: str, language_id: str) -> None:
+            raise AssertionError("No audio should generate in preflight.")
+
+    local_voice = tmp_path / "private-reference.wav"
+    with wave.open(str(local_voice), "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(24000)
+        stream.writeframes((1000).to_bytes(2, "little", signed=True) * 72000)
+    monkeypatch.setattr(
+        runtime_probe.importlib, "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=LegacyChatterbox),
+    )
+    monkeypatch.setenv("KATHASVARA_TTS_REFERENCE_WAV", str(local_voice))
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v2")
+    report = runtime_probe.probe_runtime()
+    assert report["reference_voice_status"] == "valid"
+    assert report["upstream_api_status"] == "reference_unsupported"
+    assert report["upstream_api_compatible"] is False
+    assert report["preflight_ok"] is False
+    assert str(local_voice) not in str(report)
+
+
 def test_reference_probe_never_returns_private_local_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path,
 ) -> None:
