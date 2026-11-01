@@ -1547,6 +1547,49 @@ mod tests {
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn selected_reference_is_child_scoped_and_restricted_to_audio_actions() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("consented-voice.wav");
+        fs::write(&path, b"placeholder: Python validates actual PCM").unwrap();
+        let path_text = path.to_str().unwrap();
+        let mut command = Command::new("python");
+        apply_reference_selection(&mut command, Some("synthesize"), Some(path_text)).unwrap();
+        let child_env = command.get_envs().find(|(name, _)| {
+            name == "KATHASVARA_TTS_REFERENCE_WAV"
+        });
+        assert_eq!(
+            child_env.and_then(|(_, value)| value).map(std::path::Path::new),
+            Some(path.as_path()),
+        );
+        // Unrelated actions cannot access arbitrary user-selected paths.
+        let mut other_command = Command::new("python");
+        assert!(apply_reference_selection(
+            &mut other_command, Some("diagnose"), Some(path_text),
+        ).is_err());
+        assert!(other_command.get_envs().next().is_none());
+    }
+
+    #[test]
+    fn selected_reference_rejects_missing_non_wav_and_relative_paths_without_leaking() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("private-note.wav");
+        let source = path.to_str().unwrap();
+        let mut command = Command::new("python");
+        let error = apply_reference_selection(
+            &mut command, Some("render_story"), Some(source),
+        ).unwrap_err();
+        assert!(!error.contains(source));
+        assert!(command.get_envs().next().is_none());
+        for invalid in ["relative.wav", "/tmp/not-a-wav.txt", ""] {
+            let mut process = Command::new("python");
+            assert!(apply_reference_selection(
+                &mut process, Some("probe_runtime"), Some(invalid),
+            ).is_err());
+        }
+    }
+
+
+    #[test]
     fn speech_timeout_is_opt_in_bounded_and_defaults_to_ten_minutes() {
         assert_eq!(python_job_timeout(Some("synthesize"), None), Duration::from_secs(600));
         assert_eq!(python_job_timeout(Some("render_story"), None), Duration::from_secs(600));
