@@ -112,6 +112,28 @@ def test_v3_explicitly_selects_new_checkpoint_and_tracks_variant(
     assert adapter.model_variant == "v3"
 
 
+def test_legacy_v3_api_fails_before_checkpoint_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v3")
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+        fail_gpu_probe=True,
+    )
+    entrypoint = sys.modules["chatterbox.mtl_tts"].ChatterboxMultilingualTTS
+
+    def old_pretrained(*, device: str) -> object:
+        selected.append(device)
+        raise AssertionError("A legacy model must not download weights")
+
+    entrypoint.from_pretrained = old_pretrained
+    with pytest.raises(RuntimeError, match="does not support the selected V3 checkpoint") as exc:
+        ChatterboxHindi().load()
+    assert selected == []
+    assert public_error_message(exc.value) == str(exc.value)
+
+
 def test_v2_does_not_pass_new_checkpoint_argument(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
