@@ -148,12 +148,21 @@ if (-not $importProbe.result.preflight_ok) {
     if ($importProbe.result.reference_voice_status -eq "invalid") {
         $failed += "KATHASVARA_TTS_REFERENCE_WAV (must be valid 16-bit PCM WAV)"
     }
+    if (-not $importProbe.result.upstream_api_compatible) {
+        switch ($importProbe.result.upstream_api_status) {
+            "v3_unsupported" { $failed += "Chatterbox V3 API missing (update chatterbox-tts)" }
+            "reference_unsupported" { $failed += "Chatterbox reference WAV API missing (update chatterbox-tts)" }
+            "unverifiable" { $failed += "Chatterbox selected API cannot be verified" }
+            default { $failed += "Chatterbox selected API unavailable" }
+        }
+    }
     Fail ("Speech runtime preflight failed: " + ($failed -join ", ") +
         ". Repair the Python TTS environment or override before launching the app.")
 }
 Write-Host ("Speech preflight passed (device: " + $importProbe.result.tts_device_mode +
     "; model: " + $importProbe.result.tts_model_variant +
     "; voice reference: " + $importProbe.result.reference_voice_status +
+    "; upstream API: " + $importProbe.result.upstream_api_status +
     "). Model weights, hardware capability and Hindi audio are NOT verified.")
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 
