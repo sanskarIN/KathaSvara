@@ -22,6 +22,7 @@ export interface WavQualityReport {
     peak_dbfs: number | null;
     clipped_sample_percentage: number;
     near_silence_hint: boolean;
+    dc_only_hint: boolean;
     possible_clipping_hint: boolean;
     long_internal_pause_hint: boolean;
     longest_internal_quiet_span_seconds: number;
@@ -81,6 +82,7 @@ export function parseWavQuality(input: unknown): WavQualityReport {
   const rms = hints.rms_dbfs;
   const peak = hints.peak_dbfs;
   const quiet = hints.near_silence_hint;
+  const dcOnly = hints.dc_only_hint;
   const clipping = hints.possible_clipping_hint;
   const longPause = hints.long_internal_pause_hint;
   if (
@@ -101,6 +103,8 @@ export function parseWavQuality(input: unknown): WavQualityReport {
     (rms !== null && peak !== null && rms > peak + 0.02) ||
     !bounded(hints.clipped_sample_percentage, 100) ||
     typeof quiet !== "boolean" ||
+    typeof dcOnly !== "boolean" ||
+    (dcOnly && (quiet || rms === null)) ||
     typeof clipping !== "boolean" ||
     typeof longPause !== "boolean" ||
     typeof hints.signal_review_required !== "boolean" ||
@@ -111,7 +115,7 @@ export function parseWavQuality(input: unknown): WavQualityReport {
     !quietFlagConsistent(rms, quiet) ||
     !clippingFlagConsistent(hints.clipped_sample_percentage, clipping) ||
     !pauseFlagConsistent(pause, longPause) ||
-    hints.signal_review_required !== (quiet || clipping || longPause)
+    hints.signal_review_required !== (quiet || dcOnly || clipping || longPause)
   ) {
     throw new Error("The WAV inspection report failed safety validation.");
   }
@@ -123,6 +127,7 @@ export function qualityReviewHints(report: WavQualityReport): string[] {
   const result: string[] = [];
   const hint = report.level_hints;
   if (hint.near_silence_hint) result.push("Overall level is unusually quiet. Listen for missing or very soft dialogue.");
+  if (hint.dc_only_hint) result.push("Audio is a nearly constant DC signal, not meaningful speech. Check model output and regenerate.");
   if (hint.possible_clipping_hint) result.push("Some audio samples reach full scale. Listen for distortion.");
   if (hint.long_internal_pause_hint) {
     result.push(`A ${hint.longest_internal_quiet_span_seconds.toFixed(1)}-second quiet gap begins around ${hint.longest_internal_quiet_span_start_seconds?.toFixed(1) ?? "?"} s. Check whether the pause is intentional.`);
