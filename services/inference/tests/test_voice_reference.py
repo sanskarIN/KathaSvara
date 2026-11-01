@@ -10,6 +10,7 @@ import hashlib
 import sys
 import types
 import wave
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +18,11 @@ import pytest
 
 from kathasvara.engine import ChatterboxHindi, VoiceSettings
 from kathasvara.public_errors import public_error_message
-from kathasvara.voice_reference import REFERENCE_ERROR, inspect_reference_wav
+from kathasvara.voice_reference import (
+    REFERENCE_CHANGED_ERROR,
+    REFERENCE_ERROR,
+    inspect_reference_wav,
+)
 
 
 def make_reference(path: Path, *, value: int = 1000, seconds: int = 3) -> None:
@@ -32,6 +37,7 @@ def make_reference(path: Path, *, value: int = 1000, seconds: int = 3) -> None:
 def install_fake_tts(
     monkeypatch: pytest.MonkeyPatch, *,
     has_builtin_voice: bool,
+    on_generate: Callable[[], None] | None = None,
 ) -> tuple[list[str], list[dict[str, object]]]:
     loads: list[str] = []
     requests: list[dict[str, object]] = []
@@ -47,6 +53,8 @@ def install_fake_tts(
 
         def generate(_text: str, **options: object) -> object:
             requests.append(options)
+            if on_generate is not None:
+                on_generate()
             return object()
 
         return SimpleNamespace(
@@ -158,6 +166,48 @@ def test_consent_reference_is_only_read_on_first_chunk_and_never_in_fingerprint(
     assert requests[0]["audio_prompt_path"] == str(path)
     assert "audio_prompt_path" not in requests[1]
     assert requests[0]["language_id"] == requests[1]["language_id"] == "hi"
+
+
+def test_changed_reference_before_first_chunk_fails_without_inference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    path = tmp_path / "private-voice.wav"
+    make_reference(path, value=1000)
+    monkeypatch.setenv("KATHASVARA_TTS_REFERENCE_WAV", str(path))
+    _, requests = install_fake_tts(monkeypatch, has_builtin_voice=False)
+    model = ChatterboxHindi()
+    model.load()
+    original_fingerprint = model.conditioning_fingerprint
+    make_reference(path, value=2000)
+    with pytest.raises(RuntimeError) as caught:
+        model.generate("नमस्कार।", VoiceSettings())
+    assert str(caught.value) == REFERENCE_CHANGED_ERROR
+    assert public_error_message(caught.value) == REFERENCE_CHANGED_ERROR
+    assert str(path) not in str(caught.value)
+    assert requests == []
+    assert model.conditioning_fingerprint == original_fingerprint
+
+
+def test_reference_change_during_conditioning_prevents_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    path = tmp_path / "private-voice.wav"
+    make_reference(path, value=1000)
+    monkeypatch.setenv("KATHASVARA_TTS_REFERENCE_WAV", str(path))
+    _, requests = install_fake_tts(
+        monkeypatch, has_builtin_voice=False,
+        on_generate=lambda: make_reference(path, value=2000),
+    )
+    model = ChatterboxHindi()
+    model.load()
+    with pytest.raises(RuntimeError) as caught:
+        model.generate("नमस्कार।", VoiceSettings())
+    assert str(caught.value) == REFERENCE_CHANGED_ERROR
+    assert public_error_message(caught.value) == REFERENCE_CHANGED_ERROR
+    assert str(path) not in str(caught.value)
+    assert len(requests) == 1
+    assert requests[0]["audio_prompt_path"] == str(path)
+    assert model._reference_prepared is False
 
 
 def test_bad_reference_is_rejected_before_model_download(
