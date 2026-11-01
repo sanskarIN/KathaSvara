@@ -122,7 +122,8 @@ def test_model_selection_probe_never_echoes_invalid_values_or_loads_weights(
     assert report["tts_model_variant"] == expected
     assert report["model_configuration_valid"] is valid
     assert report["preflight_ok"] == (valid and report["imports_ok"])
-    assert selected not in str(report) if not valid else True
+    if not valid:
+        assert selected not in str(report)
     assert report["model_weights_verified"] is False
     assert report["audio_synthesis_verified"] is False
 
