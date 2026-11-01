@@ -26,12 +26,17 @@ from kathasvara.voice_reference import (
 
 
 def make_reference(path: Path, *, value: int = 1000, seconds: int = 3) -> None:
-    frame = value.to_bytes(2, "little", signed=True)
+    # Alternating PCM values make these fixtures time-varying, unlike a
+    # constant DC offset that cannot condition a meaningful voice.
+    frame = (
+        value.to_bytes(2, "little", signed=True)
+        + (-value).to_bytes(2, "little", signed=True)
+    )
     with wave.open(str(path), "wb") as recording:
         recording.setnchannels(1)
         recording.setsampwidth(2)
         recording.setframerate(24_000)
-        recording.writeframes(frame * (24_000 * seconds))
+        recording.writeframes(frame * (24_000 * seconds // 2))
 
 
 def install_fake_tts(
@@ -110,6 +115,33 @@ def test_silent_voice_reference_is_rejected(tmp_path: Path) -> None:
     make_reference(silent, value=0)
     with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
         inspect_reference_wav(silent)
+
+
+def test_dc_offset_reference_is_rejected_even_if_loud(tmp_path: Path) -> None:
+    path = tmp_path / "dc-only.wav"
+    # All samples are non-zero, so the earlier raw-RMS gate would accept it.
+    constant_pcm = (12000).to_bytes(2, "little", signed=True)
+    with wave.open(str(path), "wb") as recording:
+        recording.setnchannels(1)
+        recording.setsampwidth(2)
+        recording.setframerate(24_000)
+        recording.writeframes(constant_pcm * (24_000 * 3))
+    with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
+        inspect_reference_wav(path)
+
+
+def test_offset_with_time_varying_pcm_passes_math_gate(tmp_path: Path) -> None:
+    path = tmp_path / "varying-offset.wav"
+    with wave.open(str(path), "wb") as recording:
+        recording.setnchannels(1)
+        recording.setsampwidth(2)
+        recording.setframerate(24_000)
+        pair = (
+            (11000).to_bytes(2, "little", signed=True)
+            + (13000).to_bytes(2, "little", signed=True)
+        )
+        recording.writeframes(pair * (24_000 * 3 // 2))
+    assert len(inspect_reference_wav(path)) == 64
 
 
 def test_sparse_spike_voice_reference_is_rejected(tmp_path: Path) -> None:

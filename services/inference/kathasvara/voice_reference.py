@@ -49,6 +49,7 @@ def inspect_reference_wav(path: Path) -> str:
             # A truncated RIFF file can report plausible frame metadata.
             read_bytes = 0
             total_energy = 0
+            total_sum = 0
             sample_count = 0
             while (data := recording.readframes(8192)):
                 read_bytes += len(data)
@@ -59,14 +60,19 @@ def inspect_reference_wav(path: Path) -> str:
                 if sys.byteorder != "little":
                     pcm.byteswap()
                 total_energy += sum(sample * sample for sample in pcm)
+                total_sum += sum(pcm)
                 sample_count += len(pcm)
             if read_bytes != frames * channels * width or sample_count == 0:
                 raise ValueError(REFERENCE_ERROR)
-            # A recording of pure silence or one narrow nonzero spike is not
-            # a useful conditioning prompt. This is only a PCM-level gate,
-            # not a detector for consent, voice identity or intelligibility.
-            if total_energy < sample_count:
+            # Pure silence, one narrow spike, and a constant (DC-offset)
+            # waveform cannot provide a useful changing voice signal.
+            # Subtract the mean before comparing RMS to one PCM16 step.
+            # Integer arithmetic avoids precision loss on large WAV files.
+            centered_energy = total_energy * sample_count - total_sum * total_sum
+            if centered_energy < sample_count * sample_count:
                 raise ValueError(REFERENCE_ERROR)
+            # A varying waveform is still NOT proof of understandable speech,
+            # a particular speaker's identity, consent or clean recording.
         digest = hashlib.sha256()
         with path.open("rb") as source:
             while chunk := source.read(128 * 1024):
