@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -80,6 +80,8 @@ export default function App() {
   const [checkingSetup, setCheckingSetup] = useState(false);
   const [probingImports, setProbingImports] = useState(false);
   const [importProbe, setImportProbe] = useState<RuntimeImportProbe | null>(null);
+  // Never persist the user's private reference WAV path to projects or localStorage.
+  const [referenceWavPath, setReferenceWavPath] = useState<string | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
   const [checkingCache, setCheckingCache] = useState(false);
@@ -225,6 +227,31 @@ export default function App() {
     }
   }
 
+  async function chooseReferenceVoice() {
+    try {
+      const selected = await open({
+        title: "Choose your own or consented voice reference",
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Local PCM16 WAV recording", extensions: ["wav"] }],
+      });
+      if (typeof selected !== "string") return;
+      invalidateGeneration();
+      setReferenceWavPath(selected);
+      setImportProbe(null);
+      setMessage("Session voice reference selected. Run the no-model TTS preflight before generating.");
+    } catch {
+      setMessage("Unable to open local WAV selection dialog. No reference was changed.");
+    }
+  }
+
+  function clearReferenceVoice() {
+    invalidateGeneration();
+    setReferenceWavPath(null);
+    setImportProbe(null);
+    setMessage("Session voice selection cleared. The launcher default, if configured, will apply.");
+  }
+
   async function generate() {
     const invalid = validateText(project.text);
     if (invalid) {
@@ -242,6 +269,7 @@ export default function App() {
         text: project.text,
         exaggeration,
         cfgWeight,
+        referenceWavPath,
       });
       if (revision !== generationRevision.current) {
         void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
@@ -313,7 +341,9 @@ export default function App() {
     setProbingImports(true);
     setImportProbe(null);
     try {
-      const report = await invoke<RuntimeImportProbe>("probe_tts_runtime");
+      const report = await invoke<RuntimeImportProbe>("probe_tts_runtime", {
+        referenceWavPath,
+      });
       setImportProbe(report);
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
@@ -530,7 +560,8 @@ export default function App() {
           )}
 
           {page === "cast" && (
-            <CastStudio document={castDoc} onChange={setCastDoc} onMessage={setMessage} />
+            <CastStudio document={castDoc} onChange={setCastDoc} onMessage={setMessage}
+              referenceWavPath={referenceWavPath} />
           )}
 
           {page === "projects" && (
@@ -550,6 +581,22 @@ export default function App() {
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
                 {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
               </button>
+              <div className="field-label">OPTIONAL CONSENTED LOCAL VOICE</div>
+              <p className="helper">Select a WAV recording that you own or have permission to use.
+                KathaSvara uses one reference for the entire render, not different voices per
+                character. The selection is kept in memory for this app session only; its path
+                is not shown here, stored in projects, or uploaded.</p>
+              <button className="secondary-button" onClick={() => void chooseReferenceVoice()}>
+                Choose local reference WAV
+              </button>
+              {referenceWavPath !== null && (
+                <button className="quiet-button" onClick={clearReferenceVoice}>
+                  Clear session voice selection
+                </button>
+              )}
+              <p role="status"><strong>Session reference:</strong> {referenceWavPath === null
+                ? "Launcher default (if available)"
+                : "Local recording selected (private path hidden)"}</p>
               <button className="secondary-button" disabled={probingImports} onClick={() => void verifyTtsImports()}>
                 {probingImports ? "Verifying speech library imports…" : "Verify speech library imports (no model load)"}
               </button>
