@@ -68,8 +68,16 @@ def install_fake_tts(
             generate=generate,
         )
 
+    # The imported upstream entrypoint exposes a real optional-parameter
+    # signature; instantiated fake models still record **options below.
+    def generate_api(
+        _text: str, *, language_id: str, audio_prompt_path: str | None = None,
+    ) -> None:
+        raise AssertionError("API signature must not generate speech")
+
     multilingual.ChatterboxMultilingualTTS = SimpleNamespace(
         from_pretrained=from_pretrained,
+        generate=generate_api,
     )
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setitem(sys.modules, "chatterbox", chatterbox)
@@ -222,6 +230,27 @@ def test_reference_symlink_not_followed(tmp_path: Path) -> None:
         pytest.skip("Symlink creation unavailable on this filesystem")
     with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
         inspect_reference_wav(link)
+
+
+def test_old_chatterbox_reference_api_fails_before_model_weights(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    path = tmp_path / "private-consented-voice.wav"
+    make_reference(path)
+    monkeypatch.setenv("KATHASVARA_TTS_REFERENCE_WAV", str(path))
+    loads, requests = install_fake_tts(monkeypatch, has_builtin_voice=False)
+    entrypoint = sys.modules["chatterbox.mtl_tts"].ChatterboxMultilingualTTS
+
+    def legacy_generate(_text: str, *, language_id: str) -> None:
+        raise AssertionError("Model generation must never run")
+
+    entrypoint.generate = legacy_generate
+    with pytest.raises(RuntimeError, match="does not support reference voice WAVs") as exc:
+        ChatterboxHindi().load()
+    assert loads == []
+    assert requests == []
+    assert str(path) not in str(exc.value)
+    assert public_error_message(exc.value) == str(exc.value)
 
 
 def test_missing_default_conditioning_is_diagnosed_before_generation(
