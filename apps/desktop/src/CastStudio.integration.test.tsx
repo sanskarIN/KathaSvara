@@ -61,7 +61,7 @@ function inspectedAudio() {
     distinct_voices_verified: false, human_review_required: true,
     level_hints: {
       rms_dbfs: -21.5, peak_dbfs: -3.0, clipped_sample_percentage: 0,
-      near_silence_hint: false, possible_clipping_hint: false,
+      near_silence_hint: false, dc_only_hint: false, possible_clipping_hint: false,
       long_internal_pause_hint: false, longest_internal_quiet_span_seconds: 0,
       longest_internal_quiet_span_start_seconds: null, signal_review_required: false,
     },
