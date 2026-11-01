@@ -45,6 +45,8 @@ interface Props {
   document: StoryV2;
   onChange: Dispatch<SetStateAction<StoryV2>>;
   onMessage: (message: string) => void;
+  // A single consented prompt applies to this entire render, not to each character.
+  referenceWavPath?: string | null;
 }
 
 function errorString(error: unknown): string {
@@ -58,7 +60,9 @@ function spokenSubtitleLines(doc: StoryV2) {
   );
 }
 
-export default function CastStudio({ document, onChange, onMessage }: Props) {
+export default function CastStudio({
+  document, onChange, onMessage, referenceWavPath = null,
+}: Props) {
   const [newName, setNewName] = useState("");
   const [newSceneTitle, setNewSceneTitle] = useState("");
   const [sceneSearch, setSceneSearch] = useState("");
@@ -378,6 +382,7 @@ export default function CastStudio({ document, onChange, onMessage }: Props) {
       const result = await invoke<AudioResult>("render_story_v2", {
         project: document,
         jobId: id,
+        referenceWavPath,
         ...selection,
       });
       if (revision !== renderRevision.current || activeRenderJob.current !== id) {
