@@ -552,6 +552,11 @@ export default function App() {
                   <input id="exaggeration" type="range" min="0.25" max="2" step="0.05" value={exaggeration} onChange={(e) => changeExaggeration(Number(e.target.value))} />
                   <label className="range-label" htmlFor="cfg">CFG guidance <strong>{cfgWeight.toFixed(2)}</strong></label>
                   <input id="cfg" type="range" min="0" max="1" step="0.05" value={cfgWeight} onChange={(e) => changeGuidance(Number(e.target.value))} />
+                  <p className="helper" aria-label="Active narration reference mode">
+                    <strong>Voice reference:</strong> {referenceWavPath === null
+                      ? "Launcher/default model conditioning (if available)."
+                      : "Session-selected local WAV (private path hidden). The model will try to condition on this one recording."}
+                  </p>
                   <p className="helper">Only controls supported by the selected model are shown. Generating does not upload your script.</p>
                   <p className="helper"><strong>Real audio setup required:</strong> this developer EXE does not contain Python, Chatterbox, or model weights. The Windows audio setup guide includes a real Hindi WAV smoke test; a passing dependency check alone is not enough.</p>
                   <button className="quiet-button" type="button"
