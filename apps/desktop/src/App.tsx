@@ -82,6 +82,9 @@ export default function App() {
   const [importProbe, setImportProbe] = useState<RuntimeImportProbe | null>(null);
   // Never persist the user's private reference WAV path to projects or localStorage.
   const [referenceWavPath, setReferenceWavPath] = useState<string | null>(null);
+  // Native dialogs and no-model Python probes can resolve out of order.
+  const referencePickerRevision = useRef(0);
+  const importProbeRevision = useRef(0);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
   const [checkingCache, setCheckingCache] = useState(false);
@@ -227,7 +230,14 @@ export default function App() {
     }
   }
 
+  function invalidateReferenceProbe() {
+    importProbeRevision.current += 1;
+    setProbingImports(false);
+    setImportProbe(null);
+  }
+
   async function chooseReferenceVoice() {
+    const pickerRevision = ++referencePickerRevision.current;
     try {
       const selected = await open({
         title: "Choose your own or consented voice reference",
@@ -235,20 +245,25 @@ export default function App() {
         directory: false,
         filters: [{ name: "Local PCM16 WAV recording", extensions: ["wav"] }],
       });
-      if (typeof selected !== "string") return;
+      if (pickerRevision !== referencePickerRevision.current ||
+          typeof selected !== "string") return;
       invalidateGeneration();
       setReferenceWavPath(selected);
-      setImportProbe(null);
+      invalidateReferenceProbe();
       setMessage("Session voice reference selected. Run the no-model TTS preflight before generating.");
     } catch {
-      setMessage("Unable to open local WAV selection dialog. No reference was changed.");
+      if (pickerRevision === referencePickerRevision.current) {
+        setMessage("Unable to open local WAV selection dialog. No reference was changed.");
+      }
     }
   }
 
   function clearReferenceVoice() {
+    // Retire any older picker before it can restore a now-cleared reference.
+    referencePickerRevision.current += 1;
     invalidateGeneration();
     setReferenceWavPath(null);
-    setImportProbe(null);
+    invalidateReferenceProbe();
     setMessage("Session voice selection cleared. The launcher default, if configured, will apply.");
   }
 
@@ -273,7 +288,8 @@ export default function App() {
       });
       if (revision !== generationRevision.current) {
         void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
-        setMessage("Script or voice settings changed during synthesis. Generate again to hear the new version.");
+        // A changed reference, script, or voice slider owns the newer status.
+        // Do not replace its message with this obsolete worker's response.
         return;
       }
       setAudio(result);
@@ -338,20 +354,26 @@ export default function App() {
   }
 
   async function verifyTtsImports() {
+    const probeRevision = ++importProbeRevision.current;
     setProbingImports(true);
     setImportProbe(null);
     try {
       const report = await invoke<RuntimeImportProbe>("probe_tts_runtime", {
         referenceWavPath,
       });
+      if (probeRevision !== importProbeRevision.current) return;
       setImportProbe(report);
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
         : "TTS preflight needs attention: check dependencies, model and speech device options, reference WAV, and Chatterbox API compatibility in Settings.");
     } catch (error) {
-      setMessage("TTS import probe could not run: " + errorMessage(error));
+      if (probeRevision === importProbeRevision.current) {
+        setMessage("TTS import probe could not run: " + errorMessage(error));
+      }
     } finally {
-      setProbingImports(false);
+      if (probeRevision === importProbeRevision.current) {
+        setProbingImports(false);
+      }
     }
   }
 
