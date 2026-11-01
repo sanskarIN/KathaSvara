@@ -558,19 +558,62 @@ fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) ->
     }
 }
 
+/// Apply a single user's selected local reference only to the Python child.
+fn apply_reference_selection(
+    command: &mut Command,
+    action: Option<&str>,
+    reference_wav_path: Option<&str>,
+) -> Result<(), String> {
+    let Some(reference) = reference_wav_path else {
+        // Existing launcher environment remains the legacy/default source.
+        return Ok(());
+    };
+    if !matches!(action, Some("probe_runtime" | "synthesize" | "render_story")) {
+        return Err("Voice reference selection is not supported for this action.".into());
+    }
+    let path = Path::new(reference);
+    if !path.is_absolute() || !path.extension().and_then(|part| part.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+    {
+        return Err("Select an absolute local WAV reference recording.".into());
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "Selected reference WAV cannot be read.".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Selected reference WAV must be a regular non-symlink file.".into());
+    }
+    // Never modify global process or persistent OS environment variables.
+    // Python's inspect_reference_wav() checks actual PCM, signal and limits.
+    command.env("KATHASVARA_TTS_REFERENCE_WAV", path);
+    Ok(())
+}
+
 fn invoke_python(request: Value) -> Result<Value, String> {
+    invoke_python_with_reference(request, None)
+}
+
+fn invoke_python_with_reference(
+    request: Value,
+    reference_wav_path: Option<&str>,
+) -> Result<Value, String> {
     let directory = inference_directory()?;
     if !directory.join("kathasvara/cli.py").is_file() {
         return Err("Inference sources are missing. Set KATHASVARA_INFERENCE_DIR.".into());
     }
-    let mut child = Command::new(python_executable())
+    let mut command = Command::new(python_executable());
+    command
         .args(["-m", "kathasvara.cli"])
         .current_dir(directory.clone())
         .env("PYTHONPATH", directory)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    apply_reference_selection(
+        &mut command,
+        request.get("action").and_then(Value::as_str),
+        reference_wav_path,
+    )?;
+    let mut child = command.spawn()
         .map_err(|_| "Python 3.11 runtime not found. Configure KATHASVARA_PYTHON.".to_string())?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin
@@ -640,9 +683,12 @@ async fn inspect_script(text: String) -> Result<TextInspection, String> {
 }
 
 #[tauri::command]
-async fn probe_tts_runtime() -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let response = invoke_python(json!({"action": "probe_runtime"}))?;
+async fn probe_tts_runtime(reference_wav_path: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python_with_reference(
+            json!({"action": "probe_runtime"}),
+            reference_wav_path.as_deref(),
+        )?;
         response.get("result").cloned()
             .ok_or_else(|| "Speech import probe returned no result.".to_string())
     }).await.map_err(|error| error.to_string())?
@@ -814,6 +860,7 @@ async fn synthesize(
     text: String,
     exaggeration: f32,
     cfg_weight: f32,
+    reference_wav_path: Option<String>,
 ) -> Result<AudioResult, String> {
     if text.trim().is_empty() || text.chars().count() > MAX_TEXT_LENGTH {
         return Err("Enter between 1 and 3000 characters of story text.".into());
@@ -828,13 +875,13 @@ async fn synthesize(
         let folder = app_dir(&app)?.join("audio");
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         let path = folder.join(format!("{audio_id}.wav"));
-        let data = match invoke_python(json!({
+        let data = match invoke_python_with_reference(json!({
             "action":"synthesize",
             "text":text,
             "output":path,
             "exaggeration":exaggeration,
             "cfg_weight":cfg_weight
-        })) {
+        }), reference_wav_path.as_deref()) {
             Ok(response) => response,
             Err(error) => {
                 // A terminated or timed-out Python worker cannot execute its
@@ -1239,6 +1286,7 @@ async fn render_story_v2(
     selected_scene_ids: Option<Vec<String>>,
     selected_segment_ids: Option<Vec<String>>,
     force_segment_ids: Option<Vec<String>>,
+    reference_wav_path: Option<String>,
 ) -> Result<AudioResult, String> {
     validate_story_v2(&project)?;
     Uuid::parse_str(&job_id).map_err(|_| "Invalid render job ID.")?;
@@ -1271,7 +1319,7 @@ async fn render_story_v2(
         // startup: removing the new UUID's marker here would lose fast cancels.
         // A previously used job UUID is rejected by the persisted journal.
         let _ = fs::remove_file(&progress_path);
-        let response = invoke_python(json!({
+        let response = invoke_python_with_reference(json!({
             "action": "render_story",
             "project": project,
             "output": output,
@@ -1282,7 +1330,7 @@ async fn render_story_v2(
             "selected_scene_ids": selected_scene_ids,
             "selected_segment_ids": selected_segment_ids,
             "force_segment_ids": force_segment_ids,
-        }));
+        }), reference_wav_path.as_deref());
         let _ = fs::remove_file(&cancel_path);
         let _ = fs::remove_file(&progress_path);
         let data = match response {
