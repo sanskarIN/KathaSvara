@@ -50,6 +50,8 @@ def inspect_reference_wav(path: Path) -> str:
             read_bytes = 0
             channel_energies = [0] * channels
             channel_sums = [0] * channels
+            downmix_sum = 0
+            downmix_energy = 0
             frame_count = 0
             while (data := recording.readframes(8192)):
                 read_bytes += len(data)
@@ -71,6 +73,16 @@ def inspect_reference_wav(path: Path) -> str:
                         sample * sample for sample in per_channel
                     )
                     channel_sums[channel] += sum(per_channel)
+                if channels == 2:
+                    # Chatterbox uses librosa.load() with mono=True. Stereo
+                    # channels with opposed waveforms can cancel to silence
+                    # on downmix, despite both channels having valid variance.
+                    combined = [
+                        left + right
+                        for left, right in zip(pcm[::2], pcm[1::2])
+                    ]
+                    downmix_sum += sum(combined)
+                    downmix_energy += sum(value * value for value in combined)
             if read_bytes != frames * channels * width or frame_count != frames:
                 raise ValueError(REFERENCE_ERROR)
             # Remove each channel's DC offset independently. Accept if the
@@ -82,6 +94,13 @@ def inspect_reference_wav(path: Path) -> str:
             )
             if centered_energy < channels * frames * frames:
                 raise ValueError(REFERENCE_ERROR)
+            if channels == 2:
+                centered_downmix = (
+                    downmix_energy * frames - downmix_sum * downmix_sum
+                )
+                # Divide L+R by 2 for mono; check at least one PCM16 step.
+                if centered_downmix < 4 * frames * frames:
+                    raise ValueError(REFERENCE_ERROR)
             # A varying waveform is still NOT proof of understandable speech,
             # a particular speaker's identity, consent or clean recording.
         digest = hashlib.sha256()
