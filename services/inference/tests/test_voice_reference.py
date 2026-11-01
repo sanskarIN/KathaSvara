@@ -161,6 +161,28 @@ def test_opposite_constant_stereo_offsets_are_rejected(tmp_path: Path) -> None:
         inspect_reference_wav(path)
 
 
+def test_stereo_opposite_waveforms_rejected_after_mono_downmix(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "antiphase-stereo.wav"
+    # Each channel oscillates; mixing left and right to mono yields 0.
+    first = (
+        (12000).to_bytes(2, "little", signed=True)
+        + (-12000).to_bytes(2, "little", signed=True)
+    )
+    second = (
+        (-12000).to_bytes(2, "little", signed=True)
+        + (12000).to_bytes(2, "little", signed=True)
+    )
+    with wave.open(str(path), "wb") as recording:
+        recording.setnchannels(2)
+        recording.setsampwidth(2)
+        recording.setframerate(24_000)
+        recording.writeframes((first + second) * (24_000 * 3 // 2))
+    with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
+        inspect_reference_wav(path)
+
+
 def test_stereo_with_one_varying_channel_is_allowed(tmp_path: Path) -> None:
     path = tmp_path / "stereo-with-voice-signal.wav"
     first = (
