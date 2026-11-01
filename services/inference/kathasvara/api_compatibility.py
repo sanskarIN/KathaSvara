@@ -24,10 +24,15 @@ def _accepts_keyword(method: Any, keyword: str) -> bool | None:
         inspect.Parameter.KEYWORD_ONLY,
     ):
         return True
-    return any(
+    # A generic **kwargs wrapper accepts the keyword syntactically but might
+    # discard it, transform it or pass it into an older incompatible runtime.
+    # It is not evidence of actual V3/reference support.
+    if any(
         parameter.kind == inspect.Parameter.VAR_KEYWORD
         for parameter in parameters.values()
-    )
+    ):
+        return None
+    return False
 
 
 def inspect_chatterbox_api(
