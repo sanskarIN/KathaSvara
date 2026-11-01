@@ -118,15 +118,19 @@ try {
 if (-not $importProbe.ok -or -not $importProbe.result) {
     Fail "The speech import probe failed. Check your Python 3.11 environment."
 }
-if (-not $importProbe.result.imports_ok) {
+if (-not $importProbe.result.preflight_ok) {
     $failed = @($importProbe.result.checks.PSObject.Properties |
         Where-Object { $_.Value -ne "ok" } |
         ForEach-Object { $_.Name + " (" + $_.Value + ")" })
     if (-not $importProbe.result.python_311) { $failed += "python_311 (required)" }
-    Fail ("Required speech libraries cannot import: " + ($failed -join ", ") +
-        ". Repair your Python 3.11 TTS environment before launching the app.")
+    if (-not $importProbe.result.device_configuration_valid) {
+        $failed += "KATHASVARA_TTS_DEVICE (must be auto or cpu)"
+    }
+    Fail ("Speech runtime preflight failed: " + ($failed -join ", ") +
+        ". Repair your Python 3.11 TTS environment or device override before launching the app.")
 }
-Write-Host "Speech imports passed. Model weights, hardware capability and Hindi audio are NOT verified."
+Write-Host ("Speech preflight passed (device: " + $importProbe.result.tts_device_mode +
+    "). Model weights, hardware capability and Hindi audio are NOT verified.")
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 
 if ($DoctorOnly) {
