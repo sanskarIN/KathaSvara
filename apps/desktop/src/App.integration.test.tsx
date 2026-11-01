@@ -31,6 +31,8 @@ const GOOD_IMPORTS = {
   imports_ok: true,
   tts_device_mode: "auto",
   device_configuration_valid: true,
+  tts_model_variant: "v2",
+  model_configuration_valid: true,
   preflight_ok: true,
   model_weights_verified: false,
   audio_synthesis_verified: false,
@@ -74,6 +76,38 @@ describe("local TTS import doctor (no model)", () => {
     expect(within(report).getByText(/Setup needs attention/)).toBeTruthy();
     expect(within(report).getByText("torch").parentElement?.textContent).toContain("Import failed");
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("reports an opted-in V3 checkpoint without claiming tested Hindi", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      tts_model_variant: "v3",
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/Multilingual checkpoint:/).parentElement?.textContent).toContain("v3");
+    expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/).parentElement?.textContent).toContain("No");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("rejects an invalid checkpoint setting without loading a model", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      tts_model_variant: "invalid",
+      model_configuration_valid: false,
+      preflight_ok: false,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/Setup needs attention/)).toBeTruthy();
+    expect(within(report).getByText(/Invalid override — use v2 or v3/)).toBeTruthy();
     expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
   });
 
