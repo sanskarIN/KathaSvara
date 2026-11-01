@@ -104,6 +104,25 @@ def test_story_generator_does_not_cache_or_publish_silent_spike(tmp_path) -> Non
     assert list(tmp_path.glob("*.partial.wav")) == []
 
 
+def test_dc_poisoned_cached_segment_is_regenerated(tmp_path) -> None:
+    doc = parse_dialogue("परीक्षण", "Narrator: नमस्कार।", [narrator()])
+    cache = tmp_path / "cache"
+    render_story(doc, tmp_path / "first-dc.wav", cache, FakeEngine())
+    entries = list(cache.glob("*.wav"))
+    assert len(entries) == 1
+    sf.write(
+        str(entries[0]),
+        np.full(2400, 0.35, dtype=np.float32),
+        24_000, subtype="PCM_16",
+    )
+
+    recovered = FakeEngine()
+    report = render_story(doc, tmp_path / "recovered-dc.wav", cache, recovered)
+    assert len(recovered.calls) == 1
+    assert report["segments"][0]["cached"] is False
+    assert sf.info(str(tmp_path / "recovered-dc.wav")).frames == 2400
+
+
 def test_spike_poisoned_cached_segment_is_regenerated(tmp_path) -> None:
     doc = parse_dialogue("परीक्षण", "Narrator: नमस्कार।", [narrator()])
     cache = tmp_path / "cache"
