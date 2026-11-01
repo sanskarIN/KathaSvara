@@ -10,6 +10,9 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from pathlib import Path
+
+from .voice_reference import inspect_reference_wav
 
 _MODULES = (
     ("numpy", "numpy"),
@@ -42,6 +45,14 @@ def probe_runtime() -> dict[str, object]:
     device_valid = requested_device in {"auto", "cpu"}
     requested_model = os.getenv("KATHASVARA_TTS_MODEL", "v2").strip().lower()
     model_valid = requested_model in {"v2", "v3"}
+    reference = os.getenv("KATHASVARA_TTS_REFERENCE_WAV", "").strip()
+    reference_status = "not_set"
+    if reference:
+        try:
+            inspect_reference_wav(Path(reference))
+            reference_status = "valid"
+        except ValueError:
+            reference_status = "invalid"
     imports_ok = not incompatible_python and not failed
     return {
         "python_311": not incompatible_python,
@@ -52,9 +63,12 @@ def probe_runtime() -> dict[str, object]:
         "device_configuration_valid": device_valid,
         "tts_model_variant": requested_model if model_valid else "invalid",
         "model_configuration_valid": model_valid,
-        # Import and selector checks do NOT verify checkpoint availability or
-        # compatibility with the installed upstream version.
-        "preflight_ok": imports_ok and device_valid and model_valid,
+        "reference_voice_status": reference_status,
+        # Checks do not load weights, verify built-in speaker conditioning
+        # or establish real Hindi narration.
+        "preflight_ok": (
+            imports_ok and device_valid and model_valid and reference_status != "invalid"
+        ),
         "model_weights_verified": False,
         "audio_synthesis_verified": False,
         "help": (
@@ -64,7 +78,10 @@ def probe_runtime() -> dict[str, object]:
             "TTS device is invalid, use KATHASVARA_TTS_DEVICE=auto or cpu. "
             "Choose KATHASVARA_TTS_MODEL=v2 (default) or opt in to v3, which "
             "requires an upstream version supporting t3_model=v3 and its weights. "
-            "A successful probe does not verify downloaded weights or audible Hindi; run the "
+            "An optional KATHASVARA_TTS_REFERENCE_WAV must point to your own "
+            "or consented local PCM16 reference recording. The probe never "
+            "returns its path or audio bytes. A successful probe does not verify "
+            "downloaded weights or audible Hindi; run the "
             "explicit real-model smoke test and listen to its WAV separately."
         ),
     }
