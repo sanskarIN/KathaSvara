@@ -36,6 +36,9 @@ type RuntimeImportProbe = {
   checks: Record<string, "ok" | "entrypoint_missing" | "import_failed">;
   failed_components: string[];
   imports_ok: boolean;
+  tts_device_mode: "auto" | "cpu" | "invalid";
+  device_configuration_valid: boolean;
+  preflight_ok: boolean;
   model_weights_verified: false;
   audio_synthesis_verified: false;
   help: string;
@@ -306,9 +309,9 @@ export default function App() {
     try {
       const report = await invoke<RuntimeImportProbe>("probe_tts_runtime");
       setImportProbe(report);
-      setMessage(report.imports_ok
-        ? "TTS libraries imported successfully. Model weights, Hindi generation, and voice quality are still unverified."
-        : "The speech runtime cannot import every required library. Review the detailed checks in Settings.");
+      setMessage(report.preflight_ok
+        ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
+        : "TTS preflight needs attention: check dependency imports and the requested speech device in Settings.");
     } catch (error) {
       setMessage("TTS import probe could not run: " + errorMessage(error));
     } finally {
@@ -544,12 +547,16 @@ export default function App() {
               <button className="secondary-button" disabled={probingImports} onClick={() => void verifyTtsImports()}>
                 {probingImports ? "Verifying speech library imports…" : "Verify speech library imports (no model load)"}
               </button>
-              <p className="helper">Dependency discovery only checks for installed modules. The optional import probe checks whether
-                their Python imports actually work; neither test loads model weights or generates speech.</p>
+              <p className="helper">Dependency discovery only checks for installed modules. The optional import preflight checks whether
+                their Python imports work and whether the device override is valid; neither test loads model weights or generates speech.</p>
               {importProbe && (
                 <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
-                  <h3>TTS import check: {importProbe.imports_ok ? "Imports passed" : "Setup needs attention"}</h3>
+                  <h3>TTS import check: {importProbe.preflight_ok ? "Imports passed" : "Setup needs attention"}</h3>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
+                  <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "invalid"
+                    ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
+                    {" "}({importProbe.device_configuration_valid ? "configuration accepted" : "fix before generating"})
+                  </p>
                   <ul>
                     {Object.entries(importProbe.checks).map(([module, result]) => (
                       <li key={module}><strong>{module}</strong>: {result === "ok"
