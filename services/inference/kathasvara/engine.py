@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .inference_errors import describe_model_failure
-from .voice_reference import inspect_reference_wav
+from .voice_reference import REFERENCE_CHANGED_ERROR, inspect_reference_wav
 
 
 @dataclass(frozen=True)
@@ -125,6 +125,14 @@ class ChatterboxHindi:
         if self._model is None:
             raise RuntimeError("Model is not loaded.")
         settings.validate()
+        # A consented prompt is validated and fingerprinted at model load.
+        # Recheck before its first use: a user may replace the local WAV while
+        # the large model loads, otherwise the cache key can identify the
+        # wrong voice recording. Do not reveal the private path on failure.
+        if self._reference_wav is not None and not self._reference_prepared:
+            actual_digest = inspect_reference_wav(Path(self._reference_wav))
+            if self._conditioning_fingerprint != f"reference-sha256:{actual_digest}":
+                raise RuntimeError(REFERENCE_CHANGED_ERROR)
         try:
             options: dict[str, Any] = {
                 "language_id": "hi",
@@ -137,8 +145,14 @@ class ChatterboxHindi:
             if self._reference_wav is not None and not self._reference_prepared:
                 options["audio_prompt_path"] = self._reference_wav
             audio = self._model.generate(text, **options)
-            if self._reference_wav is not None:
-                self._reference_prepared = True
-            return audio
         except Exception as exc:
             raise RuntimeError(describe_model_failure(exc, stage="generate")) from exc
+        if self._reference_wav is not None and not self._reference_prepared:
+            # Recheck after upstream conditionals were prepared, too: a
+            # concurrent overwrite during model.generate must not publish
+            # audio under an earlier recording's content fingerprint.
+            actual_digest = inspect_reference_wav(Path(self._reference_wav))
+            if self._conditioning_fingerprint != f"reference-sha256:{actual_digest}":
+                raise RuntimeError(REFERENCE_CHANGED_ERROR)
+            self._reference_prepared = True
+        return audio

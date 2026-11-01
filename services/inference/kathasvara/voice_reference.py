@@ -19,6 +19,10 @@ REFERENCE_ERROR = (
     "Reference voice WAV is invalid. Select an existing local, non-symlink "
     "16-bit PCM WAV (mono or stereo, 16-48 kHz, 2-20 seconds, at most 24 MiB)."
 )
+REFERENCE_CHANGED_ERROR = (
+    "Reference voice WAV changed after validation. Restore it or restart "
+    "the audio job with the updated recording."
+)
 
 
 def inspect_reference_wav(path: Path) -> str:
