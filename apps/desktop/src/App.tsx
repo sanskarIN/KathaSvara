@@ -41,6 +41,9 @@ type RuntimeImportProbe = {
   tts_model_variant: "v2" | "v3" | "invalid";
   model_configuration_valid: boolean;
   reference_voice_status: "not_set" | "valid" | "invalid";
+  upstream_api_status: "not_requested" | "compatible" | "unavailable" |
+    "v3_unsupported" | "reference_unsupported" | "unverifiable";
+  upstream_api_compatible: boolean;
   preflight_ok: boolean;
   model_weights_verified: false;
   audio_synthesis_verified: false;
@@ -314,7 +317,7 @@ export default function App() {
       setImportProbe(report);
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
-        : "TTS preflight needs attention: check dependency imports, model variant, speech device and local reference WAV in Settings.");
+        : "TTS preflight needs attention: check dependencies, model and speech device options, reference WAV, and Chatterbox API compatibility in Settings.");
     } catch (error) {
       setMessage("TTS import probe could not run: " + errorMessage(error));
     } finally {
@@ -554,7 +557,7 @@ export default function App() {
                 their Python imports work and whether the device and model overrides are valid; neither test loads model weights or generates speech.</p>
               {importProbe && (
                 <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
-                  <h3>TTS import check: {importProbe.preflight_ok ? "Imports passed" : "Setup needs attention"}</h3>
+                  <h3>TTS preflight: {importProbe.preflight_ok ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
                   <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "invalid"
                     ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
@@ -573,6 +576,21 @@ export default function App() {
                   </p>
                   <p className="helper">Only use recordings you own or have permission to use. A valid
                     reference does not prove speaker identity, audio quality or model compatibility.</p>
+                  <p><strong>Installed Chatterbox API:</strong> {importProbe.upstream_api_status === "not_requested"
+                    ? "Legacy V2 mode — optional API not required"
+                    : importProbe.upstream_api_status === "compatible"
+                      ? "Selected optional API signatures present"
+                      : importProbe.upstream_api_status === "v3_unsupported"
+                        ? "Installed package does not support V3 checkpoint selection"
+                        : importProbe.upstream_api_status === "reference_unsupported"
+                          ? "Installed package does not support reference audio prompts"
+                          : importProbe.upstream_api_status === "unavailable"
+                            ? "Chatterbox API unavailable"
+                            : "Cannot verify the installed API signatures"}
+                    {" "}({importProbe.upstream_api_compatible ? "signature check passed" : "check package compatibility"})
+                  </p>
+                  <p className="helper">Signature checks do not load a model, verify its weights, or establish
+                    that the selected voice and Hindi generation will work.</p>
                   <ul>
                     {Object.entries(importProbe.checks).map(([module, result]) => (
                       <li key={module}><strong>{module}</strong>: {result === "ok"
