@@ -40,6 +40,8 @@ def probe_runtime() -> dict[str, object]:
     # private paths or tokens. Validate configuration without loading weights.
     requested_device = os.getenv("KATHASVARA_TTS_DEVICE", "auto").strip().lower()
     device_valid = requested_device in {"auto", "cpu"}
+    requested_model = os.getenv("KATHASVARA_TTS_MODEL", "v2").strip().lower()
+    model_valid = requested_model in {"v2", "v3"}
     imports_ok = not incompatible_python and not failed
     return {
         "python_311": not incompatible_python,
@@ -48,8 +50,11 @@ def probe_runtime() -> dict[str, object]:
         "imports_ok": imports_ok,
         "tts_device_mode": requested_device if device_valid else "invalid",
         "device_configuration_valid": device_valid,
-        # Import checks and device configuration are NOT a model readiness test.
-        "preflight_ok": imports_ok and device_valid,
+        "tts_model_variant": requested_model if model_valid else "invalid",
+        "model_configuration_valid": model_valid,
+        # Import and selector checks do NOT verify checkpoint availability or
+        # compatibility with the installed upstream version.
+        "preflight_ok": imports_ok and device_valid and model_valid,
         "model_weights_verified": False,
         "audio_synthesis_verified": False,
         "help": (
@@ -57,6 +62,8 @@ def probe_runtime() -> dict[str, object]:
             '`python -m pip install -e ".[tts]"`. Repair the listed library imports '
             "inside the interpreter selected by KATHASVARA_PYTHON. If the "
             "TTS device is invalid, use KATHASVARA_TTS_DEVICE=auto or cpu. "
+            "Choose KATHASVARA_TTS_MODEL=v2 (default) or opt in to v3, which "
+            "requires an upstream version supporting t3_model=v3 and its weights. "
             "A successful probe does not verify downloaded weights or audible Hindi; run the "
             "explicit real-model smoke test and listen to its WAV separately."
         ),
