@@ -107,9 +107,19 @@ def inspect_reference_wav(path: Path) -> str:
         with path.open("rb") as source:
             while chunk := source.read(128 * 1024):
                 digest.update(chunk)
-        # Detect simple size changes between the metadata check and hash.
-        if path.stat().st_size != info.st_size:
-            raise ValueError(REFERENCE_ERROR)
+        # The waveform gate and SHA-256 are separate bounded reads of this
+        # local file. A same-size rewrite or replacement between them must not
+        # create a cache identity for bytes different from the validated PCM.
+        # lstat also rejects a late symlink substitution without following it.
+        after = path.lstat()
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino)
+            or after.st_size != info.st_size
+            or after.st_mtime_ns != info.st_mtime_ns
+            or after.st_ctime_ns != info.st_ctime_ns
+        ):
+            raise ValueError(REFERENCE_CHANGED_ERROR)
         return digest.hexdigest()
     except (OSError, EOFError, wave.Error) as exc:
         raise ValueError(REFERENCE_ERROR) from exc
