@@ -171,6 +171,12 @@ def render_story(
                     checkpoint = getattr(adapter, "model_variant", "v2")
                     if checkpoint != "v2":
                         cache_contract["checkpoint"] = checkpoint
+                    # Never mix audio from different user-authorized voice
+                    # references. Use the SHA-256 of the bytes, not a private
+                    # absolute recording path or the character's display name.
+                    conditioning = getattr(adapter, "conditioning_fingerprint", None)
+                    if conditioning is not None:
+                        cache_contract["conditioning"] = conditioning
                     fingerprint = json.dumps(
                         cache_contract, sort_keys=True, ensure_ascii=False,
                     )
