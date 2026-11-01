@@ -8,15 +8,17 @@ import App from "./App";
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   save: vi.fn(),
+  open: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ save: mocks.save }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ save: mocks.save, open: mocks.open }));
 vi.mock("./CastStudio", () => ({ default: () => null }));
 
 beforeEach(() => {
   mocks.invoke.mockReset();
   mocks.save.mockReset();
+  mocks.open.mockReset();
   window.localStorage.clear();
 });
 afterEach(() => cleanup());
@@ -47,6 +49,74 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("session-only consented reference selection (no model)", () => {
+  it("passes a chosen local WAV to the probe without showing or persisting its path", async () => {
+    const privatePath = "C:\\Users\\private\\my-voice.wav";
+    mocks.open.mockResolvedValue(privatePath);
+    mocks.invoke.mockResolvedValue(GOOD_IMPORTS);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain(privatePath);
+    expect(JSON.stringify(window.localStorage)).not.toContain(privatePath);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime", {
+      referenceWavPath: privatePath,
+    }));
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Clear session voice selection" }));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime", {
+      referenceWavPath: null,
+    }));
+    expect(document.body.textContent).not.toContain(privatePath);
+  });
+
+  it("sends the selected voice only to a local narration command", async () => {
+    const privatePath = "C:\\Users\\private\\consented.wav";
+    mocks.open.mockResolvedValue(privatePath);
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") {
+        return {
+          audio_id: "123e4567-e89b-42d3-a456-426614174000",
+          data_url: "data:audio/wav;base64,UklGRg==",
+          preview_available: true, duration_seconds: 1,
+          sample_rate: 24000, chunks: 1,
+        };
+      }
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Hindi Voice/ }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "synthesize", expect.objectContaining({ referenceWavPath: privatePath }),
+    ));
+    expect(document.body.textContent).not.toContain(privatePath);
+  });
+
+  it("keeps prior selection when the reference picker is cancelled", async () => {
+    mocks.open.mockResolvedValue(null);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("button", { name: "Clear session voice selection" })).toBeNull();
+    expect(screen.getByText(/Launcher default \(if available\)/)).toBeTruthy();
+  });
+});
+
 describe("local TTS import doctor (no model)", () => {
   it("shows a successful import separately from unverified real speech", async () => {
     mocks.invoke.mockResolvedValue(GOOD_IMPORTS);
@@ -59,7 +129,9 @@ describe("local TTS import doctor (no model)", () => {
     expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/)).toBeTruthy();
     expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/).parentElement?.textContent).toContain("No");
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime");
+    expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime", {
+      referenceWavPath: null,
+    });
     expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
   });
 

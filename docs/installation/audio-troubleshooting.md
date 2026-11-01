@@ -56,6 +56,8 @@ The switch sets the **child process** environment variable `KATHASVARA_TTS_JOB_T
 
 ### Optional, user-consented voice reference WAV
 
+**Desktop app (v0.5.3 development):** open **Settings → Choose local reference WAV** and select an existing recording that you own or have consent to use. Click **Verify speech library imports (no model load)** to check its format and installed Chatterbox reference API, then generate a short preview or cast/story render. The chosen file path is held **only in app memory for this session**, is never shown in the Settings panel or saved to a project, and is passed only to the local Python child for that action; no voice audio is uploaded. **Clear session voice selection** restores the launcher-provided default (if set). The app picker applies a *single reference to the entire render*, not different speaker identities to character profiles. Real audible Hindi still needs the manual listening gate. This UI option is for the v0.5.3 development build and does not exist in the published v0.5.1 EXE or the frozen v0.5.2 candidate.
+
 Upstream Chatterbox may load a checkpoint **without bundled speaker conditionals**. Previously a model could load successfully but `generate()` would then fail without a speaker prompt. The adapter now identifies that case with a clear diagnostic. To provide your own voice recording or a recording you have permission to use, opt in with an absolute local WAV path:
 
 ```powershell
