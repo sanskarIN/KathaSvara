@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .api_compatibility import inspect_chatterbox_api
 from .inference_errors import describe_model_failure
 from .voice_reference import REFERENCE_CHANGED_ERROR, inspect_reference_wav
 
@@ -79,6 +80,29 @@ class ChatterboxHindi:
         if requested not in {"auto", "cpu"}:
             raise RuntimeError(
                 "Unsupported TTS device override. Use auto or cpu."
+            )
+        # A visibly incompatible optional Chatterbox API should fail BEFORE
+        # expensive checkpoint loading or GPU initialization. An opaque API
+        # signature is not proof of compatibility, but users may still attempt
+        # the explicitly selected mode; the no-model preflight warns about it.
+        api_status = inspect_chatterbox_api(
+            ChatterboxMultilingualTTS,
+            needs_v3=requested_variant == "v3",
+            needs_reference=self._reference_wav is not None,
+        )
+        if api_status == "v3_unsupported":
+            raise RuntimeError(
+                "Installed Chatterbox does not support the selected V3 checkpoint. "
+                "Update Chatterbox or choose V2."
+            )
+        if api_status == "reference_unsupported":
+            raise RuntimeError(
+                "Installed Chatterbox does not support reference voice WAVs. "
+                "Update Chatterbox or clear the session reference."
+            )
+        if api_status == "unavailable":
+            raise RuntimeError(
+                "Chatterbox model API is unavailable. Check speech package installation."
             )
         try:
             if requested == "cpu":
