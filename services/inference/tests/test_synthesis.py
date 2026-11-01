@@ -21,7 +21,7 @@ class FakeEngine:
         return None
 
     def generate(self, text: str, settings: VoiceSettings) -> np.ndarray:
-        return np.full((1, 2400), 0.08, dtype=np.float32)
+        return np.tile(np.array([[0.08, -0.08]], dtype=np.float32), (1, 1200))
 
 
 def test_wav_is_real_pcm16_file(tmp_path) -> None:
