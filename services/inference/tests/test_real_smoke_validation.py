@@ -18,8 +18,10 @@ verify_smoke_output = runpy.run_path(str(SCRIPT_PATH))["verify_smoke_output"]
 
 def _wav(tmp_path: Path, amplitude: float = 0.08) -> tuple[Path, dict]:
     path = tmp_path / "smoke.wav"
-    sf.write(str(path), np.full(8_400, amplitude, dtype=np.float32), 24_000,
-             format="WAV", subtype="PCM_16")
+    # Model-free healthy fixtures must vary over time; a flat nonzero PCM
+    # buffer is not a real voice and should fail the updated acceptance gate.
+    samples = np.tile(np.array([amplitude, -amplitude], dtype=np.float32), 4_200)
+    sf.write(str(path), samples, 24_000, format="WAV", subtype="PCM_16")
     return path, {"sample_rate": 24_000, "duration_seconds": 0.35}
 
 
@@ -51,6 +53,16 @@ def test_real_smoke_rejects_near_silent_wav(tmp_path: Path, amplitude: float) ->
     path, metadata = _wav(tmp_path, amplitude)
     with pytest.raises(RuntimeError, match="near-silent"):
         verify_smoke_output(path, metadata)
+
+
+def test_real_smoke_rejects_loud_constant_signal(tmp_path: Path) -> None:
+    path = tmp_path / "smoke.wav"
+    sf.write(
+        str(path), np.full(8_400, 0.2, dtype=np.float32),
+        24_000, format="WAV", subtype="PCM_16",
+    )
+    with pytest.raises(RuntimeError, match="constant signal"):
+        verify_smoke_output(path, {"sample_rate": 24_000, "duration_seconds": 0.35})
 
 
 def test_real_smoke_rejects_corrupt_wav(tmp_path: Path) -> None:
