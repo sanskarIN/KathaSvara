@@ -1496,7 +1496,46 @@ fn main() {
 mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
-    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new();
+
+    #[test]
+    fn speech_timeout_is_opt_in_bounded_and_defaults_to_ten_minutes() {
+        assert_eq!(python_job_timeout(Some("synthesize"), None), Duration::from_secs(600));
+        assert_eq!(python_job_timeout(Some("render_story"), None), Duration::from_secs(600));
+        for action in ["synthesize", "render_story"] {
+            assert_eq!(
+                python_job_timeout(Some(action), Some(" 1800 ")),
+                Duration::from_secs(1800)
+            );
+            assert_eq!(
+                python_job_timeout(Some(action), Some("7200")),
+                Duration::from_secs(7200)
+            );
+            for invalid in ["", "0", "599", "7201", "-10", "invalid", "999999999999999"] {
+                assert_eq!(
+                    python_job_timeout(Some(action), Some(invalid)),
+                    Duration::from_secs(600),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn speech_timeout_override_never_extends_diagnostics_or_unknown_actions() {
+        for (action, expected_seconds) in [
+            ("probe_runtime", 90),
+            ("inspect_generated_wav", 180),
+            ("diagnose", 15),
+            ("health", 15),
+        ] {
+            assert_eq!(
+                python_job_timeout(Some(action), Some("7200")),
+                Duration::from_secs(expected_seconds),
+            );
+        }
+        assert_eq!(python_job_timeout(None, Some("7200")), Duration::from_secs(15));
+    }
+
     #[test]
     fn generated_audio_inspection_accepts_only_uuid_scoped_app_data_path() {
         let root = Path::new("private-app-data");
