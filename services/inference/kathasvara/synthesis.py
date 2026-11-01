@@ -64,8 +64,10 @@ def synthesize(
             peak = float(np.max(np.abs(samples)))
             if peak > 2.0:
                 raise RuntimeError("Speech engine returned implausible sample amplitudes.")
-            # A high-amplitude impulse can mask near-silence in a peak-only
-            # test. Check RMS before PCM16 quantization and publication.
+            # Inspect the signal that WILL actually be written. Checking raw
+            # samples first can accept [1.2, 1.8] variation which clamps to
+            # constant +1.0 PCM16 (or the equivalent negative DC offset).
+            samples = np.clip(samples, -1.0, 1.0)
             if effectively_silent_pcm(samples, np):
                 raise RuntimeError(
                     "Speech engine returned effectively silent audio. "
@@ -73,7 +75,7 @@ def synthesize(
                 )
             if chunks:
                 writer.write(silence)
-            writer.write(np.clip(samples, -1.0, 1.0))
+            writer.write(samples)
             chunks += 1
         if not chunks:
             raise RuntimeError("No audio was generated.")
