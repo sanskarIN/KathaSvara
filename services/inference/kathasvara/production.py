@@ -38,14 +38,16 @@ def _samples(audio: Any, np: Any) -> Any:
     peak = float(np.max(np.abs(samples)))
     if peak > 2.0:
         raise RuntimeError("Inference returned implausible sample amplitude.")
-    # Check global RMS, not just peaks: a single impulse amid silence is not
-    # meaningful PCM16 narration. Apply to both fresh and cached segments.
+    # Validate after clipping to the PCM16 output range. A raw waveform
+    # oscillating entirely above +1 or below -1 becomes a constant/DC signal
+    # on disk despite passing any pre-clipping variance test.
+    samples = np.clip(samples, -1.0, 1.0)
     if effectively_silent_pcm(samples, np):
         raise RuntimeError(
             "Speech engine returned effectively silent audio. "
             "Check model weights, hardware and speech generation."
         )
-    return np.clip(samples, -1.0, 1.0)
+    return samples
 
 
 def _atomic_wav(path: Path, audio: Any, rate: int, sf: Any) -> None:
