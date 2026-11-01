@@ -193,7 +193,11 @@ def test_installed_legacy_chatterbox_cannot_claim_reference_support(
         stream.setnchannels(1)
         stream.setsampwidth(2)
         stream.setframerate(24000)
-        stream.writeframes((1000).to_bytes(2, "little", signed=True) * 72000)
+        pair = (
+            (1000).to_bytes(2, "little", signed=True)
+            + (-1000).to_bytes(2, "little", signed=True)
+        )
+        stream.writeframes(pair * 36000)
     monkeypatch.setattr(
         runtime_probe.importlib, "import_module",
         lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=LegacyChatterbox),
