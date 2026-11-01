@@ -40,6 +40,7 @@ type RuntimeImportProbe = {
   device_configuration_valid: boolean;
   tts_model_variant: "v2" | "v3" | "invalid";
   model_configuration_valid: boolean;
+  reference_voice_status: "not_set" | "valid" | "invalid";
   preflight_ok: boolean;
   model_weights_verified: false;
   audio_synthesis_verified: false;
@@ -313,7 +314,7 @@ export default function App() {
       setImportProbe(report);
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
-        : "TTS preflight needs attention: check dependency imports, model variant and speech device in Settings.");
+        : "TTS preflight needs attention: check dependency imports, model variant, speech device and local reference WAV in Settings.");
     } catch (error) {
       setMessage("TTS import probe could not run: " + errorMessage(error));
     } finally {
@@ -566,6 +567,12 @@ export default function App() {
                   <p className="helper">V3 is opt-in through KATHASVARA_TTS_MODEL=v3 and may need updated
                     Chatterbox software and additional weights. This selection check does not download
                     weights or establish real Hindi generation quality.</p>
+                  <p><strong>Local voice reference:</strong> {importProbe.reference_voice_status === "valid"
+                    ? "Validated local PCM16 WAV (not uploaded)" : importProbe.reference_voice_status === "invalid"
+                      ? "Invalid reference — check selected WAV" : "Not configured (uses bundled default voice if available)"}
+                  </p>
+                  <p className="helper">Only use recordings you own or have permission to use. A valid
+                    reference does not prove speaker identity, audio quality or model compatibility.</p>
                   <ul>
                     {Object.entries(importProbe.checks).map(([module, result]) => (
                       <li key={module}><strong>{module}</strong>: {result === "ok"
