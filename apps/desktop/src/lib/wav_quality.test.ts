@@ -12,8 +12,8 @@ function sample() {
     distinct_voices_verified: false, human_review_required: true,
     level_hints: {
       rms_dbfs: -20, peak_dbfs: -6, clipped_sample_percentage: 0,
-      near_silence_hint: false, possible_clipping_hint: false,
-      long_internal_pause_hint: false, longest_internal_quiet_span_seconds: 0,
+      near_silence_hint: false, dc_only_hint: false,
+      possible_clipping_hint: false, long_internal_pause_hint: false, longest_internal_quiet_span_seconds: 0,
       longest_internal_quiet_span_start_seconds: null, signal_review_required: false,
     },
   };
@@ -26,6 +26,17 @@ describe("model-free WAV inspection report", () => {
     expect(report.human_review_required).toBe(true);
     expect(qualityReviewHints(report)).toEqual([
       expect.stringContaining("Listen anyway"),
+    ]);
+  });
+
+  it("flags constant DC-only WAVs without certifying Hindi speech", () => {
+    const raw = sample();
+    raw.level_hints.dc_only_hint = true;
+    raw.level_hints.signal_review_required = true;
+    const report = parseWavQuality(raw);
+    expect(report.hindi_listening_verified).toBe(false);
+    expect(qualityReviewHints(report)).toEqual([
+      expect.stringContaining("constant DC signal"),
     ]);
   });
 
@@ -93,6 +104,11 @@ describe("model-free WAV inspection report", () => {
       ...base, level_hints: { ...base.level_hints, ...changes },
     });
     expect(() => parseWavQuality(changed({ signal_review_required: true }))).toThrow();
+    expect(() => parseWavQuality(changed({ dc_only_hint: true }))).toThrow();
+    expect(() => parseWavQuality(changed({ dc_only_hint: "yes" }))).toThrow();
+    expect(() => parseWavQuality(changed({
+      dc_only_hint: true, near_silence_hint: true, signal_review_required: true,
+    }))).toThrow();
     expect(() => parseWavQuality(changed({
       rms_dbfs: -70, near_silence_hint: false,
     }))).toThrow();
