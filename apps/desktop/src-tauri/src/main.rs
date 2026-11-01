@@ -537,6 +537,27 @@ fn read_bounded_response(mut source: impl Read) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Bound local inference jobs without allowing diagnostics to hang for hours.
+fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) -> Duration {
+    match action {
+        Some("synthesize" | "render_story") => {
+            // Existing 10-minute behavior stays the default. Operators can
+            // explicitly allow slow CPU/model jobs up to two hours.
+            let limit = configured_seconds
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .filter(|seconds| (600..=7200).contains(seconds))
+                .unwrap_or(600);
+            Duration::from_secs(limit)
+        }
+        // WAV inspection scans up to the allowed file size twice.
+        Some("inspect_generated_wav") => Duration::from_secs(180),
+        // Torch and Chatterbox imports can be slow on Windows, but never
+        // download weights during this probe.
+        Some("probe_runtime") => Duration::from_secs(90),
+        _ => Duration::from_secs(15),
+    }
+}
+
 fn invoke_python(request: Value) -> Result<Value, String> {
     let directory = inference_directory()?;
     if !directory.join("kathasvara/cli.py").is_file() {
@@ -560,14 +581,11 @@ fn invoke_python(request: Value) -> Result<Value, String> {
     let stdout = child.stdout.take()
         .ok_or_else(|| "Python stdout was not connected.".to_string())?;
     let output_reader = thread::spawn(move || read_bounded_response(stdout));
-    let max_wait = match request.get("action").and_then(Value::as_str) {
-        Some("synthesize" | "render_story") => Duration::from_secs(600),
-        // PCM inspection scans the entire allowed WAV twice without model weights.
-        Some("inspect_generated_wav") => Duration::from_secs(180),
-        // Importing torch/Chatterbox can be slow on Windows; no model weights load.
-        Some("probe_runtime") => Duration::from_secs(90),
-        _ => Duration::from_secs(15),
-    };
+    let configured_timeout = std::env::var("KATHASVARA_TTS_JOB_TIMEOUT_SECONDS").ok();
+    let max_wait = python_job_timeout(
+        request.get("action").and_then(Value::as_str),
+        configured_timeout.as_deref(),
+    );
     let started = Instant::now();
     loop {
         match child.try_wait() {
