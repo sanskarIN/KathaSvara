@@ -48,9 +48,9 @@ def inspect_reference_wav(path: Path) -> str:
                 raise ValueError(REFERENCE_ERROR)
             # A truncated RIFF file can report plausible frame metadata.
             read_bytes = 0
-            total_energy = 0
-            total_sum = 0
-            sample_count = 0
+            channel_energies = [0] * channels
+            channel_sums = [0] * channels
+            frame_count = 0
             while (data := recording.readframes(8192)):
                 read_bytes += len(data)
                 if read_bytes > frames * channels * width or len(data) % 2:
@@ -59,17 +59,28 @@ def inspect_reference_wav(path: Path) -> str:
                 pcm.frombytes(data)
                 if sys.byteorder != "little":
                     pcm.byteswap()
-                total_energy += sum(sample * sample for sample in pcm)
-                total_sum += sum(pcm)
-                sample_count += len(pcm)
-            if read_bytes != frames * channels * width or sample_count == 0:
+                if len(pcm) % channels:
+                    raise ValueError(REFERENCE_ERROR)
+                frame_count += len(pcm) // channels
+                for channel in range(channels):
+                    # PCM WAV frames interleave L/R samples. A constant
+                    # positive-left / negative-right recording has artificial
+                    # variation when channels are mixed in one statistic.
+                    per_channel = pcm[channel::channels]
+                    channel_energies[channel] += sum(
+                        sample * sample for sample in per_channel
+                    )
+                    channel_sums[channel] += sum(per_channel)
+            if read_bytes != frames * channels * width or frame_count != frames:
                 raise ValueError(REFERENCE_ERROR)
-            # Pure silence, one narrow spike, and a constant (DC-offset)
-            # waveform cannot provide a useful changing voice signal.
-            # Subtract the mean before comparing RMS to one PCM16 step.
-            # Integer arithmetic avoids precision loss on large WAV files.
-            centered_energy = total_energy * sample_count - total_sum * total_sum
-            if centered_energy < sample_count * sample_count:
+            # Remove each channel's DC offset independently. Accept if the
+            # combined variance is at least one PCM16 step squared per sample.
+            # The integer formulation avoids float cancellation and overflow.
+            centered_energy = sum(
+                energy * frames - total * total
+                for energy, total in zip(channel_energies, channel_sums)
+            )
+            if centered_energy < channels * frames * frames:
                 raise ValueError(REFERENCE_ERROR)
             # A varying waveform is still NOT proof of understandable speech,
             # a particular speaker's identity, consent or clean recording.
