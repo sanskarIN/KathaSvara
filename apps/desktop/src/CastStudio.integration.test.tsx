@@ -68,10 +68,11 @@ function inspectedAudio() {
   };
 }
 
-function mount(doc = story()) {
+function mount(doc = story(), referenceWavPath: string | null = null) {
   const onMessage = vi.fn();
   const onChange = vi.fn();
-  const view = render(<CastStudio document={doc} onChange={onChange} onMessage={onMessage} />);
+  const view = render(<CastStudio document={doc} onChange={onChange} onMessage={onMessage}
+    referenceWavPath={referenceWavPath} />);
   return { doc, onMessage, onChange, ...view };
 }
 
@@ -88,6 +89,25 @@ afterEach(() => {
 });
 
 describe("real React/Tauri desktop controls with mocked IPC (no voice model)", () => {
+  it("uses session voice reference only as an explicit render argument", async () => {
+    const privatePath = "C:\\Users\\private\\narrator.wav";
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") return generatedAudio();
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command: " + command);
+    });
+    const doc = story();
+    mount(doc, privatePath);
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "render_story_v2",
+      expect.objectContaining({ referenceWavPath: privatePath }),
+    ));
+    expect(JSON.stringify(doc)).not.toContain(privatePath);
+    expect(document.body.textContent).not.toContain(privatePath);
+  });
+
+
   it("shows complete local cast coverage without changing project data or pretending voices are distinct", () => {
     const doc = story();
     const seed = doc.scenes[0].segments[0];
