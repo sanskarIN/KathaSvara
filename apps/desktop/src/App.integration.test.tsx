@@ -79,6 +79,26 @@ describe("session-only consented reference selection (no model)", () => {
     expect(document.body.textContent).not.toContain(privatePath);
   });
 
+  it("discloses active session voice before narration without revealing the path", async () => {
+    const privatePath = "C:\\Users\\private\\consented.wav";
+    mocks.open.mockResolvedValue(privatePath);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    expect(screen.getByLabelText("Active narration reference mode").textContent)
+      .toContain("Session-selected local WAV (private path hidden)");
+    expect(document.body.textContent).not.toContain(privatePath);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear session voice selection" }));
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    expect(screen.getByLabelText("Active narration reference mode").textContent)
+      .toContain("Launcher/default model conditioning");
+    expect(document.body.textContent).not.toContain(privatePath);
+  });
+
   it("sends the selected voice only to a local narration command", async () => {
     const privatePath = "C:\\Users\\private\\consented.wav";
     mocks.open.mockResolvedValue(privatePath);

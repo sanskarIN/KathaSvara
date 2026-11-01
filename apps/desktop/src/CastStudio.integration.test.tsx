@@ -98,6 +98,9 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     });
     const doc = story();
     mount(doc, privatePath);
+    expect(screen.getByLabelText("Active dialogue reference mode").textContent)
+      .toContain("One reference applies to the entire story or scene");
+    expect(document.body.textContent).not.toContain(privatePath);
     fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
       "render_story_v2",
