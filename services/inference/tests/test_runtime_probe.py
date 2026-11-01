@@ -23,6 +23,7 @@ def test_import_probe_reports_all_available_without_claiming_audio(
     monkeypatch.setattr(runtime_probe.importlib, "import_module", import_ok)
     monkeypatch.delenv("KATHASVARA_TTS_DEVICE", raising=False)
     monkeypatch.delenv("KATHASVARA_TTS_MODEL", raising=False)
+    monkeypatch.delenv("KATHASVARA_TTS_REFERENCE_WAV", raising=False)
     report = runtime_probe.probe_runtime()
     assert requested == ["numpy", "soundfile", "torch", "chatterbox.mtl_tts"]
     assert report["checks"] == {
@@ -34,6 +35,7 @@ def test_import_probe_reports_all_available_without_claiming_audio(
     assert report["device_configuration_valid"] is True
     assert report["tts_model_variant"] == "v2"
     assert report["model_configuration_valid"] is True
+    assert report["reference_voice_status"] == "not_set"
     assert report["preflight_ok"] == report["imports_ok"]
     assert report["failed_components"] == []
     assert report["model_weights_verified"] is False
@@ -126,6 +128,25 @@ def test_model_selection_probe_never_echoes_invalid_values_or_loads_weights(
         assert selected not in str(report)
     assert report["model_weights_verified"] is False
     assert report["audio_synthesis_verified"] is False
+
+
+def test_reference_probe_never_returns_private_local_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
+    monkeypatch.setattr(
+        runtime_probe.importlib, "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=object()),
+    )
+    filename = tmp_path / "private-narrator.wav"
+    filename.write_bytes(b"not audio")
+    monkeypatch.setenv("KATHASVARA_TTS_REFERENCE_WAV", str(filename))
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v2")
+    report = runtime_probe.probe_runtime()
+    assert report["reference_voice_status"] == "invalid"
+    assert report["preflight_ok"] is False
+    assert str(filename) not in str(report)
+    assert report["model_weights_verified"] is False
 
 
 def test_cli_exposes_probe_without_speech_generation(monkeypatch: pytest.MonkeyPatch) -> None:

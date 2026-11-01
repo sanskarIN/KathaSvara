@@ -44,6 +44,19 @@ powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -ModelV3 -Ve
 
 The first command checks Python imports and the requested checkpoint name without downloading weights; the second intentionally runs real generation and may download large V3 weights. On an already configured environment use `KATHASVARA_TTS_MODEL=v3` in the **child process environment**. The default `v2` continues to call the legacy API without a new `t3_model` keyword. V2 and V3 have separate speech cache entries so switching does not silently reuse a prior checkpoint's WAV. The Settings preflight and DoctorOnly cannot detect an outdated installed API; if actual V3 loading fails, check the upstream Chatterbox version and approved checkpoint access.
 
+### Optional, user-consented voice reference WAV
+
+Upstream Chatterbox may load a checkpoint **without bundled speaker conditionals**. Previously a model could load successfully but `generate()` would then fail without a speaker prompt. The adapter now identifies that case with a clear diagnostic. To provide your own voice recording or a recording you have permission to use, opt in with an absolute local WAV path:
+
+```powershell
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -ReferenceWavPath "C:\YOUR\OWN\VOICE.wav" -DoctorOnly
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -ReferenceWavPath "C:\YOUR\OWN\VOICE.wav" -VerifyHindiSpeech
+```
+
+The first command only inspects the local file and Python dependencies; it does **not** load the model. The second deliberately loads the Chatterbox checkpoint and sends the local recording to its **on-device** audio conditioning path. An existing local WAV must be 16-bit uncompressed PCM, mono/stereo, 16–48 kHz, 2–20 seconds, and at most 24 MiB; symlinks and essentially silent or spike-only signals are rejected. The program does not upload or persist the clip or its path in render caches, journal metadata, or desktop diagnostics. Cache keys use an audio-content SHA-256 so different reference clips never reuse each other's synthesized segments.
+
+**Scope:** this configures one reference voice for the entire running inference process. **It does not yet assign different real voice identities to individual characters.** Quality and consent must be checked by the operator; even a valid clip or model-generated WAV is not proof of recognizable Hindi speech or voice similarity. A modified reference file may require restarting the process before generating again.
+
 To test the **real** model, explicitly request one short Hindi WAV. **This can download substantial model weights** and consumes machine resources. The command reports the unique output WAV path, which you must play and listen to yourself:
 
 ```powershell
@@ -69,6 +82,8 @@ For a Python environment already created elsewhere, add `-PythonPath "C:\PATH\TO
 | `chatterbox`, `torch`, `numpy` or `soundfile` missing | Use `-InstallDependencies` explicitly with the source checkout. |
 | TTS device override is invalid | Use only `KATHASVARA_TTS_DEVICE=auto` or `cpu`. The no-model import preflight, Settings panel, and Windows DoctorOnly helper reject other values without echoing their raw contents. |
 | TTS model variant is invalid | Use `KATHASVARA_TTS_MODEL=v2` (default) or `v3` (experimental). The probe rejects other values without reflecting raw environment content. |
+| Built-in speaker conditionals are missing | Provide an optional voice recording you own or have permission to use with `-ReferenceWavPath`; Chatterbox's `generate` needs a reference when `conds.pt` is absent. |
+| Reference WAV invalid | Check PCM16 format, allowed sample rate and duration using `-DoctorOnly -ReferenceWavPath`. The private local filename is not echoed in the report. |
 | V3 selection accepted but model fails loading | A successful import probe does not verify the upstream `t3_model="v3"` API or V3 weights. Update compatible Chatterbox dependencies if needed and check model access before running the explicit WAV smoke test. |
 | DoctorOnly passes but real speech test fails | Dependency discovery is not a model smoke test. Review the privacy-safe Python error hint for model access, incompatible PyTorch, network access or insufficient RAM/VRAM; run the explicit smoke test on the configured machine. |
 | Error says "Local file or audio operation failed" | The Python bridge intentionally hides raw operating-system and audio-codec exceptions, which may contain private file paths. Check write permissions, free storage, the selected output folder and the local diagnostic probe. |

@@ -10,7 +10,8 @@ param(
     [switch]$DoctorOnly,
     [switch]$VerifyHindiSpeech,
     [switch]$CpuOnly,
-    [switch]$ModelV3
+    [switch]$ModelV3,
+    [string]$ReferenceWavPath = ""
 )
 
 Set-StrictMode -Version Latest
@@ -87,6 +88,15 @@ if ($ModelV3) {
     $env:KATHASVARA_TTS_MODEL = "v3"
     Write-Warning "Experimental multilingual V3 selected. First generation may download additional model weights; your chatterbox-tts must support t3_model=v3."
 }
+if ($ReferenceWavPath) {
+    if (-not [System.IO.Path]::IsPathRooted($ReferenceWavPath) -or
+        [System.IO.Path]::GetExtension($ReferenceWavPath).ToLowerInvariant() -ne ".wav" -or
+        -not (Test-Path -LiteralPath $ReferenceWavPath -PathType Leaf)) {
+        Fail "ReferenceWavPath must be an existing absolute local .wav file."
+    }
+    $env:KATHASVARA_TTS_REFERENCE_WAV = (Resolve-Path -LiteralPath $ReferenceWavPath).Path
+    Write-Host "Local voice reference selected. Use only a recording you own or have permission to use; no audio has been uploaded."
+}
 
 Write-Host "Checking the configured Python bridge without loading a speech model..."
 Push-Location $inference
@@ -135,11 +145,15 @@ if (-not $importProbe.result.preflight_ok) {
     if (-not $importProbe.result.model_configuration_valid) {
         $failed += "KATHASVARA_TTS_MODEL (must be v2 or v3)"
     }
+    if ($importProbe.result.reference_voice_status -eq "invalid") {
+        $failed += "KATHASVARA_TTS_REFERENCE_WAV (must be valid 16-bit PCM WAV)"
+    }
     Fail ("Speech runtime preflight failed: " + ($failed -join ", ") +
         ". Repair the Python TTS environment or override before launching the app.")
 }
 Write-Host ("Speech preflight passed (device: " + $importProbe.result.tts_device_mode +
     "; model: " + $importProbe.result.tts_model_variant +
+    "; voice reference: " + $importProbe.result.reference_voice_status +
     "). Model weights, hardware capability and Hindi audio are NOT verified.")
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 
