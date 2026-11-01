@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from .audio_stream import StreamingWav
 from .engine import ChatterboxHindi, VoiceSettings
 from .hindi import split_for_engine, validate_story
+from .pcm_signal import effectively_silent_pcm
 
 
 class SpeechEngine(Protocol):
@@ -63,10 +64,9 @@ def synthesize(
             peak = float(np.max(np.abs(samples)))
             if peak > 2.0:
                 raise RuntimeError("Speech engine returned implausible sample amplitudes.")
-            # A generated chunk below one PCM16 quantization step can become
-            # digital silence in the output file. Never label it as successful
-            # spoken narration; do not publish a partial WAV.
-            if peak < 1.0 / 32768.0:
+            # A high-amplitude impulse can mask near-silence in a peak-only
+            # test. Check RMS before PCM16 quantization and publication.
+            if effectively_silent_pcm(samples, np):
                 raise RuntimeError(
                     "Speech engine returned effectively silent audio. "
                     "Check model weights, hardware and speech generation."
