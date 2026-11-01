@@ -79,6 +79,34 @@ describe("session-only consented reference selection (no model)", () => {
     expect(document.body.textContent).not.toContain(privatePath);
   });
 
+  it("sends the selected voice only to a local narration command", async () => {
+    const privatePath = "C:\\Users\\private\\consented.wav";
+    mocks.open.mockResolvedValue(privatePath);
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") {
+        return {
+          audio_id: "123e4567-e89b-42d3-a456-426614174000",
+          data_url: "data:audio/wav;base64,UklGRg==",
+          preview_available: true, duration_seconds: 1,
+          sample_rate: 24000, chunks: 1,
+        };
+      }
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Hindi Voice/ }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "synthesize", expect.objectContaining({ referenceWavPath: privatePath }),
+    ));
+    expect(document.body.textContent).not.toContain(privatePath);
+  });
+
   it("keeps prior selection when the reference picker is cancelled", async () => {
     mocks.open.mockResolvedValue(null);
     openSettings();
