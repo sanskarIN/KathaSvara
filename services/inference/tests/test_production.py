@@ -28,7 +28,7 @@ class FakeEngine:
 
     def generate(self, text: str, settings: object) -> np.ndarray:
         self.calls.append((text, settings.exaggeration))
-        return np.full(2400, 0.12, dtype=np.float32)
+        return np.tile(np.array([0.12, -0.12], dtype=np.float32), 1200)
 
 
 def sample_doc():
@@ -366,7 +366,7 @@ def test_chunk_reserves_next_speaker_gap_before_pcm_concatenation(
 
     class LongEngine(FakeEngine):
         def generate(self, text: str, settings: object) -> np.ndarray:
-            return np.full(22_000, 0.12, dtype=np.float32)
+            return np.tile(np.array([0.12, -0.12], dtype=np.float32), 11_000)
 
     def unexpected_concatenation(_parts: object) -> None:
         raise AssertionError("Over-budget PCM must be rejected before concatenation.")

@@ -30,9 +30,51 @@ def test_sparse_impulse_exceeds_peak_threshold_but_fails_rms() -> None:
     assert effectively_silent_pcm(samples, np) is True
 
 
-def test_consistently_quiet_but_representable_pcm_passes_math_gate() -> None:
-    samples = np.full(2400, 0.0001, dtype=np.float32)
+def test_consistently_quiet_but_varying_pcm_passes_math_gate() -> None:
+    samples = np.tile(np.array([0.0001, -0.0001], dtype=np.float32), 1200)
     assert effectively_silent_pcm(samples, np) is False
+
+
+@pytest.mark.parametrize("offset", [0.01, 0.5, -0.8])
+def test_loud_constant_dc_offset_is_not_useful_audio(offset: float) -> None:
+    samples = np.full(2400, offset, dtype=np.float32)
+    assert effectively_silent_pcm(samples, np) is True
+
+
+def test_loud_offset_with_tiny_variation_is_still_effectively_silent() -> None:
+    samples = np.tile(np.array([0.2, 0.20000001], dtype=np.float32), 1200)
+    assert effectively_silent_pcm(samples, np) is True
+
+
+def test_loud_offset_with_genuine_variation_passes_signal_gate() -> None:
+    samples = np.tile(np.array([0.1, 0.3], dtype=np.float32), 1200)
+    assert effectively_silent_pcm(samples, np) is False
+
+
+def test_single_line_generator_rejects_constant_dc_without_publication(tmp_path) -> None:
+    class DcEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.full(2400, 0.3, dtype=np.float32)
+
+    output = tmp_path / "dc-narration.wav"
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        synthesize("नमस्कार।", output, VoiceSettings(), DcEngine())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_story_generator_does_not_cache_constant_dc(tmp_path) -> None:
+    class DcEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.full(2400, -0.25, dtype=np.float32)
+
+    doc = parse_dialogue("परीक्षण", "Narrator: नमस्कार।", [narrator()])
+    output = tmp_path / "story-dc.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        render_story(doc, output, cache, DcEngine())
+    assert not output.exists()
+    assert list(cache.glob("*.wav")) == []
 
 
 def test_single_line_generator_does_not_publish_silent_spike(tmp_path) -> None:
@@ -60,6 +102,25 @@ def test_story_generator_does_not_cache_or_publish_silent_spike(tmp_path) -> Non
     assert not output.exists()
     assert list(cache.glob("*.wav")) == []
     assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_dc_poisoned_cached_segment_is_regenerated(tmp_path) -> None:
+    doc = parse_dialogue("परीक्षण", "Narrator: नमस्कार।", [narrator()])
+    cache = tmp_path / "cache"
+    render_story(doc, tmp_path / "first-dc.wav", cache, FakeEngine())
+    entries = list(cache.glob("*.wav"))
+    assert len(entries) == 1
+    sf.write(
+        str(entries[0]),
+        np.full(2400, 0.35, dtype=np.float32),
+        24_000, subtype="PCM_16",
+    )
+
+    recovered = FakeEngine()
+    report = render_story(doc, tmp_path / "recovered-dc.wav", cache, recovered)
+    assert len(recovered.calls) == 1
+    assert report["segments"][0]["cached"] is False
+    assert sf.info(str(tmp_path / "recovered-dc.wav")).frames == 2400
 
 
 def test_spike_poisoned_cached_segment_is_regenerated(tmp_path) -> None:
