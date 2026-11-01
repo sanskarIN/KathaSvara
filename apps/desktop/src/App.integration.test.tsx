@@ -160,6 +160,45 @@ describe("session-only consented reference selection (no model)", () => {
     })).not.toHaveProperty("disabled", true);
   });
 
+  it("does not publish stale audio from a voice selection cleared mid-render", async () => {
+    const firstVoice = "C:\\Users\\private\\selected.wav";
+    const audioId = "123e4567-e89b-42d3-a456-426614174000";
+    let finishGeneration: (result: unknown) => void = () => {
+      throw new Error("Speech generation was not started");
+    };
+    mocks.open.mockResolvedValue(firstVoice);
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") {
+        return new Promise(resolve => { finishGeneration = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Clear session voice selection",
+    })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Hindi Voice/ }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "synthesize", expect.objectContaining({ referenceWavPath: firstVoice }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear session voice selection" }));
+    await act(async () => {
+      finishGeneration({
+        audio_id: audioId, data_url: "data:audio/wav;base64,UklGRg==",
+        preview_available: true, duration_seconds: 1,
+        sample_rate: 24000, chunks: 1,
+      });
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId });
+    expect(screen.getByText(/Session voice selection cleared/)).toBeTruthy();
+    expect(screen.getByText(/Launcher default \(if available\)/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain(firstVoice);
+  });
+
   it("keeps prior selection when the reference picker is cancelled", async () => {
     mocks.open.mockResolvedValue(null);
     openSettings();
