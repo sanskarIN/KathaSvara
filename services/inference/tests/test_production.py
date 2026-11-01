@@ -107,6 +107,35 @@ def test_different_checkpoints_never_reuse_speech_cache(tmp_path: Path) -> None:
     assert len(list(cache.glob("*.wav"))) == 4
 
 
+def test_reference_recordings_never_share_cached_speech(tmp_path: Path) -> None:
+    doc = sample_doc()
+    cache = tmp_path / "cache"
+
+    first = FakeEngine()
+    first.conditioning_fingerprint = "reference-sha256:" + "a" * 64
+    first_report = render_story(doc, tmp_path / "first.wav", cache, first)
+    assert len(first.calls) == 2
+
+    other = FakeEngine()
+    other.conditioning_fingerprint = "reference-sha256:" + "b" * 64
+    other_report = render_story(doc, tmp_path / "other.wav", cache, other)
+    assert len(other.calls) == 2
+    assert {item["cache_key"] for item in first_report["segments"]}.isdisjoint(
+        {item["cache_key"] for item in other_report["segments"]}
+    )
+
+    again = FakeEngine()
+    again.conditioning_fingerprint = first.conditioning_fingerprint
+    repeated = render_story(doc, tmp_path / "again.wav", cache, again)
+    assert again.calls == []
+    assert all(item["cached"] for item in repeated["segments"])
+
+    default = FakeEngine()
+    render_story(doc, tmp_path / "default.wav", cache, default)
+    assert len(default.calls) == 2
+    assert len(list(cache.glob("*.wav"))) == 6
+
+
 def test_render_rejects_unresolved_speaker_before_loading_model(tmp_path: Path) -> None:
     doc = parse_dialogue("A", "अज्ञात: नमस्ते।", [narrator()])
     mock = FakeEngine()
