@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .inference_errors import describe_model_failure
@@ -60,7 +61,7 @@ class ChatterboxHindi:
         if reference:
             # Fail before costly model downloads. These checks never send the
             # raw filesystem path through the desktop IPC boundary.
-            content_sha = inspect_reference_wav(__import__("pathlib").Path(reference))
+            content_sha = inspect_reference_wav(Path(reference))
             self._reference_wav = reference
             self._conditioning_fingerprint = f"reference-sha256:{content_sha}"
         try:
