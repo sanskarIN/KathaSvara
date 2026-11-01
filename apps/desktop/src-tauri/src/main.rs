@@ -1620,6 +1620,59 @@ mod tests {
 
 
     #[test]
+    fn python_input_worker_never_blocks_the_watchdog_caller() {
+        use std::sync::mpsc;
+        struct GatedWriter {
+            started: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+        impl Write for GatedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.started.send(()).unwrap();
+                self.release.recv().unwrap();
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let input = spawn_request_writer(
+            GatedWriter { started: started_tx, release: release_rx },
+            vec![b'a'; 128 * 1024],
+        );
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!input.is_finished(), "Writer must be blocked independently");
+        // The controlling thread remains free to enforce an action timeout.
+        assert_eq!(
+            python_job_timeout(Some("probe_runtime"), Some("7200")),
+            Duration::from_secs(90),
+        );
+        release_tx.send(()).unwrap();
+        input.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn python_input_writer_masks_pipe_failure_without_exposing_request() {
+        struct ClosedPipe;
+        impl Write for ClosedPipe {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let private_script = "अत्यंत निजी कहानी C:\\private\\notes.txt";
+        let failed = spawn_request_writer(ClosedPipe, private_script.as_bytes().to_vec())
+            .join().unwrap().unwrap_err();
+        assert_eq!(failed, "Unable to send synthesis request.");
+        assert!(!failed.contains(private_script));
+    }
+
+    #[test]
     fn speech_timeout_is_opt_in_bounded_and_defaults_to_ten_minutes() {
         assert_eq!(python_job_timeout(Some("synthesize"), None), Duration::from_secs(600));
         assert_eq!(python_job_timeout(Some("render_story"), None), Duration::from_secs(600));
