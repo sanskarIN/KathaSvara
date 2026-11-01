@@ -51,6 +51,61 @@ def test_loud_offset_with_genuine_variation_passes_signal_gate() -> None:
     assert effectively_silent_pcm(samples, np) is False
 
 
+@pytest.mark.parametrize("values", [
+    (1.2, 1.8), (-1.2, -1.8),
+])
+def test_clipping_cannot_publish_flat_dc_narration(
+    tmp_path, values: tuple[float, float],
+) -> None:
+    class ClippedEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.tile(np.asarray(values, dtype=np.float32), 1200)
+
+    output = tmp_path / "clipped-narration.wav"
+    # Raw RMS and variance pass; the PCM16 samples WOULD all be +1 or -1.
+    raw = np.tile(np.asarray(values, dtype=np.float32), 1200)
+    assert effectively_silent_pcm(raw, np) is False
+    assert effectively_silent_pcm(np.clip(raw, -1.0, 1.0), np) is True
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        synthesize("नमस्कार।", output, VoiceSettings(), ClippedEngine())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+@pytest.mark.parametrize("values", [
+    (1.2, 1.8), (-1.2, -1.8),
+])
+def test_clipping_cannot_cache_or_publish_flat_dc_story(
+    tmp_path, values: tuple[float, float],
+) -> None:
+    class ClippedEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.tile(np.asarray(values, dtype=np.float32), 1200)
+
+    doc = parse_dialogue("परीक्षण", "Narrator: नमस्कार।", [narrator()])
+    output = tmp_path / "clipped-story.wav"
+    cache = tmp_path / "cache"
+    with pytest.raises(RuntimeError, match="effectively silent audio"):
+        render_story(doc, output, cache, ClippedEngine())
+    assert not output.exists()
+    assert list(cache.glob("*.wav")) == []
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_partially_clipped_but_time_varying_pcm_remains_usable(tmp_path) -> None:
+    class PartiallyClippedEngine(FakeEngine):
+        def generate(self, text: str, settings: object) -> np.ndarray:
+            return np.tile(np.array([1.2, 0.3], dtype=np.float32), 1200)
+
+    output = tmp_path / "partially-clipped.wav"
+    synthesize("नमस्कार।", output, VoiceSettings(), PartiallyClippedEngine())
+    audio, rate = sf.read(str(output), dtype="float32")
+    assert rate == 24_000
+    assert effectively_silent_pcm(audio, np) is False
+    assert float(np.max(audio)) < 1.001
+    assert audio.size == 2400
+
+
 def test_single_line_generator_rejects_constant_dc_without_publication(tmp_path) -> None:
     class DcEngine(FakeEngine):
         def generate(self, text: str, settings: object) -> np.ndarray:
