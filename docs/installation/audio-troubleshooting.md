@@ -44,6 +44,16 @@ powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -ModelV3 -Ve
 
 The first command checks Python imports, the requested checkpoint name **and whether the installed Chatterbox API declares the V3 `t3_model` option**, without downloading weights; the second intentionally runs real generation and may download large V3 weights. On an already configured environment use `KATHASVARA_TTS_MODEL=v3` in the **child process environment**. The default `v2` continues to call the legacy API without a new `t3_model` keyword. V2 and V3 have separate speech cache entries so switching does not silently reuse a prior checkpoint's WAV. The Settings preflight and DoctorOnly inspect the selected optional API keywords, but they cannot verify model loading or checkpoint access; if actual V3 loading fails, review the upstream Chatterbox version, approved model access, and local hardware.
 
+### Longer local generation jobs on slow CPUs
+
+The desktop normally limits an individual speech job to **10 minutes of wall-clock time**. That is not a guaranteed completion time: genuine model downloads, CPU inference and longer story renders can take more. If you deliberately want a longer limit for the **desktop EXE launched from this helper**, choose 10–120 minutes:
+
+```powershell
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -CpuOnly -RenderTimeoutMinutes 60 -ExecutablePath "C:\YOUR\KathaSvara-dev.exe"
+```
+
+The switch sets the **child process** environment variable `KATHASVARA_TTS_JOB_TIMEOUT_SECONDS`; it does not edit the registry. The default remains 600 seconds, and allowed overrides are 600–7,200 seconds. Invalid/out-of-range environment values fall back to the default. **Only `synthesize` and `render_story` jobs are affected**; no-model diagnostics, WAV inspection and health requests retain shorter timeouts. This switch cannot overcome missing packages, incompatible hardware, unavailable weights, or bad input audio. Longer jobs still require available disk space and may consume substantial CPU/RAM. Explicit render cancellation remains available between inference chunks. `-VerifyHindiSpeech` uses a direct Python command rather than the desktop bridge and is not governed by the desktop timeout.
+
 ### Optional, user-consented voice reference WAV
 
 Upstream Chatterbox may load a checkpoint **without bundled speaker conditionals**. Previously a model could load successfully but `generate()` would then fail without a speaker prompt. The adapter now identifies that case with a clear diagnostic. To provide your own voice recording or a recording you have permission to use, opt in with an absolute local WAV path:

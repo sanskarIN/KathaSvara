@@ -537,6 +537,27 @@ fn read_bounded_response(mut source: impl Read) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Bound local inference jobs without allowing diagnostics to hang for hours.
+fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) -> Duration {
+    match action {
+        Some("synthesize" | "render_story") => {
+            // Existing 10-minute behavior stays the default. Operators can
+            // explicitly allow slow CPU/model jobs up to two hours.
+            let limit = configured_seconds
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .filter(|seconds| (600..=7200).contains(seconds))
+                .unwrap_or(600);
+            Duration::from_secs(limit)
+        }
+        // WAV inspection scans up to the allowed file size twice.
+        Some("inspect_generated_wav") => Duration::from_secs(180),
+        // Torch and Chatterbox imports can be slow on Windows, but never
+        // download weights during this probe.
+        Some("probe_runtime") => Duration::from_secs(90),
+        _ => Duration::from_secs(15),
+    }
+}
+
 fn invoke_python(request: Value) -> Result<Value, String> {
     let directory = inference_directory()?;
     if !directory.join("kathasvara/cli.py").is_file() {
@@ -560,14 +581,11 @@ fn invoke_python(request: Value) -> Result<Value, String> {
     let stdout = child.stdout.take()
         .ok_or_else(|| "Python stdout was not connected.".to_string())?;
     let output_reader = thread::spawn(move || read_bounded_response(stdout));
-    let max_wait = match request.get("action").and_then(Value::as_str) {
-        Some("synthesize" | "render_story") => Duration::from_secs(600),
-        // PCM inspection scans the entire allowed WAV twice without model weights.
-        Some("inspect_generated_wav") => Duration::from_secs(180),
-        // Importing torch/Chatterbox can be slow on Windows; no model weights load.
-        Some("probe_runtime") => Duration::from_secs(90),
-        _ => Duration::from_secs(15),
-    };
+    let configured_timeout = std::env::var("KATHASVARA_TTS_JOB_TIMEOUT_SECONDS").ok();
+    let max_wait = python_job_timeout(
+        request.get("action").and_then(Value::as_str),
+        configured_timeout.as_deref(),
+    );
     let started = Instant::now();
     loop {
         match child.try_wait() {
@@ -1479,6 +1497,45 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn speech_timeout_is_opt_in_bounded_and_defaults_to_ten_minutes() {
+        assert_eq!(python_job_timeout(Some("synthesize"), None), Duration::from_secs(600));
+        assert_eq!(python_job_timeout(Some("render_story"), None), Duration::from_secs(600));
+        for action in ["synthesize", "render_story"] {
+            assert_eq!(
+                python_job_timeout(Some(action), Some(" 1800 ")),
+                Duration::from_secs(1800)
+            );
+            assert_eq!(
+                python_job_timeout(Some(action), Some("7200")),
+                Duration::from_secs(7200)
+            );
+            for invalid in ["", "0", "599", "7201", "-10", "invalid", "999999999999999"] {
+                assert_eq!(
+                    python_job_timeout(Some(action), Some(invalid)),
+                    Duration::from_secs(600),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn speech_timeout_override_never_extends_diagnostics_or_unknown_actions() {
+        for (action, expected_seconds) in [
+            ("probe_runtime", 90),
+            ("inspect_generated_wav", 180),
+            ("diagnose", 15),
+            ("health", 15),
+        ] {
+            assert_eq!(
+                python_job_timeout(Some(action), Some("7200")),
+                Duration::from_secs(expected_seconds),
+            );
+        }
+        assert_eq!(python_job_timeout(None, Some("7200")), Duration::from_secs(15));
+    }
+
     #[test]
     fn generated_audio_inspection_accepts_only_uuid_scoped_app_data_path() {
         let root = Path::new("private-app-data");

@@ -11,13 +11,19 @@ param(
     [switch]$VerifyHindiSpeech,
     [switch]$CpuOnly,
     [switch]$ModelV3,
-    [string]$ReferenceWavPath = ""
+    [string]$ReferenceWavPath = "",
+    [int]$RenderTimeoutMinutes = 0
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 if ($DoctorOnly -and $VerifyHindiSpeech) {
     Write-Error "Choose either -DoctorOnly (no model) or -VerifyHindiSpeech (real model)."
+    exit 1
+}
+if ($RenderTimeoutMinutes -ne 0 -and
+    ($RenderTimeoutMinutes -lt 10 -or $RenderTimeoutMinutes -gt 120)) {
+    Write-Error "RenderTimeoutMinutes must be 10 through 120, or omit it for the 10-minute default."
     exit 1
 }
 
@@ -77,6 +83,13 @@ if ($InstallDependencies) {
 # The Windows user's persistent environment and registry are untouched.
 $env:KATHASVARA_PYTHON = $python
 $env:KATHASVARA_INFERENCE_DIR = $inference
+if ($RenderTimeoutMinutes -ne 0) {
+    # Only audio generation jobs receive this process-scoped timeout; no
+    # registry modifications and no change to diagnostic command budgets.
+    $env:KATHASVARA_TTS_JOB_TIMEOUT_SECONDS = [string]($RenderTimeoutMinutes * 60)
+    Write-Host ("Audio job timeout set to " + $RenderTimeoutMinutes +
+        " minutes. The desktop still supports explicit cancellation.")
+}
 if ($CpuOnly) {
     # Bypass a failing CUDA/MPS availability probe in the Python adapter.
     # Applies only to this script and the child EXE, not the user's registry.
