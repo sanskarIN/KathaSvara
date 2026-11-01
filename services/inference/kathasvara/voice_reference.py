@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import stat
+import sys
 import wave
+from array import array
 from pathlib import Path
 
 MAX_REFERENCE_BYTES = 24 * 1024 * 1024
@@ -42,11 +44,24 @@ def inspect_reference_wav(path: Path) -> str:
                 raise ValueError(REFERENCE_ERROR)
             # A truncated RIFF file can report plausible frame metadata.
             read_bytes = 0
+            total_energy = 0
+            sample_count = 0
             while (data := recording.readframes(8192)):
                 read_bytes += len(data)
-                if read_bytes > frames * channels * width:
+                if read_bytes > frames * channels * width or len(data) % 2:
                     raise ValueError(REFERENCE_ERROR)
-            if read_bytes != frames * channels * width:
+                pcm = array("h")
+                pcm.frombytes(data)
+                if sys.byteorder != "little":
+                    pcm.byteswap()
+                total_energy += sum(sample * sample for sample in pcm)
+                sample_count += len(pcm)
+            if read_bytes != frames * channels * width or sample_count == 0:
+                raise ValueError(REFERENCE_ERROR)
+            # A recording of pure silence or one narrow nonzero spike is not
+            # a useful conditioning prompt. This is only a PCM-level gate,
+            # not a detector for consent, voice identity or intelligibility.
+            if total_energy < sample_count:
                 raise ValueError(REFERENCE_ERROR)
         digest = hashlib.sha256()
         with path.open("rb") as source:
