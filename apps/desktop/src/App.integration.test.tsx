@@ -34,6 +34,8 @@ const GOOD_IMPORTS = {
   tts_model_variant: "v2",
   model_configuration_valid: true,
   reference_voice_status: "not_set",
+  upstream_api_status: "not_requested",
+  upstream_api_compatible: true,
   preflight_ok: true,
   model_weights_verified: false,
   audio_synthesis_verified: false,
@@ -53,7 +55,7 @@ describe("local TTS import doctor (no model)", () => {
       name: "Verify speech library imports (no model load)",
     }));
     const report = await screen.findByRole("status", { name: "TTS import probe result" });
-    expect(within(report).getByText(/TTS import check: Imports passed/)).toBeTruthy();
+    expect(within(report).getByText(/TTS preflight: Setup passed/)).toBeTruthy();
     expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/)).toBeTruthy();
     expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/).parentElement?.textContent).toContain("No");
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
@@ -84,6 +86,7 @@ describe("local TTS import doctor (no model)", () => {
     mocks.invoke.mockResolvedValue({
       ...GOOD_IMPORTS,
       tts_model_variant: "v3",
+      upstream_api_status: "compatible",
     });
     openSettings();
     fireEvent.click(screen.getByRole("button", {
@@ -92,6 +95,41 @@ describe("local TTS import doctor (no model)", () => {
     const report = await screen.findByRole("status", { name: "TTS import probe result" });
     expect(within(report).getByText(/Multilingual checkpoint:/).parentElement?.textContent).toContain("v3");
     expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/).parentElement?.textContent).toContain("No");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("detects a legacy Chatterbox version missing V3 selection", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      tts_model_variant: "v3",
+      upstream_api_status: "v3_unsupported",
+      upstream_api_compatible: false,
+      preflight_ok: false,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/Setup needs attention/)).toBeTruthy();
+    expect(within(report).getByText(/does not support V3 checkpoint selection/)).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("detects an installed Chatterbox version missing reference prompts", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      reference_voice_status: "valid",
+      upstream_api_status: "reference_unsupported",
+      upstream_api_compatible: false,
+      preflight_ok: false,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/does not support reference audio prompts/)).toBeTruthy();
     expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
   });
 
