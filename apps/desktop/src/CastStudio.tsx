@@ -936,6 +936,11 @@ export default function CastStudio({
           <button className="secondary-button" disabled={busy || rendering} onClick={() => void saveDocument()}>Save cast and scenes</button>
           <button className="quiet-button" disabled={busy || rendering} onClick={() => void loadDocument()}>Load saved v2</button>
         </div>
+        <p className="helper" aria-label="Active dialogue reference mode">
+          <strong>Dialogue voice reference:</strong> {referenceWavPath === null
+            ? "Launcher/default model conditioning (if available)."
+            : "Session-selected local WAV (private path hidden). One reference applies to the entire story or scene; distinct character voices are NOT verified."}
+        </p>
         <div className="render-tools">
           <button className="primary-button" disabled={busy || rendering || !document.scenes.length}
             onClick={() => void startRender()}>Generate story dialogue WAV</button>
