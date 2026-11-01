@@ -7,6 +7,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 import types
 import wave
@@ -16,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kathasvara import voice_reference
 from kathasvara.engine import ChatterboxHindi, VoiceSettings
 from kathasvara.public_errors import public_error_message
 from kathasvara.voice_reference import (
@@ -99,6 +101,53 @@ def test_reference_sha_tracks_contents_not_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("bad", ["missing", "relative", "text", "short", "truncated"])
+def test_same_size_reference_rewrite_during_hash_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "private-consented-voice.wav"
+    make_reference(path, value=1000)
+    original_info = path.lstat()
+    real_digest = hashlib.sha256
+
+    def changed_sha256():
+        # The signal gate has completed, but the checksum will read an edited
+        # recording with identical byte length. Never accept that stale gate.
+        make_reference(path, value=2000)
+        modified = path.stat()
+        os.utime(path, ns=(
+            modified.st_atime_ns, original_info.st_mtime_ns + 2_000_000_000,
+        ))
+        return real_digest()
+
+    monkeypatch.setattr(voice_reference.hashlib, "sha256", changed_sha256)
+    with pytest.raises(ValueError) as caught:
+        inspect_reference_wav(path)
+    assert str(caught.value) == REFERENCE_CHANGED_ERROR
+    assert path.stat().st_size == original_info.st_size
+    assert str(path) not in str(caught.value)
+
+
+def test_same_size_reference_replacement_during_hash_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "private-voice.wav"
+    replacement = tmp_path / "replacement.wav"
+    make_reference(path, value=1000)
+    make_reference(replacement, value=2000)
+    assert replacement.stat().st_size == path.stat().st_size
+    original_digest = hashlib.sha256
+
+    def swapped_sha256():
+        replacement.replace(path)
+        return original_digest()
+
+    monkeypatch.setattr(voice_reference.hashlib, "sha256", swapped_sha256)
+    with pytest.raises(ValueError) as caught:
+        inspect_reference_wav(path)
+    assert str(caught.value) == REFERENCE_CHANGED_ERROR
+    assert str(tmp_path) not in str(caught.value)
+
+
 def test_invalid_reference_never_leaks_file_path(
     tmp_path: Path, bad: str,
 ) -> None:
