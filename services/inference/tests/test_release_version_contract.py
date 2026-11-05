@@ -84,6 +84,17 @@ def test_public_site_uses_latest_published_prerelease_without_stable_claims() ->
     assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.1" in site
 
 
+def test_manual_windows_qa_uses_latest_published_preview() -> None:
+    qa = (ROOT / "docs/qa/windows-hindi-acceptance.md").read_text(
+        encoding="utf-8",
+    )
+    assert f"releases/tag/v{PUBLISHED_VERSION}" in qa
+    assert f"KathaSvara-v{PUBLISHED_VERSION}-dev-win64.exe" in qa
+    assert "v0.5.3" in qa and "unpublished source release candidate" in qa
+    assert "All real audio and clean-device outcomes" not in qa or "not-tested" in qa
+    assert "real model" in qa.lower() and "listening" in qa.lower()
+
+
 def test_public_support_link_matches_repository_funding() -> None:
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
