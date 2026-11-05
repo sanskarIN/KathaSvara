@@ -255,7 +255,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          gh release create v0.5.4             release-assets/KathaSvara-v0.5.4-dev-win64.exe             release-assets/README.txt             release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA"             --title "KathaSvara v0.5.4 — Experimental Hindi Audio Recovery & Scene Workflow Developer Preview"             --notes-file docs/releases/v0.5.4-published-notes.md --prerelease
+          gh release create v0.5.4             release-assets/KathaSvara-v0.5.4-dev-win64.exe             release-assets/README.txt             release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA"             --title "KathaSvara v0.5.4 — Experimental Audio Setup Doctor Developer Preview"             --notes-file docs/releases/v0.5.4-published-notes.md --prerelease
       - name: Verify tag, SHA, prerelease and three uploaded assets
         env:
           GH_TOKEN: ${{ github.token }}
