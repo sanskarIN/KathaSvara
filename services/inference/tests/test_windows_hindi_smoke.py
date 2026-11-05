@@ -105,3 +105,24 @@ def test_windows_doctor_shows_fixed_runtime_repair_action() -> None:
     assert '"Recommended next step: " + $importProbe.result.next_action' in script
     assert 'if ($DoctorOnly) {' in script
     assert 'DoctorOnly complete. No speech model was loaded' in script
+
+
+def test_windows_doctor_checks_missing_packages_in_import_probe() -> None:
+    """The first-use missing-packages case must reach the same repair advice."""
+    script = (
+        Path(__file__).resolve().parents[3] / "scripts" / "windows"
+        / "launch-with-audio.ps1"
+    ).read_text(encoding="utf-8")
+    assert script.isascii()
+    assert 'if (-not $diagnostic.result.dependencies_present) {' in script
+    before_probe, separator, after_probe = script.partition(
+        'Write-Host "Checking actual speech library imports (no model weights loaded)..."'
+    )
+    assert separator
+    # A previous early Fail made next_action unreachable for a clean machine.
+    assert 'Fail ("Speech packages are missing: "' not in before_probe
+    assert 'Some optional speech packages are absent;' in before_probe
+    assert """'{"action":"probe_runtime"}' | & $python -m kathasvara.cli""" in after_probe
+    assert 'Fail ("Speech runtime preflight failed: "' in after_probe
+    assert '$importProbe.result.next_action' in after_probe
+    assert "DoctorOnly complete. No speech model was loaded" in after_probe
