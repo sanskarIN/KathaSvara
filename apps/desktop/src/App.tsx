@@ -45,15 +45,20 @@ type RuntimeImportProbe = {
     "v3_unsupported" | "reference_unsupported" | "unverifiable";
   upstream_api_compatible: boolean;
   preflight_ok: boolean;
-  next_action_code: "select_python_311" | "repair_tts_imports" |
+  next_action_code?: "select_python_311" | "repair_tts_imports" |
     "fix_device_override" | "fix_model_selection" | "replace_reference_wav" |
     "update_chatterbox_api" | "verify_chatterbox_api" | "run_real_hindi_smoke";
-  next_action: string;
+  next_action?: string;
   model_weights_verified: false;
   audio_synthesis_verified: false;
   help: string;
 };
 const CACHE_TARGET_MIB = 512;
+const OLD_PROBE_GUIDANCE = "Update the local KathaSvara inference sources to match this desktop build, then repeat the model-free speech probe.";
+function nextProbeAction(report: RuntimeImportProbe): string {
+  return typeof report.next_action === "string" && report.next_action.trim()
+    ? report.next_action : OLD_PROBE_GUIDANCE;
+}
 function asMiB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
 }
@@ -369,7 +374,7 @@ export default function App() {
       setImportProbe(report);
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
-        : "TTS preflight needs attention. " + report.next_action);
+        : "TTS preflight needs attention. " + nextProbeAction(report));
     } catch (error) {
       if (probeRevision === importProbeRevision.current) {
         setMessage("TTS import probe could not run: " + errorMessage(error));
@@ -636,7 +641,7 @@ export default function App() {
               {importProbe && (
                 <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
                   <h3>TTS preflight: {importProbe.preflight_ok ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
-                  <p><strong>Recommended next step:</strong> {importProbe.next_action}</p>
+                  <p><strong>Recommended next step:</strong> {nextProbeAction(importProbe)}</p>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
                   <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "invalid"
                     ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
