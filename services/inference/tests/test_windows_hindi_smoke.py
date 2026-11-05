@@ -5,6 +5,7 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+import json
 import wave
 from pathlib import Path
 
@@ -75,3 +76,19 @@ def test_windows_real_smoke_mode_requires_full_wav_inspection() -> None:
     assert "near_silence_hint" in smoke_section
     assert 'if ($inspection.result.level_hints.dc_only_hint) {' in smoke_section
     assert 'Fail "The Hindi smoke-test WAV has no meaningful varying audio' in smoke_section
+
+
+def test_windows_hindi_smoke_prompt_survives_powershell_51_ansi_source() -> None:
+    # Powershell 5.1 misdecodes BOM-less UTF-8 script literals. The source must
+    # be ASCII-only while the Unicode-escaped JSON decodes to real Hindi.
+    script = (
+        Path(__file__).resolve().parents[3] / "scripts" / "windows"
+        / "launch-with-audio.ps1"
+    ).read_text(encoding="utf-8")
+    assert script.isascii()
+    prompt_lines = [line for line in script.splitlines() if "$hindiText = " in line]
+    assert len(prompt_lines) == 1
+    unicode_json = prompt_lines[0].split("'", 2)[1]
+    assert json.loads(unicode_json) == "नमस्कार। यह कथास्वर की वास्तविक हिंदी आवाज़ जाँच है।"
+    assert "text = $hindiText" in script
+    assert "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in script
