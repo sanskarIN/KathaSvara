@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- **Windows 5.1 Hindi smoke-test encoding:** keep the PowerShell launcher ASCII-only and decode its Hindi test line from JSON Unicode escapes before sending it to Python as UTF-8. Avoid legacy ANSI source-decoding corruption that could synthesize the wrong text; add a deterministic no-model test. Real Chatterbox listening remains unverified.
+
 - **Hindi smoke-test correctness:** reject WAVs containing only a loud DC offset in the opt-in Windows real-audio verification path, not just near-silence. Add CLI-inspector and launcher-contract regressions for constant and varying PCM signals; neither model-free test certifies Hindi intelligibility.
 
 - **Audio generator usability:** document that the current unsigned Windows EXE is not a standalone synthesizer, provide an opt-in PowerShell launcher that configures Python 3.11 and inference sources, diagnoses missing dependencies without model downloads, and can explicitly run a real Hindi WAV smoke test. Add no-download PowerShell syntax checking on Windows CI.
