@@ -11,7 +11,7 @@ from pathlib import Path
 
 VERSION = "0.5.2"
 # Public landing page intentionally advertises only releases actually published.
-PUBLISHED_VERSION = "0.5.1"
+PUBLISHED_VERSION = "0.5.2"
 ROOT = Path(__file__).resolve().parents[3]
 
 
