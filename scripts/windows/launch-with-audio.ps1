@@ -240,6 +240,9 @@ if ($VerifyHindiSpeech) {
         if ($inspection.result.level_hints.near_silence_hint) {
             Fail "The Hindi smoke-test WAV is almost silent. Check model output and audio dependencies before accepting it."
         }
+        if ($inspection.result.level_hints.dc_only_hint) {
+            Fail "The Hindi smoke-test WAV has no meaningful varying audio (DC-only signal). Check model output before accepting it."
+        }
         Write-Host ("Structurally validated WAV: " + $output)
         Write-Host ("Measured length: " + $inspection.result.duration_seconds +
             " seconds; sample rate: " + $inspection.result.sample_rate_hz +
