@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.4 development draft (not merged or published)
+## v0.5.4 development (not yet released)
 
 - **Actionable audio diagnostics:** model-free TTS preflight now recommends one deterministic next repair action, prioritized across Python version, imports, device/model overrides, local voice reference, and optional Chatterbox API compatibility. The Settings panel shows this next step without exposing private filenames or raw import errors. Adds Python and React regression tests; no model weights are loaded and no real Hindi speech is claimed.
 
