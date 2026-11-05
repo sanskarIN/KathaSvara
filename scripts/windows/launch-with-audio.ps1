@@ -189,9 +189,12 @@ if ($VerifyHindiSpeech) {
     # consume RAM/VRAM, and take time. It never runs in no-model CI checks.
     $output = Join-Path ([System.IO.Path]::GetTempPath()) (
         "kathasvara-hindi-smoke-" + [guid]::NewGuid().ToString("N") + ".wav")
+    # Windows PowerShell 5.1 reads BOM-less .ps1 files as ANSI. Keep the
+    # source ASCII-only and decode the Hindi sample from JSON Unicode escapes.
+    $hindiText = '"\u0928\u092e\u0938\u094d\u0915\u093e\u0930\u0964 \u092f\u0939 \u0915\u0925\u093e\u0938\u094d\u0935\u0930 \u0915\u0940 \u0935\u093e\u0938\u094d\u0924\u0935\u093f\u0915 \u0939\u093f\u0902\u0926\u0940 \u0906\u0935\u093e\u091c\u093c \u091c\u093e\u0901\u091a \u0939\u0948\u0964"' | ConvertFrom-Json
     $payload = @{
         action = "synthesize"
-        text = "नमस्कार। यह कथास्वर की वास्तविक हिंदी आवाज़ जाँच है।"
+        text = $hindiText
         output = $output
         exaggeration = 0.5
         cfg_weight = 0.5
