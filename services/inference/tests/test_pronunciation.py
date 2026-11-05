@@ -94,7 +94,7 @@ class SimulatedEngine:
 
     def generate(self, text: str, settings: object) -> np.ndarray:
         self.calls.append(text)
-        return np.full(1200, 0.2, dtype=np.float32)
+        return np.tile(np.array([0.2, -0.2], dtype=np.float32), 600)
 
 
 def test_only_changed_effective_text_invalidates_segment_cache(tmp_path: Path) -> None:

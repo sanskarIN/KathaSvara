@@ -10,7 +10,7 @@ use std::{
     fs,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
@@ -537,56 +537,146 @@ fn read_bounded_response(mut source: impl Read) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Bound local inference jobs without allowing diagnostics to hang for hours.
+fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) -> Duration {
+    match action {
+        Some("synthesize" | "render_story") => {
+            // Existing 10-minute behavior stays the default. Operators can
+            // explicitly allow slow CPU/model jobs up to two hours.
+            let limit = configured_seconds
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .filter(|seconds| (600..=7200).contains(seconds))
+                .unwrap_or(600);
+            Duration::from_secs(limit)
+        }
+        // WAV inspection scans up to the allowed file size twice.
+        Some("inspect_generated_wav") => Duration::from_secs(180),
+        // Torch and Chatterbox imports can be slow on Windows, but never
+        // download weights during this probe.
+        Some("probe_runtime") => Duration::from_secs(90),
+        _ => Duration::from_secs(15),
+    }
+}
+
+/// Apply a single user's selected local reference only to the Python child.
+fn apply_reference_selection(
+    command: &mut Command,
+    action: Option<&str>,
+    reference_wav_path: Option<&str>,
+) -> Result<(), String> {
+    let Some(reference) = reference_wav_path else {
+        // Existing launcher environment remains the legacy/default source.
+        return Ok(());
+    };
+    if !matches!(action, Some("probe_runtime" | "synthesize" | "render_story")) {
+        return Err("Voice reference selection is not supported for this action.".into());
+    }
+    let path = Path::new(reference);
+    if !path.is_absolute() || !path.extension().and_then(|part| part.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+    {
+        return Err("Select an absolute local WAV reference recording.".into());
+    }
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "Selected reference WAV cannot be read.".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("Selected reference WAV must be a regular non-symlink file.".into());
+    }
+    // Never modify global process or persistent OS environment variables.
+    // Python's inspect_reference_wav() checks actual PCM, signal and limits.
+    command.env("KATHASVARA_TTS_REFERENCE_WAV", path);
+    Ok(())
+}
+
+/// Write potentially large Hindi story requests without blocking the caller's
+/// watchdog before the Python process has finished importing its modules.
+fn spawn_request_writer<W: Write + Send + 'static>(
+    mut stdin: W,
+    payload: Vec<u8>,
+) -> thread::JoinHandle<Result<(), String>> {
+    thread::spawn(move || {
+        stdin.write_all(&payload)
+            .map_err(|_| "Unable to send synthesis request.".to_string())
+        // Drop stdin here to signal EOF to Python's bounded sys.stdin.read().
+    })
+}
+
+fn stop_inference_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn invoke_python(request: Value) -> Result<Value, String> {
+    invoke_python_with_reference(request, None)
+}
+
+fn invoke_python_with_reference(
+    request: Value,
+    reference_wav_path: Option<&str>,
+) -> Result<Value, String> {
     let directory = inference_directory()?;
     if !directory.join("kathasvara/cli.py").is_file() {
         return Err("Inference sources are missing. Set KATHASVARA_INFERENCE_DIR.".into());
     }
-    let mut child = Command::new(python_executable())
+    let mut command = Command::new(python_executable());
+    command
         .args(["-m", "kathasvara.cli"])
         .current_dir(directory.clone())
         .env("PYTHONPATH", directory)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    apply_reference_selection(
+        &mut command,
+        request.get("action").and_then(Value::as_str),
+        reference_wav_path,
+    )?;
+    let mut child = command.spawn()
         .map_err(|_| "Python 3.11 runtime not found. Configure KATHASVARA_PYTHON.".to_string())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(request.to_string().as_bytes())
-            .map_err(|_| "Unable to send synthesis request.".to_string())?;
-    }
-    // Drain child stdout concurrently to avoid a full pipe deadlocking JSON IPC.
-    let stdout = child.stdout.take()
-        .ok_or_else(|| "Python stdout was not connected.".to_string())?;
-    let output_reader = thread::spawn(move || read_bounded_response(stdout));
-    let max_wait = match request.get("action").and_then(Value::as_str) {
-        Some("synthesize" | "render_story") => Duration::from_secs(600),
-        // PCM inspection scans the entire allowed WAV twice without model weights.
-        Some("inspect_generated_wav") => Duration::from_secs(180),
-        _ => Duration::from_secs(15),
+    // Both pipes must be acquired before launching I/O. If Python startup is
+    // slow and the request exceeds the OS pipe buffer, a synchronous write
+    // would block here BEFORE the timeout loop could ever start.
+    let Some(stdin) = child.stdin.take() else {
+        stop_inference_child(&mut child);
+        return Err("Python stdin was not connected.".into());
     };
+    let Some(stdout) = child.stdout.take() else {
+        drop(stdin);
+        stop_inference_child(&mut child);
+        return Err("Python stdout was not connected.".into());
+    };
+    let output_reader = thread::spawn(move || read_bounded_response(stdout));
+    let input_writer = spawn_request_writer(stdin, request.to_string().into_bytes());
+    let configured_timeout = std::env::var("KATHASVARA_TTS_JOB_TIMEOUT_SECONDS").ok();
+    let max_wait = python_job_timeout(
+        request.get("action").and_then(Value::as_str),
+        configured_timeout.as_deref(),
+    );
     let started = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop_inference_child(&mut child);
+                // Closing the child pipes also unblocks the I/O workers.
                 return Err("Unable to monitor the local inference process.".into());
             }
         }
         if started.elapsed() >= max_wait {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_inference_child(&mut child);
+            // Never wait for the writer/reader on this failure path; their
+            // pipes close after termination, preventing a stuck UI job.
             return Err("Local inference timed out. Check model installation or hardware.".into());
         }
         thread::sleep(Duration::from_millis(100));
     }
     let status = child.wait().map_err(|_| "Cannot collect inference process status.".to_string())?;
+    let request_status = input_writer.join()
+        .map_err(|_| "Inference input writer terminated unexpectedly.".to_string())?;
     let response = output_reader.join()
         .map_err(|_| "Inference output reader terminated unexpectedly.".to_string())??;
+    request_status?;
     // Upstream model libraries may print progress to stdout. The final JSON
     // response is a complete line, not necessarily the entire output stream.
     let data: Value = response
@@ -617,6 +707,18 @@ async fn inspect_script(text: String) -> Result<TextInspection, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn probe_tts_runtime(reference_wav_path: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python_with_reference(
+            json!({"action": "probe_runtime"}),
+            reference_wav_path.as_deref(),
+        )?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Speech import probe returned no result.".to_string())
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -697,6 +799,7 @@ async fn check_engine() -> Result<String, String> {
     Ok("Python bridge available. Model weights have not been verified.".into())
 }
 
+#[cfg(test)]
 fn inspect_wav(data: &[u8]) -> Result<(), String> {
     const INVALID: &str = "Generated audio is not valid mono 16-bit PCM WAV.";
     if data.len() < 44 || &data[..4] != b"RIFF" || &data[8..12] != b"WAVE" {
@@ -763,12 +866,28 @@ fn inspect_wav(data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+// Keep completed long voice-studio recordings exportable even when the WebView
+// cannot embed a WAV larger than 25 MiB in a base64 data URL.
+fn legacy_wav_preview(path: &Path) -> Result<(String, bool, u64), String> {
+    let mut file = fs::File::open(path)
+        .map_err(|_| "The speech engine did not create a WAV.".to_string())?;
+    let opened = file.metadata().map_err(|e| e.to_string())?;
+    let details = inspect_wav_details(&mut file)?;
+    if details.file_bytes > MAX_GENERATED_WAV {
+        return Ok((String::new(), false, details.file_bytes));
+    }
+    let bytes = read_validated_wav_preview(&mut file, &opened, details.file_bytes)?;
+    Ok((format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+        true, details.file_bytes))
+}
+
 #[tauri::command]
 async fn synthesize(
     app: tauri::AppHandle,
     text: String,
     exaggeration: f32,
     cfg_weight: f32,
+    reference_wav_path: Option<String>,
 ) -> Result<AudioResult, String> {
     if text.trim().is_empty() || text.chars().count() > MAX_TEXT_LENGTH {
         return Err("Enter between 1 and 3000 characters of story text.".into());
@@ -783,13 +902,13 @@ async fn synthesize(
         let folder = app_dir(&app)?.join("audio");
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         let path = folder.join(format!("{audio_id}.wav"));
-        let data = match invoke_python(json!({
+        let data = match invoke_python_with_reference(json!({
             "action":"synthesize",
             "text":text,
             "output":path,
             "exaggeration":exaggeration,
             "cfg_weight":cfg_weight
-        })) {
+        }), reference_wav_path.as_deref()) {
             Ok(response) => response,
             Err(error) => {
                 // A terminated or timed-out Python worker cannot execute its
@@ -799,22 +918,22 @@ async fn synthesize(
                 return Err(error);
             }
         };
-        let size = fs::metadata(&path).map_err(|_| "Audio file was not created.".to_string())?.len();
-        if size > MAX_GENERATED_WAV {
-            let _ = fs::remove_file(&path);
-            return Err("Generated audio exceeds the preview limit.".into());
-        }
-        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-        inspect_wav(&bytes)?;
+        let (data_url, preview_available, size) = match legacy_wav_preview(&path) {
+            Ok(preview) => preview,
+            Err(error) => {
+                let _ = fs::remove_file(&path);
+                return Err(error);
+            }
+        };
         let result = data.get("result").ok_or("Missing synthesis metadata.")?;
         Ok(AudioResult {
             audio_id,
-            data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
+            data_url,
             duration_seconds: result["duration_seconds"].as_f64().unwrap_or(0.0),
             sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
             chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
             segment_timings: Vec::new(),
-            preview_available: true,
+            preview_available,
             file_bytes: size,
         })
     }).await.map_err(|e| e.to_string())?
@@ -1194,6 +1313,7 @@ async fn render_story_v2(
     selected_scene_ids: Option<Vec<String>>,
     selected_segment_ids: Option<Vec<String>>,
     force_segment_ids: Option<Vec<String>>,
+    reference_wav_path: Option<String>,
 ) -> Result<AudioResult, String> {
     validate_story_v2(&project)?;
     Uuid::parse_str(&job_id).map_err(|_| "Invalid render job ID.")?;
@@ -1226,7 +1346,7 @@ async fn render_story_v2(
         // startup: removing the new UUID's marker here would lose fast cancels.
         // A previously used job UUID is rejected by the persisted journal.
         let _ = fs::remove_file(&progress_path);
-        let response = invoke_python(json!({
+        let response = invoke_python_with_reference(json!({
             "action": "render_story",
             "project": project,
             "output": output,
@@ -1237,7 +1357,7 @@ async fn render_story_v2(
             "selected_scene_ids": selected_scene_ids,
             "selected_segment_ids": selected_segment_ids,
             "force_segment_ids": force_segment_ids,
-        }));
+        }), reference_wav_path.as_deref());
         let _ = fs::remove_file(&cancel_path);
         let _ = fs::remove_file(&progress_path);
         let data = match response {
@@ -1441,7 +1561,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -1452,6 +1572,144 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn selected_reference_is_child_scoped_and_restricted_to_audio_actions() {
+        let path = std::env::temp_dir().join(format!(
+            "kathasvara-consented-{}.wav", Uuid::new_v4(),
+        ));
+        fs::write(&path, b"placeholder: Python validates actual PCM").unwrap();
+        let path_text = path.to_str().unwrap();
+        let mut command = Command::new("python");
+        apply_reference_selection(&mut command, Some("synthesize"), Some(path_text)).unwrap();
+        let child_env = command.get_envs().find(|(name, _)| {
+            *name == "KATHASVARA_TTS_REFERENCE_WAV"
+        });
+        assert_eq!(
+            child_env.and_then(|(_, value)| value).map(std::path::Path::new),
+            Some(path.as_path()),
+        );
+        // Unrelated actions cannot access arbitrary user-selected paths.
+        let mut other_command = Command::new("python");
+        assert!(apply_reference_selection(
+            &mut other_command, Some("diagnose"), Some(path_text),
+        ).is_err());
+        assert!(other_command.get_envs().next().is_none());
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn selected_reference_rejects_missing_non_wav_and_relative_paths_without_leaking() {
+        let path = std::env::temp_dir().join(format!(
+            "kathasvara-missing-private-{}.wav", Uuid::new_v4(),
+        ));
+        let source = path.to_str().unwrap();
+        let mut command = Command::new("python");
+        let error = apply_reference_selection(
+            &mut command, Some("render_story"), Some(source),
+        ).unwrap_err();
+        assert!(!error.contains(source));
+        assert!(command.get_envs().next().is_none());
+        for invalid in ["relative.wav", "/tmp/not-a-wav.txt", ""] {
+            let mut process = Command::new("python");
+            assert!(apply_reference_selection(
+                &mut process, Some("probe_runtime"), Some(invalid),
+            ).is_err());
+        }
+    }
+
+
+    #[test]
+    fn python_input_worker_never_blocks_the_watchdog_caller() {
+        use std::sync::mpsc;
+        struct GatedWriter {
+            started: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+        impl Write for GatedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.started.send(()).unwrap();
+                self.release.recv().unwrap();
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let input = spawn_request_writer(
+            GatedWriter { started: started_tx, release: release_rx },
+            vec![b'a'; 128 * 1024],
+        );
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!input.is_finished(), "Writer must be blocked independently");
+        // The controlling thread remains free to enforce an action timeout.
+        assert_eq!(
+            python_job_timeout(Some("probe_runtime"), Some("7200")),
+            Duration::from_secs(90),
+        );
+        release_tx.send(()).unwrap();
+        input.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn python_input_writer_masks_pipe_failure_without_exposing_request() {
+        struct ClosedPipe;
+        impl Write for ClosedPipe {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let private_script = "अत्यंत निजी कहानी C:\\private\\notes.txt";
+        let failed = spawn_request_writer(ClosedPipe, private_script.as_bytes().to_vec())
+            .join().unwrap().unwrap_err();
+        assert_eq!(failed, "Unable to send synthesis request.");
+        assert!(!failed.contains(private_script));
+    }
+
+    #[test]
+    fn speech_timeout_is_opt_in_bounded_and_defaults_to_ten_minutes() {
+        assert_eq!(python_job_timeout(Some("synthesize"), None), Duration::from_secs(600));
+        assert_eq!(python_job_timeout(Some("render_story"), None), Duration::from_secs(600));
+        for action in ["synthesize", "render_story"] {
+            assert_eq!(
+                python_job_timeout(Some(action), Some(" 1800 ")),
+                Duration::from_secs(1800)
+            );
+            assert_eq!(
+                python_job_timeout(Some(action), Some("7200")),
+                Duration::from_secs(7200)
+            );
+            for invalid in ["", "0", "599", "7201", "-10", "invalid", "999999999999999"] {
+                assert_eq!(
+                    python_job_timeout(Some(action), Some(invalid)),
+                    Duration::from_secs(600),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn speech_timeout_override_never_extends_diagnostics_or_unknown_actions() {
+        for (action, expected_seconds) in [
+            ("probe_runtime", 90),
+            ("inspect_generated_wav", 180),
+            ("diagnose", 15),
+            ("health", 15),
+        ] {
+            assert_eq!(
+                python_job_timeout(Some(action), Some("7200")),
+                Duration::from_secs(expected_seconds),
+            );
+        }
+        assert_eq!(python_job_timeout(None, Some("7200")), Duration::from_secs(15));
+    }
+
     #[test]
     fn generated_audio_inspection_accepts_only_uuid_scoped_app_data_path() {
         let root = Path::new("private-app-data");
@@ -1977,6 +2235,10 @@ mod tests {
         data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
         data.extend_from_slice(&samples);
         fs::write(&path, &data).unwrap();
+        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&path).unwrap();
+        assert!(inline);
+        assert_eq!(legacy_size, data.len() as u64);
+        assert_eq!(legacy_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
         let response = json!({"result": {
             "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
             "segments": [{
@@ -2016,6 +2278,11 @@ mod tests {
         writer.set_len(44 + u64::from(sample_bytes)).unwrap();
         drop(writer);
         assert!(fs::metadata(&source).unwrap().len() > MAX_GENERATED_WAV);
+        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&source).unwrap();
+        assert!(!inline);
+        assert!(legacy_url.is_empty());
+        assert_eq!(legacy_size, fs::metadata(&source).unwrap().len());
+        assert!(source.exists(), "Large Voice Studio WAV must survive the preview limit");
         copy_validated_wav(&source, &exported).unwrap();
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
         assert!(copy_validated_wav(&source, &exported).is_err());

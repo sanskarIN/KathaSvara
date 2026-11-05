@@ -1,0 +1,175 @@
+"""Model-free regression coverage for the opt-in CPU-only TTS runtime.
+
+No torch packages, pretrained weights or audio generation are used.
+SPDX-License-Identifier: MPL-2.0
+"""
+from __future__ import annotations
+
+import sys
+import types
+from types import SimpleNamespace
+
+import pytest
+
+from kathasvara.engine import ChatterboxHindi
+from kathasvara.public_errors import public_error_message
+
+
+def _install_fake_runtime(
+    monkeypatch: pytest.MonkeyPatch, *,
+    cuda_available: bool,
+    mps_available: bool,
+    fail_gpu_probe: bool = False,
+) -> list[str]:
+    selected: list[str] = []
+
+    def probe_cuda() -> bool:
+        if fail_gpu_probe:
+            raise OSError("GPU probe crashed at C:/Users/private/driver.dll")
+        return cuda_available
+
+    def probe_mps() -> bool:
+        if fail_gpu_probe:
+            raise OSError("MPS probe failed")
+        return mps_available
+
+    def from_pretrained(*, device: str, t3_model: str | None = None) -> object:
+        selected.append(device if t3_model is None else f"{device}/{t3_model}")
+        return SimpleNamespace(sr=24_000)
+
+    torch = types.ModuleType("torch")
+    torch.cuda = SimpleNamespace(is_available=probe_cuda)
+    torch.backends = SimpleNamespace(mps=SimpleNamespace(is_available=probe_mps))
+    chatterbox = types.ModuleType("chatterbox")
+    chatterbox.__path__ = []
+    multilingual = types.ModuleType("chatterbox.mtl_tts")
+    multilingual.ChatterboxMultilingualTTS = SimpleNamespace(
+        from_pretrained=from_pretrained,
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "chatterbox", chatterbox)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", multilingual)
+    return selected
+
+
+def test_cpu_override_skips_broken_gpu_driver_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+        fail_gpu_probe=True,
+    )
+    adapter = ChatterboxHindi()
+    adapter.load()
+    assert selected == ["cpu"]
+    assert adapter.sample_rate == 24_000
+
+
+@pytest.mark.parametrize(("cuda", "mps", "expected"), [
+    (True, False, "cuda"),
+    (False, True, "mps"),
+    (False, False, "cpu"),
+])
+def test_default_device_selection_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, cuda: bool, mps: bool, expected: str,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "auto")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=cuda, mps_available=mps,
+    )
+    ChatterboxHindi().load()
+    assert selected == [expected]
+
+
+@pytest.mark.parametrize("invalid", ["cuda", "mps", "random", "cpu;rm -rf /"])
+def test_invalid_device_override_is_safe_and_does_not_load_weights(
+    monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", invalid)
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+    )
+    with pytest.raises(RuntimeError, match="Unsupported TTS device override") as caught:
+        ChatterboxHindi().load()
+    assert selected == []
+    assert public_error_message(caught.value) == str(caught.value)
+    assert invalid not in str(caught.value)
+
+
+def test_v3_explicitly_selects_new_checkpoint_and_tracks_variant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", " V3 ")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=True, mps_available=True,
+        fail_gpu_probe=True,
+    )
+    adapter = ChatterboxHindi()
+    adapter.load()
+    assert selected == ["cpu/v3"]
+    assert adapter.model_variant == "v3"
+
+
+def test_legacy_v3_api_fails_before_checkpoint_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v3")
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+        fail_gpu_probe=True,
+    )
+    entrypoint = sys.modules["chatterbox.mtl_tts"].ChatterboxMultilingualTTS
+
+    def old_pretrained(*, device: str) -> object:
+        selected.append(device)
+        raise AssertionError("A legacy model must not download weights")
+
+    entrypoint.from_pretrained = old_pretrained
+    with pytest.raises(RuntimeError, match="does not support the selected V3 checkpoint") as exc:
+        ChatterboxHindi().load()
+    assert selected == []
+    assert public_error_message(exc.value) == str(exc.value)
+
+
+def test_v2_does_not_pass_new_checkpoint_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", "cpu")
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v2")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+    )
+    adapter = ChatterboxHindi()
+    adapter.load()
+    assert selected == ["cpu"]
+    assert adapter.model_variant == "v2"
+
+
+@pytest.mark.parametrize("invalid", ["v4", "custom", "v3;secrets", r"C:\private\model"])
+def test_invalid_checkpoint_selection_never_loads_weights(
+    monkeypatch: pytest.MonkeyPatch, invalid: str,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", invalid)
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=False, mps_available=False,
+    )
+    with pytest.raises(RuntimeError, match="Unsupported TTS model variant") as caught:
+        ChatterboxHindi().load()
+    assert selected == []
+    assert public_error_message(caught.value) == str(caught.value)
+    assert invalid not in str(caught.value)
+
+
+def test_cpu_device_override_accepts_case_and_whitespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", " CPU ")
+    selected = _install_fake_runtime(
+        monkeypatch, cuda_available=True, mps_available=True,
+        fail_gpu_probe=True,
+    )
+    ChatterboxHindi().load()
+    assert selected == ["cpu"]

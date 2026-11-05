@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -31,6 +31,24 @@ type AbandonedWavReport = {
   removed: number; bytes_removed: number; ignored_entries: number;
   age_hours: number; max_deletions: number;
 };
+type RuntimeImportProbe = {
+  python_311: boolean;
+  checks: Record<string, "ok" | "entrypoint_missing" | "import_failed">;
+  failed_components: string[];
+  imports_ok: boolean;
+  tts_device_mode: "auto" | "cpu" | "invalid";
+  device_configuration_valid: boolean;
+  tts_model_variant: "v2" | "v3" | "invalid";
+  model_configuration_valid: boolean;
+  reference_voice_status: "not_set" | "valid" | "invalid";
+  upstream_api_status: "not_requested" | "compatible" | "unavailable" |
+    "v3_unsupported" | "reference_unsupported" | "unverifiable";
+  upstream_api_compatible: boolean;
+  preflight_ok: boolean;
+  model_weights_verified: false;
+  audio_synthesis_verified: false;
+  help: string;
+};
 const CACHE_TARGET_MIB = 512;
 function asMiB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
@@ -60,6 +78,13 @@ export default function App() {
   const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
+  const [probingImports, setProbingImports] = useState(false);
+  const [importProbe, setImportProbe] = useState<RuntimeImportProbe | null>(null);
+  // Never persist the user's private reference WAV path to projects or localStorage.
+  const [referenceWavPath, setReferenceWavPath] = useState<string | null>(null);
+  // Native dialogs and no-model Python probes can resolve out of order.
+  const referencePickerRevision = useRef(0);
+  const importProbeRevision = useRef(0);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
   const [checkingCache, setCheckingCache] = useState(false);
@@ -205,6 +230,43 @@ export default function App() {
     }
   }
 
+  function invalidateReferenceProbe() {
+    importProbeRevision.current += 1;
+    setProbingImports(false);
+    setImportProbe(null);
+  }
+
+  async function chooseReferenceVoice() {
+    const pickerRevision = ++referencePickerRevision.current;
+    try {
+      const selected = await open({
+        title: "Choose your own or consented voice reference",
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Local PCM16 WAV recording", extensions: ["wav"] }],
+      });
+      if (pickerRevision !== referencePickerRevision.current ||
+          typeof selected !== "string") return;
+      invalidateGeneration();
+      setReferenceWavPath(selected);
+      invalidateReferenceProbe();
+      setMessage("Session voice reference selected. Run the no-model TTS preflight before generating.");
+    } catch {
+      if (pickerRevision === referencePickerRevision.current) {
+        setMessage("Unable to open local WAV selection dialog. No reference was changed.");
+      }
+    }
+  }
+
+  function clearReferenceVoice() {
+    // Retire any older picker before it can restore a now-cleared reference.
+    referencePickerRevision.current += 1;
+    invalidateGeneration();
+    setReferenceWavPath(null);
+    invalidateReferenceProbe();
+    setMessage("Session voice selection cleared. The launcher default, if configured, will apply.");
+  }
+
   async function generate() {
     const invalid = validateText(project.text);
     if (invalid) {
@@ -222,19 +284,24 @@ export default function App() {
         text: project.text,
         exaggeration,
         cfgWeight,
+        referenceWavPath,
       });
       if (revision !== generationRevision.current) {
         void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
-        setMessage("Script or voice settings changed during synthesis. Generate again to hear the new version.");
+        // A changed reference, script, or voice slider owns the newer status.
+        // Do not replace its message with this obsolete worker's response.
         return;
       }
       setAudio(result);
       setStatus("completed");
-      setMessage("Hindi WAV ready. Listen before exporting to check pronunciation and quality.");
+      setMessage(result.preview_available === false
+        ? "Hindi WAV generated and kept locally. It exceeds the 25 MiB inline playback limit; use Export WAV to listen in an audio player."
+        : "Hindi WAV ready. Listen before exporting to check pronunciation and quality.");
     } catch (error) {
       if (revision === generationRevision.current) {
         setStatus("failed");
-        setMessage(errorMessage(error));
+        setMessage("Hindi speech was not generated: " + errorMessage(error) +
+          " This developer EXE does not bundle Python, the inference source, Chatterbox dependencies or model weights. Open Settings → Inspect local TTS setup and follow the audio installation guide.");
       }
     } finally {
       setWorking(false);
@@ -283,6 +350,30 @@ export default function App() {
       setMessage("Local diagnostic unavailable: " + errorMessage(error));
     } finally {
       setCheckingSetup(false);
+    }
+  }
+
+  async function verifyTtsImports() {
+    const probeRevision = ++importProbeRevision.current;
+    setProbingImports(true);
+    setImportProbe(null);
+    try {
+      const report = await invoke<RuntimeImportProbe>("probe_tts_runtime", {
+        referenceWavPath,
+      });
+      if (probeRevision !== importProbeRevision.current) return;
+      setImportProbe(report);
+      setMessage(report.preflight_ok
+        ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
+        : "TTS preflight needs attention: check dependencies, model and speech device options, reference WAV, and Chatterbox API compatibility in Settings.");
+    } catch (error) {
+      if (probeRevision === importProbeRevision.current) {
+        setMessage("TTS import probe could not run: " + errorMessage(error));
+      }
+    } finally {
+      if (probeRevision === importProbeRevision.current) {
+        setProbingImports(false);
+      }
     }
   }
 
@@ -461,7 +552,15 @@ export default function App() {
                   <input id="exaggeration" type="range" min="0.25" max="2" step="0.05" value={exaggeration} onChange={(e) => changeExaggeration(Number(e.target.value))} />
                   <label className="range-label" htmlFor="cfg">CFG guidance <strong>{cfgWeight.toFixed(2)}</strong></label>
                   <input id="cfg" type="range" min="0" max="1" step="0.05" value={cfgWeight} onChange={(e) => changeGuidance(Number(e.target.value))} />
+                  <p className="helper" aria-label="Active narration reference mode">
+                    <strong>Voice reference:</strong> {referenceWavPath === null
+                      ? "Launcher/default model conditioning (if available)."
+                      : "Session-selected local WAV (private path hidden). The model will try to condition on this one recording."}
+                  </p>
                   <p className="helper">Only controls supported by the selected model are shown. Generating does not upload your script.</p>
+                  <p className="helper"><strong>Real audio setup required:</strong> this developer EXE does not contain Python, Chatterbox, or model weights. The Windows audio setup guide includes a real Hindi WAV smoke test; a passing dependency check alone is not enough.</p>
+                  <button className="quiet-button" type="button"
+                    onClick={() => setPage("settings")}>Open local TTS diagnostics</button>
                   <button className="primary-button" disabled={working} onClick={() => void generate()}>{working ? "Generating speech…" : "✦ Generate Hindi Voice"}</button>
                 </section>
                 <section className="panel preview-panel">
@@ -469,9 +568,17 @@ export default function App() {
                   <div className={"status status-" + status} role="status" aria-live="polite"><span aria-hidden="true">●</span>{status === "waiting" ? "Waiting" : status === "loading" ? "Model loading / synthesizing" : status === "completed" ? "Completed" : "Failed"}</div>
                   {audio ? (
                     <>
-                      <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated Hindi WAV preview" />
+                      {audio.preview_available === false
+                        ? <p role="status">The generated WAV is saved locally but is too large for an inline preview.
+                          Select <strong>Export WAV</strong> and listen in your audio player. The recording has not been discarded.</p>
+                        : <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated Hindi WAV preview" />}
                       <div className="audio-meta">{audio.duration_seconds.toFixed(1)} sec · {audio.sample_rate} Hz · {audio.chunks} chunk(s)</div>
-                      <div className="preview-actions"><button className="quiet-button" onClick={() => { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } }}>■ Stop</button><button className="quiet-button" onClick={() => void clearPreview()}>Clear preview</button><button className="secondary-button" onClick={() => void exportWav()}>Export WAV ↓</button></div>
+                      <div className="preview-actions">
+                        {audio.preview_available !== false && <button className="quiet-button"
+                          onClick={() => { if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; } }}>■ Stop</button>}
+                        <button className="quiet-button" onClick={() => void clearPreview()}>Clear preview</button>
+                        <button className="secondary-button" onClick={() => void exportWav()}>Export WAV ↓</button>
+                      </div>
                     </>
                   ) : <div className="empty-preview"><div className="waveform" aria-hidden="true">▂ ▆ ▃ █ ▅ ▇ ▃ ▅ ▂ ▆ ▃</div><span>Your audio preview appears here.</span></div>}
                 </section>
@@ -480,7 +587,8 @@ export default function App() {
           )}
 
           {page === "cast" && (
-            <CastStudio document={castDoc} onChange={setCastDoc} onMessage={setMessage} />
+            <CastStudio document={castDoc} onChange={setCastDoc} onMessage={setMessage}
+              referenceWavPath={referenceWavPath} />
           )}
 
           {page === "projects" && (
@@ -500,7 +608,73 @@ export default function App() {
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
                 {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
               </button>
-              <p className="helper">A successful bridge or dependency check does not confirm model weights or a real Hindi voice test.</p>
+              <div className="field-label">OPTIONAL CONSENTED LOCAL VOICE</div>
+              <p className="helper">Select a WAV recording that you own or have permission to use.
+                KathaSvara uses one reference for the entire render, not different voices per
+                character. The selection is kept in memory for this app session only; its path
+                is not shown here, stored in projects, or uploaded.</p>
+              <button className="secondary-button" onClick={() => void chooseReferenceVoice()}>
+                Choose local reference WAV
+              </button>
+              {referenceWavPath !== null && (
+                <button className="quiet-button" onClick={clearReferenceVoice}>
+                  Clear session voice selection
+                </button>
+              )}
+              <p role="status"><strong>Session reference:</strong> {referenceWavPath === null
+                ? "Launcher default (if available)"
+                : "Local recording selected (private path hidden)"}</p>
+              <button className="secondary-button" disabled={probingImports} onClick={() => void verifyTtsImports()}>
+                {probingImports ? "Verifying speech library imports…" : "Verify speech library imports (no model load)"}
+              </button>
+              <p className="helper">Dependency discovery only checks for installed modules. The optional import preflight checks whether
+                their Python imports work and whether the device and model overrides are valid; neither test loads model weights or generates speech.</p>
+              {importProbe && (
+                <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
+                  <h3>TTS preflight: {importProbe.preflight_ok ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
+                  <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
+                  <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "invalid"
+                    ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
+                    {" "}({importProbe.device_configuration_valid ? "configuration accepted" : "fix before generating"})
+                  </p>
+                  <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "invalid"
+                    ? "Invalid override — use v2 or v3" : importProbe.tts_model_variant}
+                    {" "}({importProbe.model_configuration_valid ? "selection accepted" : "fix before generating"})
+                  </p>
+                  <p className="helper">V3 is opt-in through KATHASVARA_TTS_MODEL=v3 and may need updated
+                    Chatterbox software and additional weights. This selection check does not download
+                    weights or establish real Hindi generation quality.</p>
+                  <p><strong>Local voice reference:</strong> {importProbe.reference_voice_status === "valid"
+                    ? "Validated local PCM16 WAV (not uploaded)" : importProbe.reference_voice_status === "invalid"
+                      ? "Invalid reference — check selected WAV" : "Not configured (uses bundled default voice if available)"}
+                  </p>
+                  <p className="helper">Only use recordings you own or have permission to use. A valid
+                    reference does not prove speaker identity, audio quality or model compatibility.</p>
+                  <p><strong>Installed Chatterbox API:</strong> {importProbe.upstream_api_status === "not_requested"
+                    ? "Legacy V2 mode — optional API not required"
+                    : importProbe.upstream_api_status === "compatible"
+                      ? "Selected optional API signatures present"
+                      : importProbe.upstream_api_status === "v3_unsupported"
+                        ? "Installed package does not support V3 checkpoint selection"
+                        : importProbe.upstream_api_status === "reference_unsupported"
+                          ? "Installed package does not support reference audio prompts"
+                          : importProbe.upstream_api_status === "unavailable"
+                            ? "Chatterbox API unavailable"
+                            : "Cannot verify the installed API signatures"}
+                    {" "}({importProbe.upstream_api_compatible ? "signature check passed" : "check package compatibility"})
+                  </p>
+                  <p className="helper">Signature checks do not load a model, verify its weights, or establish
+                    that the selected voice and Hindi generation will work.</p>
+                  <ul>
+                    {Object.entries(importProbe.checks).map(([module, result]) => (
+                      <li key={module}><strong>{module}</strong>: {result === "ok"
+                        ? "Imported" : result === "entrypoint_missing" ? "Required API not found" : "Import failed"}</li>
+                    ))}
+                  </ul>
+                  <p><strong>Model weights / real Hindi audio verified:</strong> No</p>
+                  <p>{importProbe.help}</p>
+                </section>
+              )}
               <section aria-label="Local segment-cache maintenance" className="diagnostic-report">
                 <h3>Generated segment cache</h3>
                 <p>Inspect or explicitly clean old content-addressed speech chunks.

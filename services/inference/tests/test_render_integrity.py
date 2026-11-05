@@ -72,7 +72,10 @@ def test_oversized_model_chunk_never_reaches_cache(
     class TooLongEngine(FakeEngine):
         def generate(self, text: str, settings: object) -> np.ndarray:
             self.calls.append((text, settings.exaggeration))
-            return np.full(self.sample_rate * 2, 0.12, dtype=np.float32)
+            return np.tile(
+                np.array([0.12, -0.12], dtype=np.float32),
+                self.sample_rate,
+            )
 
     with pytest.raises(ValueError, match="20-minute audio limit"):
         render_story(
@@ -92,7 +95,10 @@ def test_inter_segment_pause_is_checked_before_caching(
     class NearLimitEngine(FakeEngine):
         def generate(self, text: str, settings: object) -> np.ndarray:
             self.calls.append((text, settings.exaggeration))
-            return np.full(int(self.sample_rate * .95), 0.12, dtype=np.float32)
+            return np.tile(
+                np.array([0.12, -0.12], dtype=np.float32),
+                int(self.sample_rate * .95) // 2,
+            )
 
     # The first 0.95-second line fits, but its following 0.14-second pause
     # does not. No segment cache entry should be published for this failed job.

@@ -20,3 +20,30 @@ Use Python 3.11 and the upstream-documented installation stack. The current adap
 ## Real listening gate
 
 Use scripts/smoke_hindi.py with an absolute output location and explicit --allow-model-downloads. Record hardware, torch version, Chatterbox version, model revision, generation duration, WAV metadata, perceived intelligibility, pronunciation and clipping. A native Hindi listener must review the generated Hindi audio and log problems before v0.1.0 can ship.
+
+
+## Opt-in TTS import probe (v0.5.3 development only)
+
+Use **Settings → Verify speech library imports (no model load)** in a development
+build to distinguish *discoverable* dependencies from modules that actually
+import successfully. It tests NumPy, SoundFile, PyTorch and the
+`ChatterboxMultilingualTTS` entrypoint. The same action can be used in the
+inference directory with the already configured Python interpreter:
+
+```powershell
+'{"action":"probe_runtime"}' | python -m kathasvara.cli
+```
+
+The structured result uses fixed statuses: `ok`, `import_failed` or
+`entrypoint_missing`. It does not expose third-party exception text or local
+filesystem paths, make network requests, call `from_pretrained`, load weights,
+generate speech, or validate hardware capacity. Imports may still take time on
+Windows. An `imports_ok: true` result only clears this **one** setup check;
+it is **not** confirmation that narration works.
+
+If a component fails, use a Python 3.11 virtual environment and reinstall the
+inference dependencies there. Set `KATHASVARA_PYTHON` to that interpreter for
+the desktop app, and `KATHASVARA_INFERENCE_DIR` to the absolute inference
+source directory for the unbundled Windows developer EXE. Do not change the
+system Python or disable OS protections to troubleshoot. Real model inference,
+WAV listening and clean-machine Windows acceptance remain separate work.

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,45 @@ def test_journal_still_records_progress_and_completion(tmp_path: Path) -> None:
     assert complete["done"] == 1
     assert complete["segments"][0]["cache_key"] == "a" * 64
     assert list(destination.parent.glob("*.partial.json")) == []
+
+
+def test_existing_competitor_staging_file_survives_exclusive_open_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "jobs" / "progress.json"
+    destination.parent.mkdir()
+    token = "a" * 32
+    staging = destination.with_name(f"progress-{token}.partial.json")
+    original = "COMPETING WORKER: DO NOT DELETE"
+    staging.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(render_journal.uuid, "uuid4", lambda: SimpleNamespace(hex=token))
+
+    with pytest.raises(FileExistsError):
+        RenderJournal(destination, "example-story", 1).__enter__()
+    assert staging.read_text(encoding="utf-8") == original
+    assert not destination.exists()
+
+
+def test_existing_competitor_staging_symlink_survives_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "jobs" / "progress.json"
+    destination.parent.mkdir()
+    target = tmp_path / "private-journal.json"
+    target.write_text("PRIVATE OTHER PROCESS", encoding="utf-8")
+    token = "b" * 32
+    staging = destination.with_name(f"progress-{token}.partial.json")
+    try:
+        staging.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is unavailable")
+    monkeypatch.setattr(render_journal.uuid, "uuid4", lambda: SimpleNamespace(hex=token))
+
+    with pytest.raises(FileExistsError):
+        RenderJournal(destination, "example-story", 1).__enter__()
+    assert staging.is_symlink()
+    assert target.read_text(encoding="utf-8") == "PRIVATE OTHER PROCESS"
+    assert not destination.exists()
 
 
 def test_racing_other_worker_journal_is_never_overwritten(

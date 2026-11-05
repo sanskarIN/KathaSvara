@@ -6,8 +6,14 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from .api_compatibility import inspect_chatterbox_api
+from .inference_errors import describe_model_failure
+from .voice_reference import REFERENCE_CHANGED_ERROR, inspect_reference_wav
 
 
 @dataclass(frozen=True)
@@ -27,24 +33,111 @@ class ChatterboxHindi:
 
     def __init__(self) -> None:
         self._model: Any = None
+        self._model_variant = "v2"
+        self._reference_wav: str | None = None
+        self._reference_prepared = False
+        self._conditioning_fingerprint: str | None = None
+
+    @property
+    def model_variant(self) -> str:
+        """Checkpoint family loaded into this adapter (used by the segment cache)."""
+        return self._model_variant
+
+    @property
+    def conditioning_fingerprint(self) -> str | None:
+        """Content hash only; never reveal the reference clip's private path."""
+        return self._conditioning_fingerprint
 
     def load(self) -> None:
+        self._model = None
+        self._reference_wav = None
+        self._reference_prepared = False
+        self._conditioning_fingerprint = None
+        # Preserve the original v2 default. v3 is a user-selected experiment,
+        # never an implicit download or a source of mixed-checkpoint cache hits.
+        requested_variant = os.getenv("KATHASVARA_TTS_MODEL", "v2").strip().lower()
+        if requested_variant not in {"v2", "v3"}:
+            raise RuntimeError("Unsupported TTS model variant. Use v2 or v3.")
+        reference = os.getenv("KATHASVARA_TTS_REFERENCE_WAV", "").strip()
+        if reference:
+            # Fail before costly model downloads. These checks never send the
+            # raw filesystem path through the desktop IPC boundary.
+            content_sha = inspect_reference_wav(Path(reference))
+            self._reference_wav = reference
+            self._conditioning_fingerprint = f"reference-sha256:{content_sha}"
         try:
             import torch
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-        except ImportError as exc:
+        except Exception as exc:
+            # Native extension failures (especially Windows DLL loading) can be
+            # OSError/RuntimeError, not just ImportError. Never send their
+            # potentially private paths to the desktop IPC response.
+            raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
+        # A broken GPU probing library can prevent a valid CPU setup from
+        # reaching inference. Only an explicit, documented override bypasses
+        # auto-detection; never silently downgrade or reinterpret a typo.
+        requested = os.getenv("KATHASVARA_TTS_DEVICE", "auto").strip().lower()
+        if requested not in {"auto", "cpu"}:
             raise RuntimeError(
-                'Speech engine missing. Install Python 3.11 and pip install -e ".[tts]".'
-            ) from exc
-        # Not every installed PyTorch build supports the MPS backend.
-        mps = getattr(torch.backends, "mps", None)
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif mps is not None and mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
-        self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+                "Unsupported TTS device override. Use auto or cpu."
+            )
+        # A visibly incompatible optional Chatterbox API should fail BEFORE
+        # expensive checkpoint loading or GPU initialization. An opaque API
+        # signature is not proof of compatibility, but users may still attempt
+        # the explicitly selected mode; the no-model preflight warns about it.
+        api_status = inspect_chatterbox_api(
+            ChatterboxMultilingualTTS,
+            needs_v3=requested_variant == "v3",
+            needs_reference=self._reference_wav is not None,
+        )
+        if api_status == "v3_unsupported":
+            raise RuntimeError(
+                "Installed Chatterbox does not support the selected V3 checkpoint. "
+                "Update Chatterbox or choose V2."
+            )
+        if api_status == "reference_unsupported":
+            raise RuntimeError(
+                "Installed Chatterbox does not support reference voice WAVs. "
+                "Update Chatterbox or clear the session reference."
+            )
+        if api_status == "unavailable":
+            raise RuntimeError(
+                "Chatterbox model API is unavailable. Check speech package installation."
+            )
+        try:
+            if requested == "cpu":
+                device = "cpu"
+            else:
+                # Auto mode retains the existing CUDA -> MPS -> CPU priority.
+                mps = getattr(torch.backends, "mps", None)
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif mps is not None and mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
+            if requested_variant == "v3":
+                # Upstream multilingual V3 accepts an explicit t3_model selector.
+                # Older chatterbox-tts installations may need updating first.
+                self._model = ChatterboxMultilingualTTS.from_pretrained(
+                    device=device, t3_model="v3",
+                )
+            else:
+                # Do not pass t3_model for legacy runtimes: this preserves
+                # behavior and compatibility with historical v2 installations.
+                self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+            self._model_variant = requested_variant
+        except Exception as exc:
+            raise RuntimeError(describe_model_failure(exc, stage="load")) from exc
+        # Upstream may omit the optional conds.pt. Without it, bare generate()
+        # fails even after a successful download; explain the missing voice
+        # conditioning instead of reporting a mysterious generation failure.
+        if self._reference_wav is None and getattr(self._model, "conds", True) is None:
+            self._model = None
+            raise RuntimeError(
+                "Model has no built-in voice conditioning. Supply your own "
+                "consented reference WAV with the Windows audio helper."
+            )
 
     @property
     def sample_rate(self) -> int:
@@ -56,9 +149,34 @@ class ChatterboxHindi:
         if self._model is None:
             raise RuntimeError("Model is not loaded.")
         settings.validate()
-        return self._model.generate(
-            text,
-            language_id="hi",
-            exaggeration=settings.exaggeration,
-            cfg_weight=settings.cfg_weight,
-        )
+        # A consented prompt is validated and fingerprinted at model load.
+        # Recheck before its first use: a user may replace the local WAV while
+        # the large model loads, otherwise the cache key can identify the
+        # wrong voice recording. Do not reveal the private path on failure.
+        if self._reference_wav is not None and not self._reference_prepared:
+            actual_digest = inspect_reference_wav(Path(self._reference_wav))
+            if self._conditioning_fingerprint != f"reference-sha256:{actual_digest}":
+                raise RuntimeError(REFERENCE_CHANGED_ERROR)
+        try:
+            options: dict[str, Any] = {
+                "language_id": "hi",
+                "exaggeration": settings.exaggeration,
+                "cfg_weight": settings.cfg_weight,
+            }
+            # First generation builds model conditionals from the selected
+            # local recording. Later chunks reuse the prepared conditionals
+            # rather than decoding the reference WAV for every sentence.
+            if self._reference_wav is not None and not self._reference_prepared:
+                options["audio_prompt_path"] = self._reference_wav
+            audio = self._model.generate(text, **options)
+        except Exception as exc:
+            raise RuntimeError(describe_model_failure(exc, stage="generate")) from exc
+        if self._reference_wav is not None and not self._reference_prepared:
+            # Recheck after upstream conditionals were prepared, too: a
+            # concurrent overwrite during model.generate must not publish
+            # audio under an earlier recording's content fingerprint.
+            actual_digest = inspect_reference_wav(Path(self._reference_wav))
+            if self._conditioning_fingerprint != f"reference-sha256:{actual_digest}":
+                raise RuntimeError(REFERENCE_CHANGED_ERROR)
+            self._reference_prepared = True
+        return audio

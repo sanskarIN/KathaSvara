@@ -9,7 +9,7 @@ import json
 import tomllib
 from pathlib import Path
 
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 # Public landing page intentionally advertises only releases actually published.
 PUBLISHED_VERSION = "0.5.2"
 ROOT = Path(__file__).resolve().parents[3]
@@ -43,20 +43,20 @@ def test_pre_release_workflow_has_exact_tag_guards_and_three_assets() -> None:
     for token in (
         "workflow_dispatch:",
         "release_sha:", "refs/heads/main", "git/ref/heads/main",
-        "git/ref/tags/v0.5.2", "gh release view v0.5.2",
-        "gh release create v0.5.2", "--prerelease",
+        "git/ref/tags/v0.5.3", "gh release view v0.5.3",
+        "gh release create v0.5.3", "--prerelease",
         expected_exe, "README.txt", "SHA256SUMS.txt",
         "sha256sum -c SHA256SUMS.txt",
-        "actions/download-artifact", "gh release download v0.5.2",
+        "actions/download-artifact", "gh release download v0.5.3",
         'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"',
-        'test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.2" --jq \'.assets | length\')" = 3',
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.3" --jq \'.assets | length\')" = 3',
     ):
         assert token in workflow, f"Missing release guard: {token}"
 
 
 def test_prerelease_disclosures_remain_explicit() -> None:
     instructions = (
-        ROOT / "docs/installation/portable-windows-candidate.md"
+        ROOT / "docs/installation/portable-windows-v0.5.3.md"
     ).read_text(encoding="utf-8")
     notes = (ROOT / f"docs/releases/v{VERSION}-notes.md").read_text(encoding="utf-8")
     for content in (instructions, notes):
@@ -67,7 +67,7 @@ def test_prerelease_disclosures_remain_explicit() -> None:
         assert "Chatterbox" in content
     assert "NOT A COMPLETE INSTALLER" in instructions
     assert "NOT STABLE" in notes
-    assert "KathaSvara-v0.5.2-dev-win64.exe" in notes
+    assert "KathaSvara-v0.5.3-dev-win64.exe" in notes
 
 
 def test_public_site_uses_latest_published_prerelease_without_stable_claims() -> None:

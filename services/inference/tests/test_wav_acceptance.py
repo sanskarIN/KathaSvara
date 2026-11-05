@@ -42,6 +42,7 @@ def test_structural_wav_metadata_and_sha_have_no_private_paths(tmp_path: Path) -
         "peak_dbfs": None,
         "rms_dbfs": None,
         "near_silence_hint": True,
+        "dc_only_hint": False,
         "possible_clipping_hint": False,
         "clipped_sample_percentage": 0.0,
         "longest_internal_quiet_span_seconds": 0.0,
@@ -204,6 +205,27 @@ def pcm16_file(path: Path, values: list[int], rate: int = 8000) -> Path:
         out.setframerate(rate)
         out.writeframes(struct.pack("<" + "h" * len(values), *values))
     return path
+
+
+def test_dc_only_wav_flags_missing_signal_despite_loud_rms(tmp_path: Path) -> None:
+    # A full-volume fixed offset can appear normal to a raw RMS check while
+    # containing no time-varying PCM. It is not meaningful narration.
+    path = pcm16_file(tmp_path / "private-flat.wav", [8000] * 9000)
+    report = inspect_wav_candidate(path)
+    hint = report["level_hints"]
+    assert report["structure_valid"] is True
+    assert hint["rms_dbfs"] == -12.25
+    assert hint["near_silence_hint"] is False
+    assert hint["dc_only_hint"] is True
+    assert hint["signal_review_required"] is True
+    assert "private-flat.wav" not in json.dumps(report)
+
+
+def test_subtle_pcm_variation_below_one_step_is_dc_only(tmp_path: Path) -> None:
+    path = pcm16_file(tmp_path / "varying.wav", [8000, 8001] * 4500)
+    hint = inspect_wav_candidate(path)["level_hints"]
+    assert hint["dc_only_hint"] is True
+    assert hint["near_silence_hint"] is False
 
 
 def test_moderate_signal_does_not_trigger_quiet_or_clipping_hints(tmp_path: Path) -> None:

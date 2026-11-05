@@ -56,8 +56,12 @@ class RenderJournal:
         self.document["updated_at"] = datetime.now(UTC).isoformat()
         content = json.dumps(self.document, ensure_ascii=False, separators=(",", ":"))
         temp = self.path.with_name(f"{self.path.stem}-{uuid.uuid4().hex}.partial.json")
+        created = False
         try:
+            # Exclusive open may collide with another worker's file or symlink.
+            # Only unlink this staging path when OUR open actually succeeded.
             with temp.open("x", encoding="utf-8") as stream:
+                created = True
                 stream.write(content)
                 stream.flush()
             if initial:
@@ -72,7 +76,8 @@ class RenderJournal:
             else:
                 temp.replace(self.path)
         finally:
-            temp.unlink(missing_ok=True)
+            if created:
+                temp.unlink(missing_ok=True)
 
     def __enter__(self) -> Self:
         self.path.parent.mkdir(parents=True, exist_ok=True)
