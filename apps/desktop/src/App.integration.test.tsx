@@ -390,6 +390,26 @@ describe("local TTS import doctor (no model)", () => {
 
 
 describe("actionable model-free speech setup guidance", () => {
+  it("shows compatibility guidance rather than undefined for an older Python bridge", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      preflight_ok: false,
+      next_action: undefined,
+      next_action_code: undefined,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    const nextStep = within(report).getByText(/Recommended next step:/);
+    expect(nextStep.parentElement?.textContent).toContain("Update the local KathaSvara inference sources");
+    expect(nextStep.parentElement?.textContent).not.toContain("undefined");
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+
   it("shows one actionable repair without triggering model inference", async () => {
     mocks.invoke.mockResolvedValue({
       ...GOOD_IMPORTS,
