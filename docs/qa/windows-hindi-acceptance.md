@@ -1,6 +1,6 @@
 # Windows and Hindi narration acceptance protocol (manual, not yet passed)
 
-**Project:** KathaSvara — experimental desktop. **Latest published experimental pre-release:** [v0.5.1](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.1). **Tracking:** [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+**Project:** KathaSvara — experimental desktop. **Latest verified published experimental pre-release:** [v0.5.3](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.3). **Human acceptance still pending:** [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). The release remains unsigned, unbundled and not stable.
 
 This checklist is deliberately **not an automated pass certificate**. Existing GitHub workflows compile/tests the source and unsigned developer EXE; they do **not** prove that the application launches on a clean Windows machine, that real Chatterbox model weights can be obtained and loaded, or that Hindi speech is natural. Do not close issue #3 or announce a stable release based only on mocked tests or these blank checklists.
 
@@ -8,10 +8,10 @@ This checklist is deliberately **not an automated pass certificate**. Existing G
 
 Use Windows 11 x64 with a supported WebView2 runtime and Python 3.11. Record the OS build, RAM and model-compatible CPU/GPU/VRAM (coarse characteristics only). Do not include local usernames, sensitive file paths, access tokens or machine identifiers in public reports.
 
-Use the developer executable only from the [verified GitHub release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.1) and inspect `README.txt`. Compare SHA-256 using PowerShell:
+Use the developer executable only from the [verified GitHub release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.3) and inspect `README.txt`. Compare SHA-256 using PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\KathaSvara-v0.5.1-dev-win64.exe
+Get-FileHash -Algorithm SHA256 .\KathaSvara-v0.5.3-dev-win64.exe
 ```
 
 The expected digest is recorded in the release's `SHA256SUMS.txt`. This is an **unsigned, unbundled executable**, not an MSI/NSIS installer; do not bypass a security block or turn off Windows security measures. A clean-machine test must distinguish a refusal to run an unsigned test binary from an actual application defect.
@@ -50,7 +50,7 @@ For a *separately authorized real-model test*, run `scripts/smoke_hindi.py` from
 | Privacy | Export **privacy-safe audit JSON** | Only sequential scene numbers, fixed reason codes, counts and explicit false model/audio flags |
 | Rendering | Generate full story, selected scene and one spoken line independently | Real WAV produced, ordered dialogue, no false stage-direction speech |
 | Export | Export WAV and measured SRT from the same generated scene | Suggested stems match; cue timestamps reflect dialogue audio and SRT opens in a player/editor |
-| New cue preview (development source only) | If testing source containing the post-v0.5.1 subtitle-preview feature, inspect first and last pages, seek to a cue and then export | Cue text and times agree with the SRT; preview alone does not export a file, permit an SRT-review checkmark, or prove listening quality. Mark **not tested** for the published v0.5.1 EXE |
+| Cue preview (included in v0.5.2+) | In a confirmed v0.5.2 build or later source, inspect first and last cue pages, seek to a cue and then export | Cue text and measured timing agree with the SRT; preview alone does not export a file, permit an SRT-review checkmark, or prove listening quality. Record **not tested** unless a human actually checks the given executable |
 | Recovery | Cancel between speech segments; inspect **Recent render history** | Local journal exists; retry is explicit and uses a fresh job; caches reused only for unchanged text/profile |
 | Audio hygiene | Discard a preview and inspect local cache maintenance | No stale finished preview or old audio falsely marked current; no unintended project deletion |
 | Trust | Attempt to save WAV or SRT over an existing file | Existing file is retained; export failure is surfaced safely |
@@ -77,9 +77,9 @@ Listen to an independently generated WAV on actual hardware (headphones and spea
 
 If any aspect is unverified, mark it as **blocked** or **not tested**; do not infer a pass from a fake/mocked engine test, file existence, waveform length, diagnostics, or a checked UI review box.
 
-## 5. Evidence for subtitle-preview source changes (not the published v0.5.1 EXE)
+## 5. Evidence for subtitle-preview features (v0.5.2 and later)
 
-For a development source build that includes **Preview dialogue cues**, verify these additional cases separately from the v0.5.1 release matrix:
+For an actual v0.5.2 executable or later source build that includes **Preview dialogue cues**, verify these cases against that exact tag/commit; do not reuse results from a different binary:
 
 1. Generate a WAV whose rendered dialogue uses a pronunciation-glossary substitution. Confirm the cue preview and SRT both use the **rendered** text rather than old source spelling.
 2. Produce a story with more than ten dialogue cues. Check the first and last cue pages, pagination boundaries and the measured times. A later invalid cue must prevent the entire preview rather than be silently omitted.
@@ -88,7 +88,7 @@ For a development source build that includes **Preview dialogue cues**, verify t
 5. Clear the WAV or switch stories. Stale cue text must disappear, and no previous preview or exported review state should be attributed to a new WAV.
 6. For WAVs larger than the 25 MiB inline limit, check captions visually and listen using the explicitly exported WAV in another player; do not expect the in-app seek button.
 
-**Source-only results cannot retroactively certify any previously published executable.** Do not mark future-build functionality as passed for v0.5.1; record its exact source commit and test date.
+**Source-only results cannot retroactively certify any previously published executable.** v0.5.1 did not include this preview; v0.5.2 includes it, but its real user controls and audio remain **not tested** unless someone verifies that specific binary. Record each tested commit/tag and date.
 
 ## 6. Minimal, safe acceptance record
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.4 development (not yet released)
+
+- **Actionable audio diagnostics:** model-free TTS preflight now recommends one deterministic next repair action, prioritized across Python version, imports, device/model overrides, local voice reference, and optional Chatterbox API compatibility. The Settings panel shows this next step without exposing private filenames or raw import errors. Adds Python and React regression tests; no model weights are loaded and no real Hindi speech is claimed.
+
 ## v0.5.3 published experimental developer pre-release (5 November 2026)
 
 - The [guarded release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/42020099803) passed at exact commit `7e050a17fa4173efb32f80985d517c23d84bcd39`, published the unsigned Windows developer EXE, README and SHA256 companion, and verified the GitHub-downloaded EXE digest. This does **not** certify real Hindi speech, model availability or clean-Windows installation.

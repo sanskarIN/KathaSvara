@@ -10,6 +10,12 @@
 
 The adapter follows the upstream `ChatterboxMultilingualTTS.from_pretrained` / `generate(text, language_id="hi")` interface. **V2 remains the default** for backward compatibility. The optional V3 multilingual checkpoint uses `t3_model="v3"` and may require a newer `chatterbox-tts` package and additional approved weights. Selecting V3 does **not** certify Hindi quality, voice similarity, or model availability; only real local inference followed by listening can establish those on a specific system.
 
+## Experimental development: one next action for speech setup
+
+The post-v0.5.3 source development adds a specific **Recommended next step** to the model-free TTS import probe in Settings. It prioritizes the first actionable blocker: Python 3.11, missing or broken speech imports, invalid device/model selection, an unusable local reference WAV, or an incompatible/unverifiable optional Chatterbox API. The advice is selected from fixed strings, so private interpreter paths, reference filenames, tokens, and native import errors are not echoed.
+
+The Windows `-DoctorOnly` helper also prints the same fixed **Recommended next step**, including when preflight fails. When optional speech packages are missing, the helper now continues into the safe, model-free import probe instead of exiting before a recommendation appears. Installing packages is **opt-in** using `-InstallDependencies`; the doctor alone does not install packages, download weights or run the speech model. A green import probe recommends the **explicit real Hindi smoke test and listening**, not an automatic model download and not a claim that KathaSvara can already speak Hindi. This diagnostic improvement is development-only until included in a later release. It is **not part of the already published v0.5.3 or v0.5.2 executables**, and does not certify real Hindi narration.
+
 ## Windows 11 — configure, diagnose, and start
 
 Prerequisites: obtain KathaSvara's source tree from the official GitHub repository, install **Python 3.11**, and use a developer EXE downloaded from a verified KathaSvara GitHub release with its checksum validated. No administrator privileges or persistent environment-variable changes are required by this helper.

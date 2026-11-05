@@ -265,3 +265,63 @@ def test_cli_exposes_probe_without_speech_generation(monkeypatch: pytest.MonkeyP
     assert cli.handle({"action": "probe_runtime"}) == {
         "ok": True, "result": {"imports_ok": False},
     }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"python_311": False, "failed_components": ["torch"]},
+         "select_python_311"),
+        ({"failed_components": ["numpy", "torch"], "device_valid": False},
+         "repair_tts_imports"),
+        ({"device_valid": False, "model_valid": False},
+         "fix_device_override"),
+        ({"model_valid": False, "reference_status": "invalid"},
+         "fix_model_selection"),
+        ({"reference_status": "invalid", "api_status": "v3_unsupported"},
+         "replace_reference_wav"),
+        ({"api_status": "v3_unsupported"}, "update_chatterbox_api"),
+        ({"api_status": "reference_unsupported"}, "update_chatterbox_api"),
+        ({"api_status": "unavailable"}, "update_chatterbox_api"),
+        ({"api_status": "unverifiable"}, "verify_chatterbox_api"),
+        ({}, "run_real_hindi_smoke"),
+    ],
+)
+def test_next_audio_action_selects_first_safe_repair(
+    overrides: dict[str, object], expected: str,
+) -> None:
+    options: dict[str, object] = {
+        "python_311": True,
+        "failed_components": [],
+        "device_valid": True,
+        "model_valid": True,
+        "reference_status": "not_set",
+        "api_status": "not_requested",
+    }
+    options.update(overrides)
+    action = runtime_probe._next_action_code(**options)
+    assert action == expected
+    assert action in runtime_probe._NEXT_ACTIONS
+    assert runtime_probe._NEXT_ACTIONS[action]
+
+
+def test_probe_next_action_has_no_private_environment_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_value = r"C:\\Users\\private\\my-token"
+    monkeypatch.setattr(
+        runtime_probe.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(ChatterboxMultilingualTTS=object()),
+    )
+    monkeypatch.setenv("KATHASVARA_TTS_DEVICE", private_value)
+    monkeypatch.setenv("KATHASVARA_TTS_MODEL", "v2")
+    monkeypatch.delenv("KATHASVARA_TTS_REFERENCE_WAV", raising=False)
+    report = runtime_probe.probe_runtime()
+    if report["python_311"]:
+        assert report["next_action_code"] == "fix_device_override"
+    else:
+        assert report["next_action_code"] == "select_python_311"
+    assert report["preflight_ok"] is False
+    assert private_value not in str(report)
+    assert report["audio_synthesis_verified"] is False
