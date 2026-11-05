@@ -122,11 +122,11 @@ try {
 if (-not $diagnostic.ok -or -not $diagnostic.result.python_311) {
     Fail "The local Python bridge failed its Python 3.11 check."
 }
+# Missing packages are common on a clean installation. Let the import probe
+# return one fixed repair action instead of exiting before the audio doctor.
+# Imports are model-free and do not download package or checkpoint weights.
 if (-not $diagnostic.result.dependencies_present) {
-    $missing = @($diagnostic.result.dependencies.PSObject.Properties |
-        Where-Object { -not $_.Value } | ForEach-Object { $_.Name })
-    Fail ("Speech packages are missing: " + ($missing -join ", ") +
-        ". Rerun with -InstallDependencies to install the optional TTS packages.")
+    Write-Host "Some optional speech packages are absent; running the model-free import doctor for a recommended repair."
 }
 if (-not $diagnostic.result.temporary_write_test_passed) {
     Fail "Python cannot write temporary files; speech synthesis cannot be used safely."
