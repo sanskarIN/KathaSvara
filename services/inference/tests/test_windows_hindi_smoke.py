@@ -73,3 +73,5 @@ def test_windows_real_smoke_mode_requires_full_wav_inspection() -> None:
     assert "distinct_voices_verified" in smoke_section
     assert "signal_review_required" in smoke_section
     assert "near_silence_hint" in smoke_section
+    assert 'if ($inspection.result.level_hints.dc_only_hint) {' in smoke_section
+    assert 'Fail "The Hindi smoke-test WAV has no meaningful varying audio' in smoke_section
