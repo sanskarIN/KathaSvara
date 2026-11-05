@@ -11,7 +11,7 @@ from pathlib import Path
 
 VERSION = "0.5.3"
 # Public landing page intentionally advertises only releases actually published.
-PUBLISHED_VERSION = "0.5.2"
+PUBLISHED_VERSION = "0.5.3"
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -80,6 +80,8 @@ def test_public_site_uses_latest_published_prerelease_without_stable_claims() ->
     assert "Real Hindi listening" in site
     assert "remain unverified" in site
     assert "issues/3" in site
+    assert "v0.5.2 · Published experimental pre-release" in site
+    assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.2" in site
     assert "v0.5.1 · Published experimental pre-release" in site
     assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.1" in site
 

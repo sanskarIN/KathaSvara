@@ -1,7 +1,7 @@
-"""Model-free policy tests for the future v0.5.3 prerelease workflow.
+"""Model-free policy tests for the archived v0.5.3 prerelease workflow.
 
-The v0.5.2 prerelease is published; v0.5.3 remains a guarded draft.
-Passing these tests does NOT authorize a v0.5.3 tag or publish action.
+Both v0.5.2 and v0.5.3 are published. These tests preserve manual-only
+release safeguards and honest real-Hindi acceptance disclaimers.
 SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ VERSION = "v0.5.3"
 PREVIOUS = "v0.5.2"
 
 
-def test_next_release_is_manual_and_requires_published_previous_version() -> None:
+def test_published_release_workflow_is_manual_and_requires_predecessor() -> None:
     workflow = (
         ROOT / ".github/workflows/release-v0.5.3.yml"
     ).read_text(encoding="utf-8")
@@ -44,7 +44,7 @@ def test_next_release_is_manual_and_requires_published_previous_version() -> Non
     assert 'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"' in publish
 
 
-def test_next_release_is_immutable_and_requires_verified_assets() -> None:
+def test_published_release_workflow_is_immutable_and_verifies_assets() -> None:
     workflow = (
         ROOT / ".github/workflows/release-v0.5.3.yml"
     ).read_text(encoding="utf-8")
@@ -73,7 +73,7 @@ def test_next_release_is_immutable_and_requires_verified_assets() -> None:
     assert "KathaSvara-v0.5.2-dev-win64.exe,README.txt,SHA256SUMS.txt" in workflow
 
 
-def test_future_release_notes_do_not_claim_audio_acceptance_or_publication() -> None:
+def test_published_release_notes_do_not_claim_human_audio_acceptance() -> None:
     notes = (
         ROOT / "docs/releases/v0.5.3-notes.md"
     ).read_text(encoding="utf-8")
@@ -87,7 +87,8 @@ def test_future_release_notes_do_not_claim_audio_acceptance_or_publication() -> 
         assert VERSION in text
         assert PREVIOUS in text
         assert "issue #3" in text
-    assert "NOT PUBLISHED" in notes
+    assert "PUBLISHED EXPERIMENTAL PRE-RELEASE" in notes
+    assert "NOT PUBLISHED" not in notes
     assert "NOT STABLE" in notes
     assert "NOT A COMPLETE INSTALLER" in readme
     assert "Python 3.11" in readme
