@@ -2,6 +2,8 @@
 
 ## v0.5.3 draft development (not merged or published)
 
+- **Hindi smoke-test correctness:** reject WAVs containing only a loud DC offset in the opt-in Windows real-audio verification path, not just near-silence. Add CLI-inspector and launcher-contract regressions for constant and varying PCM signals; neither model-free test certifies Hindi intelligibility.
+
 - **Audio generator usability:** document that the current unsigned Windows EXE is not a standalone synthesizer, provide an opt-in PowerShell launcher that configures Python 3.11 and inference sources, diagnoses missing dependencies without model downloads, and can explicitly run a real Hindi WAV smoke test. Add no-download PowerShell syntax checking on Windows CI.
 - **Real WAV retention fix:** Voice Studio now preserves structurally validated recordings above the 25 MiB inline-preview limit and exposes Export WAV instead of deleting them. Add Windows Rust unit coverage for short/long WAV previews and clarify missing audio setup and errors in the desktop UI.
 
