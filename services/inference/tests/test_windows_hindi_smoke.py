@@ -92,3 +92,16 @@ def test_windows_hindi_smoke_prompt_survives_powershell_51_ansi_source() -> None
     assert json.loads(unicode_json) == "नमस्कार। यह कथास्वर की वास्तविक हिंदी आवाज़ जाँच है।"
     assert "text = $hindiText" in script
     assert "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)" in script
+
+
+def test_windows_doctor_shows_fixed_runtime_repair_action() -> None:
+    script = (
+        Path(__file__).resolve().parents[3] / "scripts" / "windows"
+        / "launch-with-audio.ps1"
+    ).read_text(encoding="utf-8")
+    assert script.isascii()
+    assert 'if (-not $importProbe.result.preflight_ok) {' in script
+    assert 'Fail ("Speech runtime preflight failed: "' in script
+    assert '"Recommended next step: " + $importProbe.result.next_action' in script
+    assert 'if ($DoctorOnly) {' in script
+    assert 'DoctorOnly complete. No speech model was loaded' in script
