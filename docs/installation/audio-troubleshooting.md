@@ -12,9 +12,9 @@ The adapter follows the upstream `ChatterboxMultilingualTTS.from_pretrained` / `
 
 ## Experimental development: one next action for speech setup
 
-The post-v0.5.3 development branch adds a specific **Recommended next step** to the model-free TTS import probe in Settings. It prioritizes the first actionable blocker: Python 3.11, missing or broken speech imports, invalid device/model selection, an unusable local reference WAV, or an incompatible/unverifiable optional Chatterbox API. The advice is selected from fixed strings, so private interpreter paths, reference filenames, tokens, and native import errors are not echoed.
+The post-v0.5.3 source development adds a specific **Recommended next step** to the model-free TTS import probe in Settings. It prioritizes the first actionable blocker: Python 3.11, missing or broken speech imports, invalid device/model selection, an unusable local reference WAV, or an incompatible/unverifiable optional Chatterbox API. The advice is selected from fixed strings, so private interpreter paths, reference filenames, tokens, and native import errors are not echoed.
 
-The Windows `-DoctorOnly` helper also prints the same fixed **Recommended next step**, including when preflight fails. It does not run the speech model. A green import probe recommends the **explicit real Hindi smoke test and listening**, not an automatic model download and not a claim that KathaSvara can already speak Hindi. This diagnostic change is development-only until separately published in a future pre-release; it is not part of the published v0.5.2 binary or the pending v0.5.3 release candidate.
+The Windows `-DoctorOnly` helper also prints the same fixed **Recommended next step**, including when preflight fails. It does not run the speech model. A green import probe recommends the **explicit real Hindi smoke test and listening**, not an automatic model download and not a claim that KathaSvara can already speak Hindi. This diagnostic improvement is development-only until included in a later release. It is **not part of the already published v0.5.3 or v0.5.2 executables**, and does not certify real Hindi narration.
 
 ## Windows 11 — configure, diagnose, and start
 
