@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.4 development draft (not merged or published)
+
+- **Actionable audio diagnostics:** model-free TTS preflight now recommends one deterministic next repair action, prioritized across Python version, imports, device/model overrides, local voice reference, and optional Chatterbox API compatibility. The Settings panel shows this next step without exposing private filenames or raw import errors. Adds Python and React regression tests; no model weights are loaded and no real Hindi speech is claimed.
+
 ## v0.5.3 draft development (not merged or published)
 
 - **Windows 5.1 Hindi smoke-test encoding:** keep the PowerShell launcher ASCII-only and decode its Hindi test line from JSON Unicode escapes before sending it to Python as UTF-8. Avoid legacy ANSI source-decoding corruption that could synthesize the wrong text; add a deterministic no-model test. Real Chatterbox listening remains unverified.
