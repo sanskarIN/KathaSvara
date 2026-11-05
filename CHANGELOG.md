@@ -1,6 +1,8 @@
 # Changelog
 
-## v0.5.3 draft development (not merged or published)
+## v0.5.3 published experimental developer pre-release (5 November 2026)
+
+- The [guarded release workflow](https://github.com/sanskarIN/KathaSvara/actions/runs/42020099803) passed at exact commit `7e050a17fa4173efb32f80985d517c23d84bcd39`, published the unsigned Windows developer EXE, README and SHA256 companion, and verified the GitHub-downloaded EXE digest. This does **not** certify real Hindi speech, model availability or clean-Windows installation.
 
 - **Windows 5.1 Hindi smoke-test encoding:** keep the PowerShell launcher ASCII-only and decode its Hindi test line from JSON Unicode escapes before sending it to Python as UTF-8. Avoid legacy ANSI source-decoding corruption that could synthesize the wrong text; add a deterministic no-model test. Real Chatterbox listening remains unverified.
 
