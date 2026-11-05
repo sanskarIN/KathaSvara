@@ -29,8 +29,10 @@ _NEXT_ACTIONS = {
         "Select a Python 3.11 interpreter in the KathaSvara setup before retrying."
     ),
     "repair_tts_imports": (
-        "Repair the failed speech packages in the selected Python environment; "
-        "optional dependencies require an explicit installation."
+        "Repair the failed speech packages in the selected Python 3.11 "
+        "environment. On Windows, run the setup helper with -InstallDependencies "
+        "only if you explicitly approve installing third-party packages; "
+        "then repeat the no-model probe."
     ),
     "fix_device_override": (
         "Set KATHASVARA_TTS_DEVICE to auto or cpu, then repeat the no-model probe."
