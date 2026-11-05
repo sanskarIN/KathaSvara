@@ -22,6 +22,67 @@ _MODULES = (
     ("chatterbox_multilingual", "chatterbox.mtl_tts"),
 )
 
+# Fixed, path-free responses; never send import exception text, model paths, or
+# environment override values to the desktop through this diagnostic channel.
+_NEXT_ACTIONS = {
+    "select_python_311": (
+        "Select a Python 3.11 interpreter in the KathaSvara setup before retrying."
+    ),
+    "repair_tts_imports": (
+        "Repair the failed speech packages in the selected Python environment; "
+        "optional dependencies require an explicit installation."
+    ),
+    "fix_device_override": (
+        "Set KATHASVARA_TTS_DEVICE to auto or cpu, then repeat the no-model probe."
+    ),
+    "fix_model_selection": (
+        "Set KATHASVARA_TTS_MODEL to v2 or v3; V2 is the compatibility default."
+    ),
+    "replace_reference_wav": (
+        "Select your own or consented local 16-bit PCM WAV meeting the reference "
+        "duration and signal rules, or clear the session reference."
+    ),
+    "update_chatterbox_api": (
+        "The installed Chatterbox API lacks a selected optional capability. "
+        "Use its supported option or explicitly update the local package."
+    ),
+    "verify_chatterbox_api": (
+        "The optional Chatterbox API could not be proven compatible. Review "
+        "its installed version and documented signatures before generating."
+    ),
+    "run_real_hindi_smoke": (
+        "Imports and options passed. Model weights and real Hindi speech remain "
+        "unverified; run the explicit Hindi WAV smoke test and listen to its output."
+    ),
+}
+
+
+def _next_action_code(
+    *,
+    python_311: bool,
+    failed_components: list[str],
+    device_valid: bool,
+    model_valid: bool,
+    reference_status: str,
+    api_status: str,
+) -> str:
+    """Return one deterministic first repair action, never private input."""
+    if not python_311:
+        return "select_python_311"
+    if failed_components:
+        return "repair_tts_imports"
+    if not device_valid:
+        return "fix_device_override"
+    if not model_valid:
+        return "fix_model_selection"
+    if reference_status == "invalid":
+        return "replace_reference_wav"
+    if api_status == "unverifiable":
+        return "verify_chatterbox_api"
+    if api_status not in {"not_requested", "compatible"}:
+        return "update_chatterbox_api"
+    return "run_real_hindi_smoke"
+
 
 def probe_runtime() -> dict[str, object]:
     """Attempt imports only; do not call from_pretrained or generate."""
@@ -64,6 +125,14 @@ def probe_runtime() -> dict[str, object]:
     )
     api_compatible = requested_api_status in {"not_requested", "compatible"}
     imports_ok = not incompatible_python and not failed
+    next_action_code = _next_action_code(
+        python_311=not incompatible_python,
+        failed_components=failed,
+        device_valid=device_valid,
+        model_valid=model_valid,
+        reference_status=reference_status,
+        api_status=requested_api_status,
+    )
     return {
         "python_311": not incompatible_python,
         "checks": checks,
@@ -85,6 +154,8 @@ def probe_runtime() -> dict[str, object]:
         ),
         "model_weights_verified": False,
         "audio_synthesis_verified": False,
+        "next_action_code": next_action_code,
+        "next_action": _NEXT_ACTIONS[next_action_code],
         "help": (
             "Use Python 3.11 and install the inference project with "
             '`python -m pip install -e ".[tts]"`. Repair the listed library imports '
