@@ -1,6 +1,6 @@
 """Model-free policy tests for the future v0.5.3 prerelease workflow.
 
-The current v0.5.2 package/source version and held release SHA remain untouched.
+The v0.5.2 prerelease is published; v0.5.3 remains a guarded draft.
 Passing these tests does NOT authorize a v0.5.3 tag or publish action.
 SPDX-License-Identifier: MPL-2.0
 """
@@ -65,6 +65,8 @@ def test_next_release_is_immutable_and_requires_verified_assets() -> None:
         assert token in workflow, f"Missing v0.5.3 release invariant: {token}"
     # The older EXE name must appear in the prior-release asset gate.
     # It must never be packaged or published as the new v0.5.3 artifact.
+    assert "actions/setup-python@v7" in workflow
+    assert "actions/upload-artifact@v7" in workflow
     assert "gh release create v0.5.2" not in workflow
     assert '$name = "KathaSvara-v0.5.2-dev-win64.exe"' not in workflow
     assert "release-assets/KathaSvara-v0.5.2-dev-win64.exe" not in workflow
