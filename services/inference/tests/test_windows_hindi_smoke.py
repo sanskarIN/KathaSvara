@@ -33,6 +33,24 @@ def test_smoke_wav_inspector_reports_structure_not_hindi_listening(tmp_path: Pat
     assert report["model_loaded"] is False
     assert report["hindi_listening_verified"] is False
     assert report["distinct_voices_verified"] is False
+    # A loud unchanging DC offset can pass structural checks but is not speech.
+    assert report["level_hints"]["near_silence_hint"] is False
+    assert report["level_hints"]["dc_only_hint"] is True
+
+
+def test_smoke_wav_inspector_accepts_varying_pcm_without_dc_hint(tmp_path: Path) -> None:
+    output = tmp_path / "varying.wav"
+    with wave.open(str(output), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(8_000)
+        wav.writeframes(b"\x00\x08\x00\xf8" * 4_000)
+
+    report = handle({"action": "inspect_generated_wav", "path": str(output)})["result"]
+    assert report["structure_valid"] is True
+    assert report["level_hints"]["near_silence_hint"] is False
+    assert report["level_hints"]["dc_only_hint"] is False
+    assert report["hindi_listening_verified"] is False
 
 
 def test_smoke_wav_inspector_rejects_non_wav_even_if_file_is_large(tmp_path: Path) -> None:
