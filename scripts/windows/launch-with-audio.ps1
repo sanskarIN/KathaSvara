@@ -170,13 +170,14 @@ if (-not $importProbe.result.preflight_ok) {
         }
     }
     Fail ("Speech runtime preflight failed: " + ($failed -join ", ") +
-        ". Repair the Python TTS environment or override before launching the app.")
+        ". Recommended next step: " + $importProbe.result.next_action)
 }
 Write-Host ("Speech preflight passed (device: " + $importProbe.result.tts_device_mode +
     "; model: " + $importProbe.result.tts_model_variant +
     "; voice reference: " + $importProbe.result.reference_voice_status +
     "; upstream API: " + $importProbe.result.upstream_api_status +
     "). Model weights, hardware capability and Hindi audio are NOT verified.")
+Write-Host ("Recommended next step: " + $importProbe.result.next_action)
 Write-Host "The first explicit Generate action may need an internet connection, model-weight access, storage, and compatible hardware."
 
 if ($DoctorOnly) {
