@@ -12,12 +12,13 @@
 
 ## v0.5.3 published — audio recovery and scene workflows (human audio acceptance still pending)
 
-
 The v0.5.3 experimental preview adds diagnostic safeguards, local consented reference-voice support and further scene and narration recovery improvements. **A passing import probe or structurally valid generated WAV does not verify intelligible Hindi or distinct character voices.** The Windows EXE remains unsigned and requires a separately configured inference stack. See [v0.5.3 release notes](docs/releases/v0.5.3-notes.md), [local audio troubleshooting](docs/installation/audio-troubleshooting.md), and the [blank human-acceptance checklist](docs/qa/windows-hindi-acceptance.md).
+## v0.5.2 published — subtitle cue review (historical)
+
 The published v0.5.2 source adds **Preview dialogue cues** to the Character and Scene Studio after a generated WAV becomes available. It displays validated, glossary-adjusted Hindi captions and rounded timestamps ten at a time, lets the creator search captions locally and seek the inline WAV to a cue, and refuses duplicate, unknown-story, out-of-WAV or otherwise inconsistent timing metadata. Preview is local-only: **it does not export an SRT, claim a listening pass, or unlock the manual subtitle checklist**. Export dialogue SRT remains an explicit separate action. See [v0.5.2 development notes](docs/releases/v0.5.2-development.md); v0.5.3 is the latest published developer preview, and [manual acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3) remains open.
 
 
-## Post-v0.5.0 development (not a new release)
+## Development history after v0.5.0
 
 Source builds now use **React 19.3.1 / React DOM 19.3.1 with matching types**, TypeScript 7.0.2, Vite 8.3.5, React plugin 6.1.2 and Vitest 5.0.5, from the npm v3 lockfile under Node 22 `npm ci`. The React runtime/types upgrade was tested as one consistent dependency graph because updating React or React DOM alone fails locked peer installation. The migrated suite passed all 55 React tests, a TypeScript build, and an npm security audit reporting zero known vulnerabilities at check time. Active frontend CI checks high-severity npm advisories and weekly Dependabot updates are configured. This does **not** update the already-published v0.5.0 executable, certify long-term dependency security, or prove real Hindi narration quality. Review the [npm maintenance policy](docs/maintenance/npm-dependencies.md) and [security-update tracking issue #33](https://github.com/sanskarIN/KathaSvara/issues/33).
 
