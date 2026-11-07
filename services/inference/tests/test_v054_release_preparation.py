@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = "0.5.4"
 PREVIOUS = "0.5.3"
+NEXT_VERSION = "0.5.5"
 
 
 def test_v054_workflow_is_exact_sha_manual_only_and_predecessor_gated() -> None:
@@ -72,7 +73,7 @@ def test_v054_release_template_cannot_publish_a_false_draft_banner() -> None:
     assert "NOT A COMPLETE INSTALLER" in published
 
 
-def test_version_components_match_published_v054_site() -> None:
+def test_next_version_components_match_while_site_remains_published_v054() -> None:
     package = json.loads((ROOT / "apps/desktop/package.json").read_text(encoding="utf-8"))
     lock = json.loads(
         (ROOT / "apps/desktop/package-lock.json").read_text(encoding="utf-8")
@@ -94,7 +95,7 @@ def test_version_components_match_published_v054_site() -> None:
         cargo["package"]["version"],
         python["project"]["version"],
     ):
-        assert actual == VERSION
+        assert actual == NEXT_VERSION
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     assert 'releases/tag/v0.5.4' in site
     assert "v0.5.4 · Latest experimental pre-release" in site
@@ -140,11 +141,11 @@ def test_v054_windows_candidate_and_readme_are_unbundled() -> None:
         ROOT / ".github/workflows/windows-portable-candidate.yml"
     ).read_text(encoding="utf-8")
     instructions = (
-        ROOT / "docs/installation/portable-windows-v0.5.4.md"
+        ROOT / "docs/installation/portable-windows-v0.5.5.md"
     ).read_text(encoding="utf-8")
-    assert "KathaSvara-v0.5.4-dev-win64.exe" in candidate
-    assert "portable-windows-v0.5.4.md" in candidate
-    assert "KathaSvara-v0.5.3-dev-win64.exe" not in candidate
+    assert "KathaSvara-v0.5.5-dev-win64.exe" in candidate
+    assert "portable-windows-v0.5.5.md" in candidate
+    assert "KathaSvara-v0.5.4-dev-win64.exe" not in candidate
     for term in (
         "NOT A COMPLETE INSTALLER", "NOT STABLE", "Python 3.11",
         "Chatterbox", "SHA256SUMS.txt", "issue #3", "UNSIGNED",
