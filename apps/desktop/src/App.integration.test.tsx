@@ -230,7 +230,7 @@ describe("explicit real Hindi model smoke test", () => {
     expect(screen.getByText(/Signal review needed:/)).toBeTruthy();
     expect(screen.getByText(/possible clipping/)).toBeTruthy();
     expect(screen.getByText(/long internal quiet span/)).toBeTruthy();
-    expect(screen.getByText(/quality is NOT automatically verified/)).toBeTruthy();
+    expect(screen.getByText(/Hindi intelligibility is NOT automatically verified/)).toBeTruthy();
     expect(mocks.invoke).not.toHaveBeenCalledWith("discard_audio", expect.anything());
   });
 
