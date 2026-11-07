@@ -31,6 +31,15 @@ type AbandonedWavReport = {
   removed: number; bytes_removed: number; ignored_entries: number;
   age_hours: number; max_deletions: number;
 };
+type OfflineWavProbe = {
+  status: "passed" | "failed";
+  failed_stage: "temporary_directory" | "write_pcm16" | "inspect_pcm16" | "cleanup" | null;
+  temporary_wav_roundtrip_ok: boolean;
+  model_loaded: false;
+  hindi_listening_verified: false;
+  audio_playback_verified: false;
+  help: string;
+};
 type RuntimeImportProbe = {
   python_311: boolean;
   checks: Record<string, "ok" | "entrypoint_missing" | "import_failed">;
@@ -88,6 +97,8 @@ export default function App() {
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
   const [probingImports, setProbingImports] = useState(false);
+  const [checkingAudioIo, setCheckingAudioIo] = useState(false);
+  const [audioIoReport, setAudioIoReport] = useState<OfflineWavProbe | null>(null);
   const [importProbe, setImportProbe] = useState<RuntimeImportProbe | null>(null);
   // Never persist the user's private reference WAV path to projects or localStorage.
   const [referenceWavPath, setReferenceWavPath] = useState<string | null>(null);
@@ -362,6 +373,24 @@ export default function App() {
     }
   }
 
+  async function verifyAudioIo() {
+    setCheckingAudioIo(true);
+    setAudioIoReport(null);
+    try {
+      const report = await invoke<OfflineWavProbe>("probe_audio_io");
+      setAudioIoReport(report);
+      setMessage(report.temporary_wav_roundtrip_ok
+        ? "Temporary WAV write/read passed. Speech, speakers and playback are still unverified."
+        : "Temporary WAV I/O needs attention. Check the failing stage in Settings.");
+    } catch {
+      // Native/OS errors may contain private filesystem paths. Never reflect
+      // exception details or the user's reference path into the Settings UI.
+      setMessage("Cannot run the WAV I/O check. Configure Python 3.11 and local inference sources.");
+    } finally {
+      setCheckingAudioIo(false);
+    }
+  }
+
   async function verifyTtsImports() {
     const probeRevision = ++importProbeRevision.current;
     setProbingImports(true);
@@ -633,6 +662,20 @@ export default function App() {
               <p role="status"><strong>Session reference:</strong> {referenceWavPath === null
                 ? "Launcher default (if available)"
                 : "Local recording selected (private path hidden)"}</p>
+              <button className="secondary-button" disabled={checkingAudioIo} onClick={() => void verifyAudioIo()}>
+                {checkingAudioIo ? "Checking temporary WAV I/O…" : "Test temporary WAV I/O (no model or playback)"}
+              </button>
+              <p className="helper">Writes, inspects and deletes one disposable 250 ms synthetic PCM16 WAV in Python's temporary folder.
+                No TTS model, speech packages, microphone, speakers, private story or reference voice are used.
+                Passing here does not verify actual Hindi generation or the final export destination.</p>
+              {audioIoReport && (
+                <section aria-label="Offline WAV I/O result" className="diagnostic-report" role="status">
+                  <h3>WAV I/O: {audioIoReport.temporary_wav_roundtrip_ok ? "Temporary round-trip passed" : "Temporary round-trip failed"}</h3>
+                  {audioIoReport.failed_stage && <p><strong>Failed stage:</strong> {audioIoReport.failed_stage}</p>}
+                  <p><strong>Model / Hindi speech / playback verified:</strong> No</p>
+                  <p>{audioIoReport.help}</p>
+                </section>
+              )}
               <button className="secondary-button" disabled={probingImports} onClick={() => void verifyTtsImports()}>
                 {probingImports ? "Verifying speech library imports…" : "Verify speech library imports (no model load)"}
               </button>
