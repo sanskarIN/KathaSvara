@@ -500,6 +500,81 @@ fn selected_inference_paths() -> &'static Mutex<Option<SessionInferencePaths>> {
     SESSION_INFERENCE_PATHS.get_or_init(|| Mutex::new(None))
 }
 
+const SESSION_PYTHON_VERIFY_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_INFERENCE_PROJECT_METADATA_BYTES: u64 = 32 * 1024;
+
+/// Only the documented source package version may be used with this desktop.
+/// Read a bounded, local text file; never execute anything to identify source version.
+fn inference_source_version_matches(inference: &Path) -> bool {
+    let manifest = inference.join("pyproject.toml");
+    let Ok(metadata) = fs::metadata(&manifest) else { return false };
+    if !metadata.is_file() || metadata.len() > MAX_INFERENCE_PROJECT_METADATA_BYTES {
+        return false;
+    }
+    let Ok(source) = fs::read_to_string(manifest) else { return false };
+    let mut project_section = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            project_section = trimmed == "[project]";
+            continue;
+        }
+        if !project_section || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = trimmed.split_once('=') else { continue };
+        if name.trim() != "version" {
+            continue;
+        }
+        // The source distribution uses an explicit PEP 621 quoted version.
+        // Never accept ambiguous computed expressions or other TOML sections.
+        return value.trim() == format!("\"{}\"", env!("CARGO_PKG_VERSION"));
+    }
+    false
+}
+
+/// Explicitly execute only the interpreter selected by the user; -I prevents
+/// user-site/path startup influences, and stdio cannot leak private paths.
+/// No model load, package import, network request or shell interpreter occurs.
+fn verify_selected_python_311(python: &Path) -> Result<(), String> {
+    const CODE: &str =
+        "import sys; sys.exit(0 if sys.version_info[:2] == (3, 11) else 3)";
+    let mut child = Command::new(python)
+        .arg("-I")
+        .arg("-c")
+        .arg(CODE)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| "The selected Python executable could not be started.".to_string())?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err("Select a working Python 3.11 interpreter (not another Python version).".into())
+                };
+            }
+            Ok(None) if started.elapsed() < SESSION_PYTHON_VERIFY_TIMEOUT => {
+                thread::sleep(Duration::from_millis(40));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Python did not respond to the local version check. Choose another interpreter.".into());
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Unable to check the selected Python interpreter version.".into());
+            }
+        }
+    }
+}
+
 fn validate_session_inference_paths(
     python: &Path,
     inference: &Path,
@@ -522,6 +597,9 @@ fn validate_session_inference_paths(
     if !inference.is_dir() || !inference.join("kathasvara").join("cli.py").is_file() {
         return Err("Select the inference source directory containing kathasvara/cli.py.".into());
     }
+    if !inference_source_version_matches(inference) {
+        return Err("The inference source version must match this desktop executable. Select the matching source checkout.".into());
+    }
     Ok(SessionInferencePaths {
         python: python.to_path_buf(),
         inference: inference.to_path_buf(),
@@ -531,14 +609,22 @@ fn validate_session_inference_paths(
 /// Apply to new Python jobs only. In-flight jobs keep their already-spawned
 /// child-process paths; the global OS environment is never modified.
 #[tauri::command]
-fn configure_local_inference(python_path: String, inference_dir: String) -> Result<(), String> {
-    let selection = validate_session_inference_paths(
-        Path::new(&python_path), Path::new(&inference_dir),
-    )?;
-    let mut guard = selected_inference_paths().lock()
-        .map_err(|_| "Unable to update local inference settings.".to_string())?;
-    *guard = Some(selection);
-    Ok(())
+async fn configure_local_inference(python_path: String, inference_dir: String) -> Result<(), String> {
+    // Never stall the desktop UI while waiting for an interpreter which may be
+    // damaged or point to a Microsoft Store launcher stub.
+    tauri::async_runtime::spawn_blocking(move || {
+        let selection = validate_session_inference_paths(
+            Path::new(&python_path), Path::new(&inference_dir),
+        )?;
+        verify_selected_python_311(&selection.python)?;
+        let mut guard = selected_inference_paths().lock()
+            .map_err(|_| "Unable to update local inference settings.".to_string())?;
+        // A failed check leaves the previously configured session intact.
+        *guard = Some(selection);
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Unable to verify the local Python interpreter.".to_string())?
 }
 
 #[tauri::command]
@@ -1798,6 +1884,10 @@ mod tests {
         let module = source.join("kathasvara");
         fs::create_dir_all(&module).unwrap();
         fs::write(module.join("cli.py"), "# test only").unwrap();
+        fs::write(source.join("pyproject.toml"), format!(
+            "[build-system]\\nrequires = []\\n\\n[project]\\nname = \\"kathasvara-inference\\"\\nversion = \\"{}\\"\\n",
+            env!("CARGO_PKG_VERSION")
+        ).replace("\\\\n", "\\n")).unwrap();
         let python = root.join(if cfg!(windows) { "python.exe" } else { "python3.11" });
         fs::write(&python, b"not executed").unwrap();
 
@@ -1813,6 +1903,15 @@ mod tests {
         let wrong_name = root.join("suspicious-tool.exe");
         fs::write(&wrong_name, b"test").unwrap();
         assert!(validate_session_inference_paths(&wrong_name, &source).is_err());
+
+        // A filename alone cannot prove the selected file is Python.
+        assert!(verify_selected_python_311(&python).is_err());
+
+        // A valid CLI path with a stale or tampered package version is rejected.
+        fs::write(source.join("pyproject.toml"), "[project]\\nversion = \\"0.0.1\\"\\n").unwrap();
+        assert!(validate_session_inference_paths(&python, &source).is_err());
+        fs::remove_file(source.join("pyproject.toml")).unwrap();
+        assert!(validate_session_inference_paths(&python, &source).is_err());
 
         fs::remove_dir_all(root).unwrap();
     }
