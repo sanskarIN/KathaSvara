@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
+import { publicDesktopError } from "./lib/public_errors";
 import { buildDialogueCues, buildDialogueSrt, type DialogueCue } from "./lib/subtitles";
 import { parseWavQuality, qualityReviewHints, type WavQualityReport } from "./lib/wav_quality";
 import { resolveRenderSelection } from "./lib/render_selection";
@@ -50,7 +51,7 @@ interface Props {
 }
 
 function errorString(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return publicDesktopError(error);
 }
 
 function spokenSubtitleLines(doc: StoryV2) {
