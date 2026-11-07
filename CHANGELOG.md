@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.5 development — NOT PUBLISHED / NOT STABLE
+
+- **Disposable WAV plumbing doctor:** the Python inference source now verifies that it can write, read back, inspect and clean up a 250 ms synthetic PCM16 WAV without touching the user's story, reference voice, speaker output or the TTS model. Rust validates its fixed result schema and the Settings UI provides stage-specific repair guidance. [Merged PR #126](https://github.com/sanskarIN/KathaSvara/pull/126).
+- **In-app local runtime selection:** the user can deliberately choose a trusted Python executable and a matching `services/inference` folder in desktop Settings. The selection is session-only, private, reversible and applies to new jobs without changing OS environment variables. Python/TTS dependencies and model weights are still external. [Merged PR #128](https://github.com/sanskarIN/KathaSvara/pull/128).
+- **Future preview preparation:** exact-version checks and a SHA-pinned, manually dispatched v0.5.5 GitHub release workflow are proposed. The latest *published* release remains v0.5.4 until an authorized workflow succeeds. No human-tested Hindi voice quality, cross-machine standalone installer or stable release is claimed. See [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) and [full activation issue #129](https://github.com/sanskarIN/KathaSvara/issues/129).
+
 ## v0.5.4 published experimental developer pre-release (7 November 2026)
 
 - [GitHub v0.5.4 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4) was published by [manual workflow #42336118150](https://github.com/sanskarIN/KathaSvara/actions/runs/42336118150) from immutable exact commit `1fff96cf1c784bdb211ddfe60db92a4e2e924618`. All seven jobs passed, including the GitHub-downloaded Windows executable SHA-256 check. Attached `KathaSvara-v0.5.4-dev-win64.exe`, `README.txt` and `SHA256SUMS.txt`.
