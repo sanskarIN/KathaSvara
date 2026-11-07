@@ -15,6 +15,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use uuid::Uuid;
 
@@ -27,6 +28,27 @@ const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
 
 const CACHE_PRUNE_SENTINEL: &str = ":segment-cache-maintenance:";
+
+/// Per-process exclusive access for memory-heavy real TTS jobs. Model-free
+/// diagnostics and local project editing remain independent and available.
+static REAL_SPEECH_JOB_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct RealSpeechJobGuard;
+
+impl RealSpeechJobGuard {
+    fn start() -> Result<Self, String> {
+        REAL_SPEECH_JOB_ACTIVE.compare_exchange(
+            false, true, Ordering::AcqRel, Ordering::Acquire,
+        ).map_err(|_| "Another real speech generation or story render is already running. Wait for it to finish.".to_string())?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RealSpeechJobGuard {
+    fn drop(&mut self) {
+        REAL_SPEECH_JOB_ACTIVE.store(false, Ordering::Release);
+    }
+}
 static ACTIVE_RENDER_JOBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn active_render_jobs() -> &'static Mutex<HashSet<String>> {
@@ -1016,7 +1038,9 @@ async fn synthesize(
     {
         return Err("Voice settings are outside supported limits.".into());
     }
+    let guard = RealSpeechJobGuard::start()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _real_speech_job = guard;
         let audio_id = Uuid::new_v4().to_string();
         let folder = app_dir(&app)?.join("audio");
         fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
@@ -1444,8 +1468,10 @@ async fn render_story_v2(
     // Register synchronously, before the worker starts: fast cancel/history
     // requests should observe the job even while the runtime queues work.
     let guard = ActiveRenderGuard::start(&job_id)?;
+    let speech_guard = RealSpeechJobGuard::start()?;
     tauri::async_runtime::spawn_blocking(move || {
         let _active_job = guard;
+        let _real_speech_job = speech_guard;
         let root = app_dir(&app)?;
         let folder = root.join("audio");
         let jobs = root.join("jobs");
@@ -1789,6 +1815,20 @@ mod tests {
             .join().unwrap().unwrap_err();
         assert_eq!(failed, "Unable to send synthesis request.");
         assert!(!failed.contains(private_script));
+    }
+
+    #[test]
+    fn real_speech_jobs_are_exclusive_and_release_on_guard_drop() {
+        let first = RealSpeechJobGuard::start().unwrap();
+        let error = match RealSpeechJobGuard::start() {
+            Ok(_) => panic!("Concurrent model jobs must be rejected."),
+            Err(error) => error,
+        };
+        assert!(error.contains("Another real speech generation"));
+        assert!(!error.contains("C:\\"));
+        drop(first);
+        let subsequent = RealSpeechJobGuard::start().unwrap();
+        drop(subsequent);
     }
 
     #[test]
