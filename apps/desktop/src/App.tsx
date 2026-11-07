@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
+import { publicDesktopError } from "./lib/public_errors";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
@@ -153,7 +154,7 @@ function asMiB(bytes: number): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return publicDesktopError(error);
 }
 
 export default function App() {
