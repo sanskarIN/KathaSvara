@@ -606,6 +606,73 @@ describe("local TTS import doctor (no model)", () => {
 });
 
 
+describe("privacy boundary for individual Settings diagnostics", () => {
+  const privateFragment = "private-folder-DO-NOT-DISPLAY";
+
+  it("renders only allowlisted import components and fixed action guidance", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      preflight_ok: false,
+      next_action_code: "repair_tts_imports",
+      next_action: "C:\\Users\\private-folder-DO-NOT-DISPLAY\\voice.wav",
+      help: "Sensitive runtime detail private-folder-DO-NOT-DISPLAY",
+      checks: {
+        ...GOOD_IMPORTS.checks,
+        "C:\\Users\\private-folder-DO-NOT-DISPLAY\\module.py": "import_failed",
+      },
+      tts_device_mode: "C:\\Users\\private-folder-DO-NOT-DISPLAY",
+      device_configuration_valid: false,
+      tts_model_variant: "private-folder-DO-NOT-DISPLAY",
+      model_configuration_valid: false,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    const recommendation = within(report).getByText(/Recommended next step:/);
+    expect(recommendation.parentElement?.textContent).toContain("Repair the failed speech packages");
+    expect(within(report).getByText(/Invalid override — use auto or cpu/)).toBeTruthy();
+    expect(within(report).getByText(/Invalid override — use v2 or v3/)).toBeTruthy();
+    expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/)).toBeTruthy();
+    expect(report.textContent).not.toContain(privateFragment);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("uses fallback text for a worker returning an unknown action code", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      preflight_ok: false,
+      next_action_code: "C:\\Users\\private-folder-DO-NOT-DISPLAY",
+      next_action: "Leak: private-folder-DO-NOT-DISPLAY",
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/Recommended next step:/).parentElement?.textContent)
+      .toContain("Update the local KathaSvara inference sources");
+    expect(report.textContent).not.toContain(privateFragment);
+  });
+
+  it("redacts Python and import-probe exceptions instead of echoing local paths", async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-folder-DO-NOT-DISPLAY\\python.exe"));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect local TTS setup" }));
+    await waitFor(() => expect(screen.getByText(/Local diagnostic unavailable/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateFragment);
+
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-folder-DO-NOT-DISPLAY\\voice.wav"));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    await waitFor(() => expect(screen.getByText(/TTS import probe could not run/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateFragment);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+});
+
 describe("actionable model-free speech setup guidance", () => {
   it("shows compatibility guidance rather than undefined for an older Python bridge", async () => {
     mocks.invoke.mockResolvedValue({
