@@ -87,6 +87,8 @@ const FIXED_PROBE_ACTIONS: Record<NonNullable<RuntimeImportProbe["next_action_co
 };
 const KNOWN_IMPORT_COMPONENTS = ["numpy", "soundfile", "torch", "chatterbox_multilingual"] as const;
 const FIXED_PROBE_HELP = "This check only inspects Python imports, options and reference WAV structure. It does not load a speech model, download weights or verify audible Hindi.";
+// Fixed, short original sample: never substitute or upload a user's story.
+const REAL_HINDI_SMOKE_SAMPLE = "नमस्कार। यह कथास्वर की हिंदी आवाज़ की जाँच है।";
 
 /** Reports from independently installed Python sources must fail closed. */
 function isConsistentImportPreflight(report: RuntimeImportProbe): boolean {
@@ -140,6 +142,12 @@ export default function App() {
   const [readinessStage, setReadinessStage] = useState<ReadinessStage>("idle");
   const [readinessSummary, setReadinessSummary] = useState<ReadinessSummary | null>(null);
   const readinessRevision = useRef(0);
+  const [smokeConsent, setSmokeConsent] = useState(false);
+  const [smokeAudio, setSmokeAudio] = useState<AudioResult | null>(null);
+  const [smokeWorking, setSmokeWorking] = useState(false);
+  const [smokeStatus, setSmokeStatus] = useState<string | null>(null);
+  const smokeRevision = useRef(0);
+  const smokeAudioRef = useRef<HTMLAudioElement>(null);
   const [configuringRuntime, setConfiguringRuntime] = useState(false);
   const [sessionRuntimeConfigured, setSessionRuntimeConfigured] = useState(false);
   const [probingImports, setProbingImports] = useState(false);
@@ -297,6 +305,23 @@ export default function App() {
     }
   }
 
+  function invalidateSmokeTest() {
+    smokeRevision.current += 1;
+    if (smokeAudioRef.current) {
+      smokeAudioRef.current.pause();
+      smokeAudioRef.current.currentTime = 0;
+    }
+    if (smokeAudio) {
+      void invoke("discard_audio", { audioId: smokeAudio.audio_id }).catch(() => {
+        // No private native error text may leak to the Settings interface.
+      });
+    }
+    setSmokeAudio(null);
+    setSmokeWorking(false);
+    setSmokeConsent(false);
+    setSmokeStatus(null);
+  }
+
   function invalidateReadiness() {
     readinessRevision.current += 1;
     setReadinessStage("idle");
@@ -304,10 +329,89 @@ export default function App() {
   }
 
   function invalidateReferenceProbe() {
+    invalidateSmokeTest();
     invalidateReadiness();
     importProbeRevision.current += 1;
     setProbingImports(false);
     setImportProbe(null);
+  }
+
+  async function runRealHindiSmokeTest() {
+    if (!smokeConsent || smokeWorking || working || configuringRuntime || smokeAudio) return;
+    const revision = ++smokeRevision.current;
+    setSmokeWorking(true);
+    setSmokeStatus("Loading the real local Hindi model. First use may download approved model weights. No microphone or speech upload is used.");
+    try {
+      const result = await invoke<AudioResult>("synthesize", {
+        text: REAL_HINDI_SMOKE_SAMPLE,
+        exaggeration: 0.5,
+        cfgWeight: 0.5,
+        referenceWavPath,
+      });
+      if (revision !== smokeRevision.current) {
+        // A changed local voice reference or runtime owns the newer state.
+        if (typeof result?.audio_id === "string") {
+          void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
+        }
+        return;
+      }
+      if (!result || typeof result.audio_id !== "string" ||
+          !Number.isFinite(result.duration_seconds) || result.duration_seconds <= 0 ||
+          !Number.isFinite(result.sample_rate) || result.sample_rate < 8000 ||
+          !Number.isFinite(result.chunks) || result.chunks < 1) {
+        if (typeof result?.audio_id === "string") {
+          void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
+        }
+        setSmokeStatus("The local model returned inconsistent WAV metadata. Do not accept this as successful Hindi narration.");
+        return;
+      }
+      setSmokeAudio(result);
+      setSmokeStatus("A model-generated WAV was produced. Listen critically for understandable Hindi, clipping and silence; success is NOT certified automatically.");
+    } catch {
+      if (revision === smokeRevision.current) {
+        setSmokeStatus("Real Hindi synthesis could not complete. Use the model-free readiness checks above and confirm authorized model weights, dependencies and hardware.");
+      }
+    } finally {
+      if (revision === smokeRevision.current) setSmokeWorking(false);
+    }
+  }
+
+  async function exportSmokeWav() {
+    if (!smokeAudio) return;
+    try {
+      const destination = await save({
+        title: "Export real Hindi model smoke-test recording",
+        defaultPath: "kathasvara-hindi-smoke-test.wav",
+        filters: [{ name: "Uncompressed Wave audio", extensions: ["wav"] }],
+      });
+      if (!destination) return;
+      await invoke("export_wav", { audioId: smokeAudio.audio_id, destination });
+      setSmokeStatus("Test WAV exported. Manually listen and verify Hindi pronunciation and quality before marking any acceptance checklist complete.");
+    } catch {
+      setSmokeStatus("Test WAV export failed. Select a new destination and retry; the local test result remains available.");
+    }
+  }
+
+  async function clearRealHindiSmokeTest() {
+    smokeRevision.current += 1;
+    if (smokeAudioRef.current) {
+      smokeAudioRef.current.pause();
+      smokeAudioRef.current.currentTime = 0;
+    }
+    const previous = smokeAudio;
+    setSmokeAudio(null);
+    setSmokeWorking(false);
+    setSmokeConsent(false);
+    if (!previous) {
+      setSmokeStatus("The test result was retired. A currently running model job may still finish; its outdated WAV will be discarded.");
+      return;
+    }
+    try {
+      await invoke("discard_audio", { audioId: previous.audio_id });
+      setSmokeStatus("The local Hindi smoke-test WAV was deleted.");
+    } catch {
+      setSmokeStatus("Test preview hidden, but deleting the local WAV could not be confirmed.");
+    }
   }
 
   async function chooseLocalRuntime() {
@@ -769,7 +873,7 @@ export default function App() {
                   <p className="helper"><strong>Real audio setup required:</strong> this developer EXE does not contain Python, Chatterbox, or model weights. The Windows audio setup guide includes a real Hindi WAV smoke test; a passing dependency check alone is not enough.</p>
                   <button className="quiet-button" type="button"
                     onClick={() => setPage("settings")}>Open local TTS diagnostics</button>
-                  <button className="primary-button" disabled={working} onClick={() => void generate()}>{working ? "Generating speech…" : "✦ Generate Hindi Voice"}</button>
+                  <button className="primary-button" disabled={working || smokeWorking} onClick={() => void generate()}>{working ? "Generating speech…" : "✦ Generate Hindi Voice"}</button>
                 </section>
                 <section className="panel preview-panel">
                   <div className="section-label">03 / LISTEN</div><h2>Audio preview</h2>
@@ -855,6 +959,47 @@ export default function App() {
                     <p><strong>Real Hindi narration, model weights and speaker playback verified:</strong> No</p>
                   </div>
                 )}
+              </section>
+              <section aria-label="Real Hindi speech smoke test" className="diagnostic-report">
+                <h3>Real Hindi model and listening test</h3>
+                <p className="helper">Unlike the three checks above, this explicitly runs the actual locally configured
+                  Chatterbox speech model on a short fixed Hindi sample. First use may download large
+                  third-party model weights, use substantial RAM or GPU resources, and require an internet
+                  connection. Review the model's license and use only your own or consented reference WAV.
+                  No microphone access or story upload is requested.</p>
+                <p lang="hi"><strong>Test sentence:</strong> {REAL_HINDI_SMOKE_SAMPLE}</p>
+                <label className="field-label">
+                  <input type="checkbox" checked={smokeConsent} disabled={smokeWorking}
+                    onChange={event => setSmokeConsent(event.target.checked)} />
+                  I understand that this will load real speech models and may download model weights.
+                </label>
+                <button className="secondary-button" disabled={!smokeConsent || smokeWorking || working ||
+                  configuringRuntime || smokeAudio !== null}
+                  onClick={() => void runRealHindiSmokeTest()}>
+                  {smokeWorking ? "Generating genuine Hindi test audio…" :
+                    "Generate real Hindi test WAV (may download model)"}
+                </button>
+                {smokeAudio && (
+                  <div role="status" aria-label="Real Hindi audio test result">
+                    <p><strong>Model-generated WAV:</strong> {smokeAudio.duration_seconds.toFixed(1)} seconds,
+                      {smokeAudio.sample_rate} Hz. This is not an automatic language or quality pass.</p>
+                    {smokeAudio.preview_available === false
+                      ? <p>This test WAV exceeds inline playback limits. Export it and listen in a local audio player.</p>
+                      : <audio ref={smokeAudioRef} controls src={smokeAudio.data_url} aria-label="Real Hindi smoke-test audio preview" />}
+                    <button className="secondary-button" onClick={() => void exportSmokeWav()}>
+                      Export real Hindi test WAV
+                    </button>
+                  </div>
+                )}
+                {(smokeWorking || smokeAudio) && (
+                  <button className="quiet-button" onClick={() => void clearRealHindiSmokeTest()}>
+                    Hide and discard Hindi test
+                  </button>
+                )}
+                {smokeStatus && <p role="status">{smokeStatus}</p>}
+                <p className="helper">Generating a structurally valid WAV does not establish intelligible Hindi,
+                  a correctly conditioned character voice, or successful speaker playback. Listen and record
+                  those judgments separately under the manual Windows acceptance checklist.</p>
               </section>
               <button className="secondary-button" onClick={() => void checkRuntime()}>Check Python bridge</button>
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
