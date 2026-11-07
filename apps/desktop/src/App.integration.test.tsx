@@ -250,6 +250,36 @@ describe("explicit real Hindi model smoke test", () => {
     expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
   });
 
+  it("retires a real WAV that becomes stale while PCM inspection is pending", async () => {
+    let finishInspection: (value: typeof goodInspection) => void = () => {
+      throw new Error("Inspection was never requested");
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") return Promise.resolve(goodWav);
+      if (command === "inspect_generated_audio") {
+        return new Promise<typeof goodInspection>(resolve => { finishInspection = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command " + command);
+    });
+    mocks.open.mockResolvedValue("C:\\Users\\private-story\\replaced-reference.wav");
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("inspect_generated_audio", {
+      audioId: testId,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Generating genuine Hindi test audio/ }))
+      .toHaveProperty("disabled", true);
+    await act(async () => { finishInspection(goodInspection); });
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+    expect(document.body.textContent).not.toContain("private-story");
+    expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
+  });
+
   it("does not start a parallel full story synthesis while the real smoke test runs", async () => {
     mocks.invoke.mockImplementation((command: string) => {
       if (command === "synthesize") return new Promise(() => {});
