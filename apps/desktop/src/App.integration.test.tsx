@@ -51,6 +51,43 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("private native errors in Voice Studio", () => {
+  it("never displays an OS path from a failed full-story generation", async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-singer\\secret.wav"));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Generate Hindi Voice/ }));
+    await waitFor(() => expect(screen.getByText(/Hindi speech was not generated/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain("private-singer");
+    expect(document.body.textContent).not.toContain("secret.wav");
+    expect(screen.getByText(/Local operation failed/)).toBeTruthy();
+  });
+
+  it("never displays a private export filename or token on WAV copy failure", async () => {
+    const wav = {
+      audio_id: "123e4567-e89b-42d3-a456-426614174000",
+      data_url: "data:audio/wav;base64,UklGRg==", preview_available: true,
+      duration_seconds: 1.25, sample_rate: 24000, chunks: 1,
+    };
+    mocks.save.mockResolvedValue("C:\\Users\\private-singer\\export.wav");
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return wav;
+      if (command === "export_wav") throw new Error("C:\\Users\\private-singer\\export.wav token-secret");
+      return undefined;
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Generate Hindi Voice/ }));
+    await screen.findByRole("button", { name: /Export WAV/ });
+    fireEvent.click(screen.getByRole("button", { name: /Export WAV/ }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("export_wav", {
+      audioId: wav.audio_id, destination: "C:\\Users\\private-singer\\export.wav",
+    }));
+    await waitFor(() => expect(screen.getByText(/Export failed: Local operation failed/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain("private-singer");
+    expect(document.body.textContent).not.toContain("token-secret");
+    expect(JSON.stringify(window.localStorage)).not.toContain("private-singer");
+  });
+});
+
 describe("explicit real Hindi model smoke test", () => {
   const testId = "123e4567-e89b-42d3-a456-426614174055";
   const goodWav = {
