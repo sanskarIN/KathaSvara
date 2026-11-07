@@ -507,11 +507,22 @@ const MAX_INFERENCE_PROJECT_METADATA_BYTES: u64 = 32 * 1024;
 /// Read a bounded, local text file; never execute anything to identify source version.
 fn inference_source_version_matches(inference: &Path) -> bool {
     let manifest = inference.join("pyproject.toml");
-    let Ok(metadata) = fs::metadata(&manifest) else { return false };
+    let Ok(mut file) = fs::File::open(manifest) else { return false };
+    let Ok(metadata) = file.metadata() else { return false };
     if !metadata.is_file() || metadata.len() > MAX_INFERENCE_PROJECT_METADATA_BYTES {
         return false;
     }
-    let Ok(source) = fs::read_to_string(manifest) else { return false };
+    // Use the same opened handle for metadata and parsing, and bound the actual
+    // read: replacing a path after its size check must not allocate unlimited
+    // memory or parse a different checkout's manifest.
+    let mut bytes = Vec::new();
+    if (&mut file).take(MAX_INFERENCE_PROJECT_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes).is_err()
+        || bytes.len() as u64 > MAX_INFERENCE_PROJECT_METADATA_BYTES
+    {
+        return false;
+    }
+    let Ok(source) = std::str::from_utf8(&bytes) else { return false };
     let mut project_section = false;
     for line in source.lines() {
         let trimmed = line.trim();
@@ -1939,6 +1950,14 @@ version = "0.0.1"
         fs::remove_file(source.join("pyproject.toml")).unwrap();
         assert!(validate_session_inference_paths(&python, &source).is_err());
         assert!(matching_inference_sources(source.clone()).is_err());
+
+        // Metadata and actual stream length must both be bounded. No project
+        // selected via the file picker can force the runtime into a huge read.
+        fs::write(source.join("pyproject.toml"),
+            vec![b' '; (MAX_INFERENCE_PROJECT_METADATA_BYTES + 1) as usize]).unwrap();
+        assert!(!inference_source_version_matches(&source));
+        fs::write(source.join("pyproject.toml"), [0xff, 0xfe, 0xff]).unwrap();
+        assert!(!inference_source_version_matches(&source));
 
         fs::remove_dir_all(root).unwrap();
     }
