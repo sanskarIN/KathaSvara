@@ -9,7 +9,7 @@ import json
 import tomllib
 from pathlib import Path
 
-VERSION = "0.5.4"
+VERSION = "0.5.5"
 # Public landing page must match the last actually published GitHub prerelease.
 PUBLISHED_VERSION = "0.5.4"
 ROOT = Path(__file__).resolve().parents[3]
@@ -43,13 +43,13 @@ def test_pre_release_workflow_has_exact_tag_guards_and_three_assets() -> None:
     for token in (
         "workflow_dispatch:",
         "release_sha:", "refs/heads/main", "git/ref/heads/main",
-        "git/ref/tags/v0.5.4", "gh release view v0.5.4",
-        "gh release create v0.5.4", "--prerelease",
+        "git/ref/tags/v0.5.5", "gh release view v0.5.5",
+        "gh release create v0.5.5", "--prerelease",
         expected_exe, "README.txt", "SHA256SUMS.txt",
         "sha256sum -c SHA256SUMS.txt",
-        "actions/download-artifact", "gh release download v0.5.4",
+        "actions/download-artifact", "gh release download v0.5.5",
         'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"',
-        'test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.4" --jq \'.assets | length\')" = 3',
+        'test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.5.5" --jq \'.assets | length\')" = 3',
     ):
         assert token in workflow, f"Missing release guard: {token}"
 
@@ -67,8 +67,8 @@ def test_prerelease_disclosures_remain_explicit() -> None:
         assert "Chatterbox" in content
     assert "NOT A COMPLETE INSTALLER" in instructions
     assert "NOT STABLE" in notes
-    assert "KathaSvara-v0.5.4-dev-win64.exe" in notes
-    published_notes = (ROOT / "docs/releases/v0.5.4-published-notes.md").read_text(encoding="utf-8")
+    assert "KathaSvara-v0.5.5-dev-win64.exe" in notes
+    published_notes = (ROOT / "docs/releases/v0.5.5-published-notes.md").read_text(encoding="utf-8")
     assert "NOT STABLE" in published_notes
     assert "DRAFT — NOT PUBLISHED" not in published_notes
     assert "issue #3" in published_notes
