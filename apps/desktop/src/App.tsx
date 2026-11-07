@@ -40,6 +40,9 @@ type OfflineWavProbe = {
   audio_playback_verified: false;
   help: string;
 };
+type ReadinessStage = "idle" | "python" | "wav" | "imports";
+type ReadinessSummary = { readyForExplicitGeneration: boolean; guidance: string };
+
 type RuntimeImportProbe = {
   python_311: boolean;
   checks: Record<string, "ok" | "entrypoint_missing" | "import_failed">;
@@ -70,9 +73,41 @@ const WAV_IO_REPAIR_ACTIONS: Record<NonNullable<OfflineWavProbe["failed_stage"]>
 };
 const CACHE_TARGET_MIB = 512;
 const OLD_PROBE_GUIDANCE = "Update the local KathaSvara inference sources to match this desktop build, then repeat the model-free speech probe.";
+// Interpret codes, not arbitrary Python text. A stale or mismatched worker may
+// include filesystem paths, environment values or untrusted exception strings.
+const FIXED_PROBE_ACTIONS: Record<NonNullable<RuntimeImportProbe["next_action_code"]>, string> = {
+  select_python_311: "Select a trusted Python 3.11 interpreter, then repeat the no-model check.",
+  repair_tts_imports: "Repair the failed speech packages in your selected Python 3.11 environment, then retry the no-model check.",
+  fix_device_override: "Set the TTS device to auto or cpu in the launcher configuration, then rerun the check.",
+  fix_model_selection: "Select a supported v2 or v3 Chatterbox model variant; v2 is the compatibility default.",
+  replace_reference_wav: "Select your own or consented compatible PCM16 reference WAV, or clear the session reference.",
+  update_chatterbox_api: "Update the installed Chatterbox API or choose a supported option before generating.",
+  verify_chatterbox_api: "Verify your installed Chatterbox API compatibility before attempting real generation.",
+  run_real_hindi_smoke: "Run the explicit Hindi WAV smoke test and listen to its output. Model weights and sound quality remain unverified.",
+};
+const KNOWN_IMPORT_COMPONENTS = ["numpy", "soundfile", "torch", "chatterbox_multilingual"] as const;
+const FIXED_PROBE_HELP = "This check only inspects Python imports, options and reference WAV structure. It does not load a speech model, download weights or verify audible Hindi.";
+
+/** Reports from independently installed Python sources must fail closed. */
+function isConsistentImportPreflight(report: RuntimeImportProbe): boolean {
+  return report.preflight_ok === true && report.python_311 === true
+    && report.imports_ok === true && report.device_configuration_valid === true
+    && report.model_configuration_valid === true && report.upstream_api_compatible === true
+    && (report.tts_device_mode === "auto" || report.tts_device_mode === "cpu")
+    && (report.tts_model_variant === "v2" || report.tts_model_variant === "v3")
+    && (report.reference_voice_status === "not_set" || report.reference_voice_status === "valid")
+    && report.model_weights_verified === false && report.audio_synthesis_verified === false
+    && KNOWN_IMPORT_COMPONENTS.every(module => report.checks?.[module] === "ok");
+}
 function nextProbeAction(report: RuntimeImportProbe): string {
-  return typeof report.next_action === "string" && report.next_action.trim()
-    ? report.next_action : OLD_PROBE_GUIDANCE;
+  const code = report.next_action_code;
+  if (code === "run_real_hindi_smoke" && !isConsistentImportPreflight(report)) {
+    return OLD_PROBE_GUIDANCE;
+  }
+  return typeof code === "string"
+    && Object.prototype.hasOwnProperty.call(FIXED_PROBE_ACTIONS, code)
+      ? FIXED_PROBE_ACTIONS[code as keyof typeof FIXED_PROBE_ACTIONS]
+      : OLD_PROBE_GUIDANCE;
 }
 function asMiB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
@@ -102,6 +137,9 @@ export default function App() {
   const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
+  const [readinessStage, setReadinessStage] = useState<ReadinessStage>("idle");
+  const [readinessSummary, setReadinessSummary] = useState<ReadinessSummary | null>(null);
+  const readinessRevision = useRef(0);
   const [configuringRuntime, setConfiguringRuntime] = useState(false);
   const [sessionRuntimeConfigured, setSessionRuntimeConfigured] = useState(false);
   const [probingImports, setProbingImports] = useState(false);
@@ -259,13 +297,21 @@ export default function App() {
     }
   }
 
+  function invalidateReadiness() {
+    readinessRevision.current += 1;
+    setReadinessStage("idle");
+    setReadinessSummary(null);
+  }
+
   function invalidateReferenceProbe() {
+    invalidateReadiness();
     importProbeRevision.current += 1;
     setProbingImports(false);
     setImportProbe(null);
   }
 
   async function chooseLocalRuntime() {
+    invalidateReadiness();
     const revision = ++runtimePickerRevision.current;
     setConfiguringRuntime(true);
     try {
@@ -300,6 +346,7 @@ export default function App() {
   }
 
   async function clearLocalRuntime() {
+    invalidateReadiness();
     runtimePickerRevision.current += 1;
     setConfiguringRuntime(true);
     try {
@@ -417,6 +464,68 @@ export default function App() {
     }
   }
 
+  async function checkSpeechReadiness() {
+    // All three checks are model-free: no synthesis, checkpoint download,
+    // package installation, file export, or microphone/speaker access.
+    const revision = ++readinessRevision.current;
+    setReadinessSummary(null);
+    setDiagnostics(null);
+    setAudioIoReport(null);
+    setImportProbe(null);
+    setReadinessStage("python");
+    try {
+      const environment = await invoke<EngineDiagnostics>("diagnose_engine");
+      if (revision !== readinessRevision.current) return;
+      setDiagnostics(environment);
+      if (environment.python_311 !== true) {
+        setReadinessSummary({
+          readyForExplicitGeneration: false,
+          guidance: "Use the local runtime chooser to select Python 3.11, then rerun this check.",
+        });
+        return;
+      }
+
+      setReadinessStage("wav");
+      const wav = await invoke<OfflineWavProbe>("probe_audio_io");
+      if (revision !== readinessRevision.current) return;
+      setAudioIoReport(wav);
+      if (!wav.temporary_wav_roundtrip_ok) {
+        setReadinessSummary({
+          readyForExplicitGeneration: false,
+          guidance: "Temporary WAV I/O is blocked. Review its fixed failure stage below before attempting speech.",
+        });
+        return;
+      }
+
+      setReadinessStage("imports");
+      const imports = await invoke<RuntimeImportProbe>("probe_tts_runtime", {
+        referenceWavPath,
+      });
+      if (revision !== readinessRevision.current) return;
+      setImportProbe(imports);
+      setReadinessSummary(isConsistentImportPreflight(imports)
+        ? {
+          readyForExplicitGeneration: true,
+          guidance: "Environment, temporary WAV I/O and speech imports passed. The next step is explicit real Hindi generation and listening. Model weights and sound quality have NOT been verified.",
+        }
+        : {
+          readyForExplicitGeneration: false,
+          guidance: "Speech setup needs attention. Review the first suggested repair action in the TTS preflight report below.",
+        });
+    } catch {
+      // Never display native exception text: failed Python launches and import
+      // errors may expose private user or checkpoint file paths.
+      if (revision === readinessRevision.current) {
+        setReadinessSummary({
+          readyForExplicitGeneration: false,
+          guidance: "A local diagnostic could not run. Verify the selected Python 3.11 executable and inference source folder, then retry.",
+        });
+      }
+    } finally {
+      if (revision === readinessRevision.current) setReadinessStage("idle");
+    }
+  }
+
   async function diagnoseRuntime() {
     setCheckingSetup(true);
     try {
@@ -425,9 +534,10 @@ export default function App() {
       setMessage(details.dependencies_present
         ? "Python dependencies appear installed. Model weights and real Hindi audio are NOT validated."
         : "Local speech dependencies are incomplete. See the diagnostics below.");
-    } catch (error) {
+    } catch {
+      // Native failures can contain interpreter or local model paths.
       setDiagnostics(null);
-      setMessage("Local diagnostic unavailable: " + errorMessage(error));
+      setMessage("Local diagnostic unavailable. Check the selected Python interpreter and inference folder.");
     } finally {
       setCheckingSetup(false);
     }
@@ -461,12 +571,12 @@ export default function App() {
       });
       if (probeRevision !== importProbeRevision.current) return;
       setImportProbe(report);
-      setMessage(report.preflight_ok
+      setMessage(isConsistentImportPreflight(report)
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
         : "TTS preflight needs attention. " + nextProbeAction(report));
-    } catch (error) {
+    } catch {
       if (probeRevision === importProbeRevision.current) {
-        setMessage("TTS import probe could not run: " + errorMessage(error));
+        setMessage("TTS import probe could not run. Check Python 3.11 and your configured inference source folder.");
       }
     } finally {
       if (probeRevision === importProbeRevision.current) {
@@ -726,6 +836,26 @@ export default function App() {
                   after the app closes. Use the no-model checks below to confirm installation.
                   A valid interpreter location is not proof that Hindi speech works.</p>
               </section>
+              <section aria-label="Guided speech readiness" className="diagnostic-report">
+                <h3>Guided speech readiness check</h3>
+                <p className="helper">One click checks Python, a disposable WAV read/write, and speech-library imports in order.
+                  It stops at the first blocker. It does not load checkpoints, install or download software,
+                  generate speech, test speakers, or touch your recordings.</p>
+                <button className="secondary-button" disabled={readinessStage !== "idle" || configuringRuntime}
+                  onClick={() => void checkSpeechReadiness()}>
+                  {readinessStage === "python" ? "Step 1/3: Checking Python…" :
+                    readinessStage === "wav" ? "Step 2/3: Checking temporary WAV…" :
+                      readinessStage === "imports" ? "Step 3/3: Checking speech imports…" :
+                        "Check speech readiness (no model load)"}
+                </button>
+                {readinessSummary && (
+                  <div role="status" aria-label="Speech readiness summary">
+                    <h3>{readinessSummary.readyForExplicitGeneration ? "Setup checks passed" : "Setup needs attention"}</h3>
+                    <p>{readinessSummary.guidance}</p>
+                    <p><strong>Real Hindi narration, model weights and speaker playback verified:</strong> No</p>
+                  </div>
+                )}
+              </section>
               <button className="secondary-button" onClick={() => void checkRuntime()}>Check Python bridge</button>
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
                 {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
@@ -772,15 +902,15 @@ export default function App() {
                 their Python imports work and whether the device and model overrides are valid; neither test loads model weights or generates speech.</p>
               {importProbe && (
                 <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
-                  <h3>TTS preflight: {importProbe.preflight_ok ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
+                  <h3>TTS preflight: {isConsistentImportPreflight(importProbe) ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
                   <p><strong>Recommended next step:</strong> {nextProbeAction(importProbe)}</p>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
-                  <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "invalid"
-                    ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
+                  <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "auto" || importProbe.tts_device_mode === "cpu"
+                    ? importProbe.tts_device_mode : "Invalid override — use auto or cpu"}
                     {" "}({importProbe.device_configuration_valid ? "configuration accepted" : "fix before generating"})
                   </p>
-                  <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "invalid"
-                    ? "Invalid override — use v2 or v3" : importProbe.tts_model_variant}
+                  <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "v2" || importProbe.tts_model_variant === "v3"
+                    ? importProbe.tts_model_variant : "Invalid override — use v2 or v3"}
                     {" "}({importProbe.model_configuration_valid ? "selection accepted" : "fix before generating"})
                   </p>
                   <p className="helper">V3 is opt-in through KATHASVARA_TTS_MODEL=v3 and may need updated
@@ -808,13 +938,16 @@ export default function App() {
                   <p className="helper">Signature checks do not load a model, verify its weights, or establish
                     that the selected voice and Hindi generation will work.</p>
                   <ul>
-                    {Object.entries(importProbe.checks).map(([module, result]) => (
-                      <li key={module}><strong>{module}</strong>: {result === "ok"
-                        ? "Imported" : result === "entrypoint_missing" ? "Required API not found" : "Import failed"}</li>
-                    ))}
+                    {KNOWN_IMPORT_COMPONENTS.map(module => {
+                      const result = importProbe.checks?.[module];
+                      return (
+                        <li key={module}><strong>{module}</strong>: {result === "ok"
+                          ? "Imported" : result === "entrypoint_missing" ? "Required API not found" : "Import failed or unavailable"}</li>
+                      );
+                    })}
                   </ul>
                   <p><strong>Model weights / real Hindi audio verified:</strong> No</p>
-                  <p>{importProbe.help}</p>
+                  <p>{FIXED_PROBE_HELP}</p>
                 </section>
               )}
               <section aria-label="Local segment-cache maintenance" className="diagnostic-report">
