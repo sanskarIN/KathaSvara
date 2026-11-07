@@ -114,7 +114,7 @@ describe("explicit real Hindi model smoke test", () => {
     openSettings();
     fireEvent.click(screen.getByLabelText(consentLabel));
     fireEvent.click(screen.getByRole("button", { name: runLabel }));
-    await waitFor(() => expect(screen.getByText(/Real Hindi synthesis could not complete/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Real Hindi generation or WAV inspection could not complete/)).toBeTruthy());
     expect(document.body.textContent).not.toContain("private-story");
     expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
     expect(JSON.stringify(window.localStorage)).not.toContain("private-story");
