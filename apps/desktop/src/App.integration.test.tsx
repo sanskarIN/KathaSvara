@@ -51,6 +51,58 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("local session inference configuration", () => {
+  const python = "C:\\Users\\private-account\\speech-env\\Scripts\\python.exe";
+  const source = "C:\\Users\\private-account\\KathaSvara\\services\\inference";
+
+  it("lets users select a trusted Python interpreter and inference source without saving paths", async () => {
+    mocks.open.mockResolvedValueOnce(python).mockResolvedValueOnce(source);
+    mocks.invoke.mockResolvedValue(undefined);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "configure_local_inference", { pythonPath: python, inferenceDir: source },
+    ));
+    expect(screen.getByText(/Local Python and sources selected for this app session/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private-account");
+    expect(JSON.stringify(window.localStorage)).not.toContain("private-account");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+    expect(mocks.invoke).not.toHaveBeenCalledWith("probe_tts_runtime", expect.anything());
+  });
+
+  it("does not change runtime configuration when the folder dialog is cancelled", async () => {
+    mocks.open.mockResolvedValueOnce(python).mockResolvedValueOnce(null);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(2));
+    expect(mocks.invoke).not.toHaveBeenCalledWith("configure_local_inference", expect.anything());
+    expect(screen.getByText(/Launcher-provided Python and source discovery/)).toBeTruthy();
+  });
+
+  it("keeps private native errors out of Settings on invalid selection", async () => {
+    mocks.open.mockResolvedValueOnce(python).mockResolvedValueOnce(source);
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-account\\missing.exe"));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
+    await waitFor(() => expect(screen.getByText(/Could not configure the local Python runtime/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain("private-account");
+    expect(screen.getByText(/Launcher-provided Python and source discovery/)).toBeTruthy();
+  });
+
+  it("clears the selected interpreter without changing system environment variables", async () => {
+    mocks.open.mockResolvedValueOnce(python).mockResolvedValueOnce(source);
+    mocks.invoke.mockResolvedValue(undefined);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
+    const clear = await screen.findByRole("button", { name: "Clear session runtime selection" });
+    fireEvent.click(clear);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("clear_local_inference"));
+    expect(screen.getByText(/Launcher-provided Python and source discovery/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private-account");
+    expect(JSON.stringify(window.localStorage)).not.toContain("private-account");
+  });
+});
+
 describe("offline WAV I/O diagnostic in Settings", () => {
   it("shows a passing synthetic round-trip without generating audio or persisting paths", async () => {
     mocks.invoke.mockResolvedValue({
