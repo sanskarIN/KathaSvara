@@ -22,7 +22,7 @@ use uuid::Uuid;
 mod wav_file;
 mod production_manifest;
 use production_manifest::write_production_manifest;
-use wav_file::{inspect_wav_details, inspect_wav_file, wav_source_metadata_unchanged};
+use wav_file::{inspect_wav_details, inspect_wav_file, wav_source_metadata_unchanged, WavHeader};
 
 const MAX_GENERATED_WAV: u64 = 25 * 1024 * 1024;
 const MAX_TEXT_LENGTH: usize = 3000;
@@ -1007,19 +1007,75 @@ fn inspect_wav(data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-// Keep completed long voice-studio recordings exportable even when the WebView
-// cannot embed a WAV larger than 25 MiB in a base64 data URL.
-fn legacy_wav_preview(path: &Path) -> Result<(String, bool, u64), String> {
+// Keep completed long Voice Studio recordings exportable when the WebView
+// cannot embed a WAV larger than 25 MiB. Media details come from the actual
+// opened PCM16 file, never solely from Python's claimed response.
+fn legacy_wav_preview(path: &Path) -> Result<(String, bool, WavHeader), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| "The speech engine did not create a WAV.".to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("The generated WAV must be a regular non-symlink file.".into());
+    }
     let mut file = fs::File::open(path)
         .map_err(|_| "The speech engine did not create a WAV.".to_string())?;
-    let opened = file.metadata().map_err(|e| e.to_string())?;
+    let opened = file.metadata()
+        .map_err(|_| "Unable to inspect generated WAV.".to_string())?;
     let details = inspect_wav_details(&mut file)?;
+    let checked = file.metadata()
+        .map_err(|_| "Unable to recheck generated WAV.".to_string())?;
+    if !wav_source_metadata_unchanged(&opened, &checked) {
+        return Err("Generated WAV changed during validation; render again.".into());
+    }
     if details.file_bytes > MAX_GENERATED_WAV {
-        return Ok((String::new(), false, details.file_bytes));
+        return Ok((String::new(), false, details));
     }
     let bytes = read_validated_wav_preview(&mut file, &opened, details.file_bytes)?;
     Ok((format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
-        true, details.file_bytes))
+        true, details))
+}
+
+/// Fail closed when Python's success JSON contradicts the actual WAV.
+/// This is not a Hindi quality certificate: it checks only transport and
+/// metadata integrity so misleading progress cannot be shown to the user.
+fn finalize_single_synthesis_wav(
+    path: &Path, audio_id: String, response: &Value,
+) -> Result<AudioResult, String> {
+    let (data_url, preview_available, wav) = legacy_wav_preview(path)?;
+    let result = response.get("result")
+        .ok_or("Speech worker returned no synthesis metadata.")?;
+    let rate = result["sample_rate"].as_u64()
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or("Speech worker reported an invalid audio sample rate.")?;
+    let chunks = result["chunks"].as_u64()
+        .filter(|&value| (1..=256).contains(&value))
+        .ok_or("Speech worker reported invalid synthesis chunk counts.")?;
+    let duration = result["duration_seconds"].as_f64()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or("Speech worker reported an invalid audio duration.")?;
+    let actual_duration = wav.frames as f64 / f64::from(wav.sample_rate_hz);
+    if rate != wav.sample_rate_hz || (duration - actual_duration).abs() > 0.005 {
+        return Err("Speech worker audio metadata does not match the saved WAV.".into());
+    }
+    Ok(AudioResult {
+        audio_id,
+        data_url,
+        duration_seconds: (actual_duration * 1000.0).round() / 1000.0,
+        sample_rate: wav.sample_rate_hz,
+        chunks: chunks as u32,
+        segment_timings: Vec::new(),
+        preview_available,
+        file_bytes: wav.file_bytes,
+    })
+}
+
+fn finalize_or_remove_single_synthesis_wav(
+    path: &Path, audio_id: String, response: &Value,
+) -> Result<AudioResult, String> {
+    let finalized = finalize_single_synthesis_wav(path, audio_id, response);
+    if finalized.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    finalized
 }
 
 #[tauri::command]
@@ -1061,24 +1117,10 @@ async fn synthesize(
                 return Err(error);
             }
         };
-        let (data_url, preview_available, size) = match legacy_wav_preview(&path) {
-            Ok(preview) => preview,
-            Err(error) => {
-                let _ = fs::remove_file(&path);
-                return Err(error);
-            }
-        };
-        let result = data.get("result").ok_or("Missing synthesis metadata.")?;
-        Ok(AudioResult {
-            audio_id,
-            data_url,
-            duration_seconds: result["duration_seconds"].as_f64().unwrap_or(0.0),
-            sample_rate: result["sample_rate"].as_u64().unwrap_or(0) as u32,
-            chunks: result["chunks"].as_u64().unwrap_or(0) as u32,
-            segment_timings: Vec::new(),
-            preview_available,
-            file_bytes: size,
-        })
+        // A worker success flag and nonempty WAV are insufficient: inspect the
+        // opened PCM16 file and cross-check duration/rate/chunk metadata. On
+        // failure delete this job's UUID audio, never publish a stale preview.
+        finalize_or_remove_single_synthesis_wav(&path, audio_id, &data)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -2482,9 +2524,9 @@ mod tests {
         data.extend_from_slice(&(samples.len() as u32).to_le_bytes());
         data.extend_from_slice(&samples);
         fs::write(&path, &data).unwrap();
-        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&path).unwrap();
+        let (legacy_url, inline, legacy_wav) = legacy_wav_preview(&path).unwrap();
         assert!(inline);
-        assert_eq!(legacy_size, data.len() as u64);
+        assert_eq!(legacy_wav.file_bytes, data.len() as u64);
         assert_eq!(legacy_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
         let response = json!({"result": {
             "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
@@ -2499,6 +2541,42 @@ mod tests {
         assert!(result.preview_available);
         assert_eq!(result.file_bytes, data.len() as u64);
         assert_eq!(result.data_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
+        // Voice Studio's simple synthesize path now checks the same actual
+        // PCM16 frame duration/rate as the more advanced scene renderer.
+        let simple_response = json!({"result": {
+            "duration_seconds": 0.01, "sample_rate": 24000, "chunks": 1,
+        }});
+        let inspected = finalize_single_synthesis_wav(
+            &path, Uuid::new_v4().to_string(), &simple_response,
+        ).unwrap();
+        assert_eq!(inspected.duration_seconds, 0.01);
+        assert_eq!(inspected.sample_rate, 24_000);
+        assert_eq!(inspected.file_bytes, data.len() as u64);
+        assert_eq!(inspected.data_url, format!("data:audio/wav;base64,{}", STANDARD.encode(&data)));
+        for altered in [
+            json!({"result": {"duration_seconds": 1.0, "sample_rate": 24000, "chunks": 1}}),
+            json!({"result": {"duration_seconds": 0.01, "sample_rate": 48000, "chunks": 1}}),
+            json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000, "chunks": 0}}),
+            json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000, "chunks": -1}}),
+            json!({"result": {"duration_seconds": "private-path", "sample_rate": 24000, "chunks": 1}}),
+            json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000}}),
+        ] {
+            assert!(finalize_single_synthesis_wav(
+                &path, Uuid::new_v4().to_string(), &altered,
+            ).is_err(), "Contradictory Python metadata must be rejected.");
+        }
+        assert!(path.exists(), "Pure validation never deletes user audio.");
+        let orphan = std::env::temp_dir().join(format!(
+            "kathasvara-invalid-speech-{}.wav", Uuid::new_v4(),
+        ));
+        fs::write(&orphan, &data).unwrap();
+        let bad_response = json!({"result": {
+            "duration_seconds": 5.0, "sample_rate": 24000, "chunks": 1,
+        }});
+        assert!(finalize_or_remove_single_synthesis_wav(
+            &orphan, Uuid::new_v4().to_string(), &bad_response,
+        ).is_err());
+        assert!(!orphan.exists(), "Invalid UUID-owned WAV must be removed.");
         fs::remove_file(path).unwrap();
     }
 
@@ -2525,10 +2603,10 @@ mod tests {
         writer.set_len(44 + u64::from(sample_bytes)).unwrap();
         drop(writer);
         assert!(fs::metadata(&source).unwrap().len() > MAX_GENERATED_WAV);
-        let (legacy_url, inline, legacy_size) = legacy_wav_preview(&source).unwrap();
+        let (legacy_url, inline, legacy_wav) = legacy_wav_preview(&source).unwrap();
         assert!(!inline);
         assert!(legacy_url.is_empty());
-        assert_eq!(legacy_size, fs::metadata(&source).unwrap().len());
+        assert_eq!(legacy_wav.file_bytes, fs::metadata(&source).unwrap().len());
         assert!(source.exists(), "Large Voice Studio WAV must survive the preview limit");
         copy_validated_wav(&source, &exported).unwrap();
         assert_eq!(fs::metadata(&source).unwrap().len(), fs::metadata(&exported).unwrap().len());
