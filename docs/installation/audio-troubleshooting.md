@@ -42,6 +42,14 @@ This feature helps when the Windows developer EXE is launched by double-clicking
 
 Clearing the session selection restores launcher environment values or source discovery for subsequent jobs. Existing jobs already spawned with an older interpreter are not retroactively changed. If the source folder or interpreter was moved, reselect the current paths. Missing dependencies or incorrect Python versions will be reported by the no-model doctor; successful setup does not establish actual Hindi pronunciation or speech playback.
 
+### Next release development: verify Python and matching inference version before activation
+
+**Not included in published v0.5.4 or the frozen v0.5.5 source candidate.** An additional session setup gate runs the **explicitly selected** Python executable in isolated `-I` mode with a minimal built-in `sys.version_info` check. It accepts **Python 3.11 only**. There is an eight-second timeout, all child output is discarded, no Python speech packages or models are imported, and no shell or download is involved. The check runs off the UI thread so a damaged interpreter does not freeze the window.
+
+Before running that executable, the app verifies the selected inference directory has the Python CLI and a small readable `pyproject.toml` whose `[project]` version **exactly matches the desktop build**. Choosing v0.5.4 sources with a v0.5.5 desktop (or vice versa) therefore fails with a fixed, path-free repair message instead of silently using a different protocol. Failed or timed-out validation **does not overwrite a previous working session selection**. Choose only interpreters and source trees you trust: selecting an executable is an explicit local program execution decision.
+
+These checks verify an interpreter version and source metadata **only**. They do not prove that NumPy, SoundFile, PyTorch, Chatterbox, authorized model weights, actual Hindi narration or audio playback is working; continue through the model-free diagnostics, then separately generate and listen to real Hindi audio under issue #3.
+
 ## Windows 11 — configure, diagnose, and start
 
 Prerequisites: obtain KathaSvara's source tree from the official GitHub repository, install **Python 3.11**, and use a developer EXE downloaded from a verified KathaSvara GitHub release with its checksum validated. No administrator privileges or persistent environment-variable changes are required by this helper.
