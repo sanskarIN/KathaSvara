@@ -317,9 +317,12 @@ export default function App() {
       });
     }
     setSmokeAudio(null);
-    setSmokeWorking(false);
+    // Keep the previous native model job marked busy until it actually
+    // settles. Hiding a result never terminates the Python worker.
     setSmokeConsent(false);
-    setSmokeStatus(null);
+    setSmokeStatus(smokeWorking
+      ? "The previous model job is still finishing. Its outdated result will be discarded."
+      : null);
   }
 
   function invalidateReadiness() {
@@ -372,7 +375,9 @@ export default function App() {
         setSmokeStatus("Real Hindi synthesis could not complete. Use the model-free readiness checks above and confirm authorized model weights, dependencies and hardware.");
       }
     } finally {
-      if (revision === smokeRevision.current) setSmokeWorking(false);
+      // No second model job can start while the previous worker is alive,
+      // even if a reference/runtime change retires its result.
+      setSmokeWorking(false);
     }
   }
 
@@ -400,7 +405,6 @@ export default function App() {
     }
     const previous = smokeAudio;
     setSmokeAudio(null);
-    setSmokeWorking(false);
     setSmokeConsent(false);
     if (!previous) {
       setSmokeStatus("The test result was retired. A currently running model job may still finish; its outdated WAV will be discarded.");
