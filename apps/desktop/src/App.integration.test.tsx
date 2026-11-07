@@ -145,6 +145,9 @@ describe("explicit real Hindi model smoke test", () => {
       .toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
     await waitFor(() => expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Generating genuine Hindi test audio/ }))
+      .toHaveProperty("disabled", true);
+    expect(screen.getByText(/previous model job is still finishing/)).toBeTruthy();
     await act(async () => { finish(goodWav); });
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
     expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
