@@ -721,6 +721,16 @@ async fn probe_tts_runtime(reference_wav_path: Option<String>) -> Result<Value, 
     }).await.map_err(|error| error.to_string())?
 }
 
+/// Model-free, bounded synthetic PCM16 round-trip; never plays or synthesizes audio.
+#[tauri::command]
+async fn probe_audio_io() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let response = invoke_python(json!({"action": "probe_audio_io"}))?;
+        response.get("result").cloned()
+            .ok_or_else(|| "Offline WAV I/O doctor returned no result.".to_string())
+    }).await.map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 async fn diagnose_engine() -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -1561,7 +1571,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -1700,6 +1710,7 @@ mod tests {
             ("probe_runtime", 90),
             ("inspect_generated_wav", 180),
             ("diagnose", 15),
+            ("probe_audio_io", 15),
             ("health", 15),
         ] {
             assert_eq!(
