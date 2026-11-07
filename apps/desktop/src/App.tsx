@@ -372,7 +372,7 @@ export default function App() {
       setSmokeStatus("A model-generated WAV was produced. Listen critically for understandable Hindi, clipping and silence; success is NOT certified automatically.");
     } catch {
       if (revision === smokeRevision.current) {
-        setSmokeStatus("Real Hindi synthesis could not complete. Use the model-free readiness checks above and confirm authorized model weights, dependencies and hardware.");
+        setSmokeStatus("Real Hindi synthesis could not complete. Check model-free readiness, approved model weights and hardware, or finish any other running story render before retrying.");
       }
     } finally {
       // No second model job can start while the previous worker is alive,
