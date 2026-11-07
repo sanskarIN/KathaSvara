@@ -20,13 +20,13 @@ The Windows `-DoctorOnly` helper also prints the same fixed **Recommended next s
 
 The next development branch adds a **model-free PCM16 WAV round-trip** to the Windows audio helper. It writes a deterministic, quarter-second **synthetic signal** to the selected Python interpreter's temporary directory, reopens it with KathaSvara's bounded WAV structural inspector, verifies the shape and non-silent variation, and removes the temporary file. This uses only the Python standard library and existing local source; it **does not** install packages, load Chatterbox/PyTorch, download weights, play any sound or export any of your story/voice recordings.
 
-From the repository's \`services/inference\` directory in a configured Python environment, run the standalone protocol check:
+From the repository's `services/inference` directory in a configured Python environment, run the standalone protocol check:
 
-\`\`\`powershell
+```powershell
 '{"action":"probe_audio_io"}' | python -m kathasvara.cli
-\`\`\`
+```
 
-A passing \`temporary_wav_roundtrip_ok\` means only that **temporary PCM16 file writing and structural read-back worked in that interpreter**. It does not confirm the app's final export path, Windows speakers, TTS packages, correct Hindi speech, voice identity or listening quality. A failure returns a fixed \`failed_stage\` code (\`temporary_directory\`, \`write_pcm16\`, \`inspect_pcm16\`, or \`cleanup\`) without revealing private paths. In the development branch, the \`-DoctorOnly\` helper performs this check before probing speech imports, so an import failure cannot be mistaken for a WAV-file failure.
+A passing `temporary_wav_roundtrip_ok` means only that **temporary PCM16 file writing and structural read-back worked in that interpreter**. It does not confirm the app's final export path, Windows speakers, TTS packages, correct Hindi speech, voice identity or listening quality. A failure returns a fixed `failed_stage` code (`temporary_directory`, `write_pcm16`, `inspect_pcm16`, or `cleanup`) without revealing private paths. In the development branch, the `-DoctorOnly` helper performs this check before probing speech imports, so an import failure cannot be mistaken for a WAV-file failure.
 
 This feature is **future development only**. It is absent from the already published v0.5.3 executable and the frozen, not-yet-published v0.5.4 source candidate. It must pass reviewed CI before merging, and no synthetic test replaces issue #3's real Hindi listening and clean-Windows acceptance.
 
