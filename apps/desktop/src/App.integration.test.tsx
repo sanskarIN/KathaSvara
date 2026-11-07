@@ -85,6 +85,8 @@ describe("offline WAV I/O diagnostic in Settings", () => {
     const report = await screen.findByRole("status", { name: "Offline WAV I/O result" });
     expect(within(report).getByText(/Temporary round-trip failed/)).toBeTruthy();
     expect(within(report).getByText(/inspect_pcm16/)).toBeTruthy();
+    expect(within(report).getByText(/Recommended next step:/).parentElement?.textContent)
+      .toContain("Update KathaSvara inference sources");
     expect(within(report).getByText(/Model \/ Hindi speech \/ playback verified:/).parentElement?.textContent).toContain("No");
   });
 
