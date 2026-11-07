@@ -122,3 +122,16 @@ def test_cli_can_run_offline_audio_io_probe_without_model() -> None:
     assert report["temporary_wav_roundtrip_ok"] is True
     assert report["model_loaded"] is False
     assert report["audio_playback_verified"] is False
+
+
+def test_windows_doctor_runs_wav_roundtrip_before_speech_imports() -> None:
+    root = Path(__file__).resolve().parents[3]
+    launcher = (root / "scripts/windows/launch-with-audio.ps1").read_text(
+        encoding="utf-8",
+    )
+    assert launcher.count("'{" + '"action":"probe_audio_io"' + "}'") == 1
+    assert launcher.index('"action":"probe_audio_io"') < launcher.index(
+        '"action":"probe_runtime"'
+    )
+    assert "Offline WAV I/O check passed" in launcher
+    assert "does NOT verify Chatterbox, Hindi speech or audio playback" in launcher
