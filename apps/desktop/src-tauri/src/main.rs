@@ -1885,9 +1885,15 @@ mod tests {
         fs::create_dir_all(&module).unwrap();
         fs::write(module.join("cli.py"), "# test only").unwrap();
         fs::write(source.join("pyproject.toml"), format!(
-            "[build-system]\\nrequires = []\\n\\n[project]\\nname = \\"kathasvara-inference\\"\\nversion = \\"{}\\"\\n",
+            r#"[build-system]
+requires = []
+
+[project]
+name = "kathasvara-inference"
+version = "{}"
+"#,
             env!("CARGO_PKG_VERSION")
-        ).replace("\\\\n", "\\n")).unwrap();
+        )).unwrap();
         let python = root.join(if cfg!(windows) { "python.exe" } else { "python3.11" });
         fs::write(&python, b"not executed").unwrap();
 
@@ -1908,7 +1914,9 @@ mod tests {
         assert!(verify_selected_python_311(&python).is_err());
 
         // A valid CLI path with a stale or tampered package version is rejected.
-        fs::write(source.join("pyproject.toml"), "[project]\\nversion = \\"0.0.1\\"\\n").unwrap();
+        fs::write(source.join("pyproject.toml"), r#"[project]
+version = "0.0.1"
+"#).unwrap();
         assert!(validate_session_inference_paths(&python, &source).is_err());
         fs::remove_file(source.join("pyproject.toml")).unwrap();
         assert!(validate_session_inference_paths(&python, &source).is_err());
