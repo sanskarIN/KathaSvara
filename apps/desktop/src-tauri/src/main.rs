@@ -486,6 +486,79 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<StoryProject>, String> {
     Ok(items)
 }
 
+/// Trusted runtime paths explicitly selected by a user for this app session.
+/// Never persist these paths in stories, settings files, or global environment.
+#[derive(Clone)]
+struct SessionInferencePaths {
+    python: PathBuf,
+    inference: PathBuf,
+}
+
+static SESSION_INFERENCE_PATHS: OnceLock<Mutex<Option<SessionInferencePaths>>> = OnceLock::new();
+
+fn selected_inference_paths() -> &'static Mutex<Option<SessionInferencePaths>> {
+    SESSION_INFERENCE_PATHS.get_or_init(|| Mutex::new(None))
+}
+
+fn validate_session_inference_paths(
+    python: &Path,
+    inference: &Path,
+) -> Result<SessionInferencePaths, String> {
+    if !python.is_absolute() || !inference.is_absolute() {
+        return Err("Select absolute paths for Python and the inference source folder.".into());
+    }
+    let executable = python.file_name().and_then(|value| value.to_str())
+        .ok_or("Select the Python 3.11 interpreter executable.")?;
+    let allowed_name = if cfg!(windows) {
+        executable.eq_ignore_ascii_case("python.exe")
+            || executable.eq_ignore_ascii_case("python3.exe")
+            || executable.eq_ignore_ascii_case("python3.11.exe")
+    } else {
+        matches!(executable, "python" | "python3" | "python3.11")
+    };
+    if !allowed_name || !python.is_file() {
+        return Err("Select an existing Python interpreter executable (Python 3.11 recommended).".into());
+    }
+    if !inference.is_dir() || !inference.join("kathasvara").join("cli.py").is_file() {
+        return Err("Select the inference source directory containing kathasvara/cli.py.".into());
+    }
+    Ok(SessionInferencePaths {
+        python: python.to_path_buf(),
+        inference: inference.to_path_buf(),
+    })
+}
+
+/// Apply to new Python jobs only. In-flight jobs keep their already-spawned
+/// child-process paths; the global OS environment is never modified.
+#[tauri::command]
+fn configure_local_inference(python_path: String, inference_dir: String) -> Result<(), String> {
+    let selection = validate_session_inference_paths(
+        Path::new(&python_path), Path::new(&inference_dir),
+    )?;
+    let mut guard = selected_inference_paths().lock()
+        .map_err(|_| "Unable to update local inference settings.".to_string())?;
+    *guard = Some(selection);
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_local_inference() -> Result<(), String> {
+    let mut guard = selected_inference_paths().lock()
+        .map_err(|_| "Unable to clear local inference settings.".to_string())?;
+    *guard = None;
+    Ok(())
+}
+
+fn runtime_paths() -> Result<(PathBuf, PathBuf), String> {
+    let selected = selected_inference_paths().lock()
+        .map_err(|_| "Unable to read local inference settings.".to_string())?
+        .clone();
+    if let Some(config) = selected {
+        return Ok((config.python, config.inference));
+    }
+    Ok((PathBuf::from(python_executable()), inference_directory()?))
+}
+
 fn python_executable() -> String {
     std::env::var("KATHASVARA_PYTHON")
         .unwrap_or_else(|_| if cfg!(windows) { "python" } else { "python3" }.to_string())
@@ -614,11 +687,11 @@ fn invoke_python_with_reference(
     request: Value,
     reference_wav_path: Option<&str>,
 ) -> Result<Value, String> {
-    let directory = inference_directory()?;
+    let (python, directory) = runtime_paths()?;
     if !directory.join("kathasvara/cli.py").is_file() {
-        return Err("Inference sources are missing. Set KATHASVARA_INFERENCE_DIR.".into());
+        return Err("Inference sources are missing. Configure the source directory in Settings.".into());
     }
-    let mut command = Command::new(python_executable());
+    let mut command = Command::new(python);
     command
         .args(["-m", "kathasvara.cli"])
         .current_dir(directory.clone())
@@ -1607,7 +1680,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -1716,6 +1789,32 @@ mod tests {
             .join().unwrap().unwrap_err();
         assert_eq!(failed, "Unable to send synthesis request.");
         assert!(!failed.contains(private_script));
+    }
+
+    #[test]
+    fn session_inference_setup_rejects_relative_untrusted_or_missing_sources() {
+        let root = std::env::temp_dir().join(format!("kathasvara-setup-{}", Uuid::new_v4()));
+        let source = root.join("services").join("inference");
+        let module = source.join("kathasvara");
+        fs::create_dir_all(&module).unwrap();
+        fs::write(module.join("cli.py"), "# test only").unwrap();
+        let python = root.join(if cfg!(windows) { "python.exe" } else { "python3.11" });
+        fs::write(&python, b"not executed").unwrap();
+
+        let selection = validate_session_inference_paths(&python, &source).unwrap();
+        assert_eq!(selection.python, python);
+        assert_eq!(selection.inference, source);
+
+        assert!(validate_session_inference_paths(Path::new("python.exe"), &source).is_err());
+        assert!(validate_session_inference_paths(&python, Path::new("relative")).is_err());
+        assert!(validate_session_inference_paths(&python, &root).is_err());
+        assert!(validate_session_inference_paths(&root.join("missing.exe"), &source).is_err());
+
+        let wrong_name = root.join("suspicious-tool.exe");
+        fs::write(&wrong_name, b"test").unwrap();
+        assert!(validate_session_inference_paths(&wrong_name, &source).is_err());
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

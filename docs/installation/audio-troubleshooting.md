@@ -34,6 +34,14 @@ The desktop presents one fixed remediation for each failure stage: `temporary_di
 
 This feature is **post-v0.5.4 source development only**. It is absent from the published v0.5.3 and v0.5.4 executables. The branch has passing no-model CI, but no synthetic test replaces issue #3's real Hindi listening and clean-Windows acceptance.
 
+## Next development: choose the local runtime from desktop Settings
+
+**Post-v0.5.4 source development only (not in the v0.5.4 download).** A new Settings section lets users choose a **trusted Python 3.11 executable** and the matching **`services/inference` folder** through local OS file and directory dialogs. A Rust command checks that the executable exists with a Python filename and the chosen folder contains `kathasvara/cli.py`. The selection overrides launcher defaults **for new Python jobs in this app session only**; it is never stored in a story, browser localStorage, project metadata or the OS registry, and the paths are not displayed to other users.
+
+This feature helps when the Windows developer EXE is launched by double-clicking instead of through `launch-with-audio.ps1`. It does **not** install Python, `chatterbox-tts`, PyTorch or model weights. Choose an interpreter you trust; executable selection is a deliberate local program execution choice. Configure the source folder from the **same source version as the EXE**, then run **Check Python bridge**, **Inspect local TTS setup**, **Verify speech library imports (no model load)**, and **Test temporary WAV I/O**. Model inference remains an explicit separate action and may require approved checkpoint downloads.
+
+Clearing the session selection restores launcher environment values or source discovery for subsequent jobs. Existing jobs already spawned with an older interpreter are not retroactively changed. If the source folder or interpreter was moved, reselect the current paths. Missing dependencies or incorrect Python versions will be reported by the no-model doctor; successful setup does not establish actual Hindi pronunciation or speech playback.
+
 ## Windows 11 — configure, diagnose, and start
 
 Prerequisites: obtain KathaSvara's source tree from the official GitHub repository, install **Python 3.11**, and use a developer EXE downloaded from a verified KathaSvara GitHub release with its checksum validated. No administrator privileges or persistent environment-variable changes are required by this helper.

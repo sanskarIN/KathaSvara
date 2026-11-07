@@ -102,6 +102,8 @@ export default function App() {
   const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
+  const [configuringRuntime, setConfiguringRuntime] = useState(false);
+  const [sessionRuntimeConfigured, setSessionRuntimeConfigured] = useState(false);
   const [probingImports, setProbingImports] = useState(false);
   const [checkingAudioIo, setCheckingAudioIo] = useState(false);
   const [audioIoReport, setAudioIoReport] = useState<OfflineWavProbe | null>(null);
@@ -110,6 +112,7 @@ export default function App() {
   const [referenceWavPath, setReferenceWavPath] = useState<string | null>(null);
   // Native dialogs and no-model Python probes can resolve out of order.
   const referencePickerRevision = useRef(0);
+  const runtimePickerRevision = useRef(0);
   const importProbeRevision = useRef(0);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [cachePlan, setCachePlan] = useState<CachePruneReport | null>(null);
@@ -260,6 +263,57 @@ export default function App() {
     importProbeRevision.current += 1;
     setProbingImports(false);
     setImportProbe(null);
+  }
+
+  async function chooseLocalRuntime() {
+    const revision = ++runtimePickerRevision.current;
+    setConfiguringRuntime(true);
+    try {
+      const python = await open({
+        title: "Select your trusted Python 3.11 interpreter (python.exe on Windows)",
+        multiple: false, directory: false,
+      });
+      if (revision !== runtimePickerRevision.current || typeof python !== "string") return;
+      const inference = await open({
+        title: "Select the KathaSvara services/inference source folder",
+        multiple: false, directory: true,
+      });
+      if (revision !== runtimePickerRevision.current || typeof inference !== "string") return;
+      // Both selections are validated atomically by Rust; neither is stored
+      // in localStorage, project JSON, React diagnostics, or public logs.
+      await invoke("configure_local_inference", {
+        pythonPath: python, inferenceDir: inference,
+      });
+      if (revision !== runtimePickerRevision.current) return;
+      setSessionRuntimeConfigured(true);
+      setDiagnostics(null);
+      setAudioIoReport(null);
+      invalidateReferenceProbe();
+      setMessage("Local Python and inference sources configured for this app session. Run the TTS preflight; speech model and Hindi audio remain unverified.");
+    } catch {
+      if (revision === runtimePickerRevision.current) {
+        setMessage("Could not configure the local Python runtime. Choose an existing Python executable and the source folder containing kathasvara/cli.py.");
+      }
+    } finally {
+      if (revision === runtimePickerRevision.current) setConfiguringRuntime(false);
+    }
+  }
+
+  async function clearLocalRuntime() {
+    runtimePickerRevision.current += 1;
+    setConfiguringRuntime(true);
+    try {
+      await invoke("clear_local_inference");
+      setSessionRuntimeConfigured(false);
+      setDiagnostics(null);
+      setAudioIoReport(null);
+      invalidateReferenceProbe();
+      setMessage("Session runtime selection cleared. New jobs use the launcher environment or automatic source discovery.");
+    } catch {
+      setMessage("Unable to clear the session runtime selection.");
+    } finally {
+      setConfiguringRuntime(false);
+    }
   }
 
   async function chooseReferenceVoice() {
@@ -648,6 +702,30 @@ export default function App() {
               <p>Appearance and a diagnostic check of the Python integration. This is a development preview, not a standalone packaged runtime.</p>
               <label className="field-label" htmlFor="theme-select">COLOR THEME</label>
               <select id="theme-select" value={theme} onChange={(e) => setTheme(e.target.value as Theme)}><option value="dark">Dark</option><option value="light">Light</option></select>
+              <section aria-label="Local Python setup" className="diagnostic-report">
+                <h3>Connect your local speech runtime</h3>
+                <p className="helper">To enable narration, character renders and audio export on a developer EXE,
+                  select your trusted Python 3.11 interpreter and the matching KathaSvara
+                  <code>services/inference</code> folder. Speech libraries and authorized model weights
+                  must already be installed separately. Selecting files never installs packages,
+                  loads a model, changes system settings, or uploads a recording.</p>
+                <button className="secondary-button" disabled={configuringRuntime || working}
+                  onClick={() => void chooseLocalRuntime()}>
+                  {configuringRuntime ? "Choosing local runtime…" : "Choose Python and inference folder"}
+                </button>
+                {sessionRuntimeConfigured && (
+                  <button className="quiet-button" disabled={configuringRuntime || working}
+                    onClick={() => void clearLocalRuntime()}>
+                    Clear session runtime selection
+                  </button>
+                )}
+                <p role="status"><strong>Runtime selection:</strong> {sessionRuntimeConfigured
+                  ? "Local Python and sources selected for this app session (private paths hidden)"
+                  : "Launcher-provided Python and source discovery"}</p>
+                <p className="helper">This selection affects new Python jobs only and is not saved
+                  after the app closes. Use the no-model checks below to confirm installation.
+                  A valid interpreter location is not proof that Hindi speech works.</p>
+              </section>
               <button className="secondary-button" onClick={() => void checkRuntime()}>Check Python bridge</button>
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
                 {checkingSetup ? "Checking dependencies…" : "Inspect local TTS setup"}
