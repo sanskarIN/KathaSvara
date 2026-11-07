@@ -51,6 +51,80 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("offline WAV I/O diagnostic in Settings", () => {
+  it("shows a passing synthetic round-trip without generating audio or persisting paths", async () => {
+    mocks.invoke.mockResolvedValue({
+      status: "passed", failed_stage: null, temporary_wav_roundtrip_ok: true,
+      model_loaded: false, hindi_listening_verified: false,
+      audio_playback_verified: false, help: "Synthetic WAV I/O passed.",
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Test temporary WAV I/O (no model or playback)",
+    }));
+    const report = await screen.findByRole("status", { name: "Offline WAV I/O result" });
+    expect(within(report).getByText(/Temporary round-trip passed/)).toBeTruthy();
+    expect(within(report).getByText(/Model \/ Hindi speech \/ playback verified:/).parentElement?.textContent).toContain("No");
+    expect(mocks.invoke).toHaveBeenCalledWith("probe_audio_io");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+    expect(mocks.invoke).not.toHaveBeenCalledWith("probe_tts_runtime", expect.anything());
+    expect(JSON.stringify(window.localStorage)).not.toContain("wav");
+  });
+
+  it("shows fixed failed stage, not claims about real model or Hindi sound", async () => {
+    mocks.invoke.mockResolvedValue({
+      status: "failed", failed_stage: "inspect_pcm16",
+      temporary_wav_roundtrip_ok: false,
+      model_loaded: false, hindi_listening_verified: false,
+      audio_playback_verified: false, help: "Check temporary WAV I/O.",
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Test temporary WAV I/O (no model or playback)",
+    }));
+    const report = await screen.findByRole("status", { name: "Offline WAV I/O result" });
+    expect(within(report).getByText(/Temporary round-trip failed/)).toBeTruthy();
+    expect(within(report).getByText(/inspect_pcm16/)).toBeTruthy();
+    expect(within(report).getByText(/Model \/ Hindi speech \/ playback verified:/).parentElement?.textContent).toContain("No");
+  });
+
+  it("never exposes local paths when the native WAV check rejects its call", async () => {
+    const privatePath = "C:\\Users\\private-person\\secret-voice.wav";
+    mocks.invoke.mockRejectedValue(new Error(privatePath));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Test temporary WAV I/O (no model or playback)",
+    }));
+    await waitFor(() => {
+      expect(screen.getByText(/Cannot run the WAV I\/O check/)).toBeTruthy();
+    });
+    expect(document.body.textContent).not.toContain("private-person");
+    expect(document.body.textContent).not.toContain(privatePath);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("disables repeated clicks while an offline WAV check is running", async () => {
+    let finish: (value: unknown) => void = () => {
+      throw new Error("WAV diagnostic not invoked");
+    };
+    mocks.invoke.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Test temporary WAV I/O (no model or playback)",
+    }));
+    expect(screen.getByRole("button", { name: /Checking temporary WAV I\/O/ })).toHaveProperty("disabled", true);
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish({
+        status: "passed", failed_stage: null, temporary_wav_roundtrip_ok: true,
+        model_loaded: false, hindi_listening_verified: false,
+        audio_playback_verified: false, help: "Checked.",
+      });
+    });
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("session-only consented reference selection (no model)", () => {
   it("passes a chosen local WAV to the probe without showing or persisting its path", async () => {
     const privatePath = "C:\\Users\\private\\my-voice.wav";
