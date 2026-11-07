@@ -721,13 +721,49 @@ async fn probe_tts_runtime(reference_wav_path: Option<String>) -> Result<Value, 
     }).await.map_err(|error| error.to_string())?
 }
 
+/// Allow only the strict fixed-shape, privacy-preserving offline WAV report.
+fn validate_audio_io_report(report: &Value) -> Result<Value, String> {
+    const MALFORMED: &str = "Offline WAV I/O doctor returned an invalid result. Update the local inference sources.";
+    let status = report.get("status").and_then(Value::as_str).ok_or(MALFORMED)?;
+    let passed = report.get("temporary_wav_roundtrip_ok").and_then(Value::as_bool)
+        .ok_or(MALFORMED)?;
+    // A synthetic WAV cannot verify any actual speech, model load or playback.
+    for key in ["model_loaded", "hindi_listening_verified", "audio_playback_verified"] {
+        if report.get(key) != Some(&Value::Bool(false)) {
+            return Err(MALFORMED.into());
+        }
+    }
+    let stage = report.get("failed_stage").ok_or(MALFORMED)?;
+    let help = match (status, passed, stage.as_str()) {
+        ("passed", true, None) if stage.is_null() =>
+            "Temporary PCM16 WAV write/read passed. No model, Hindi speech or speaker playback was tested.",
+        ("failed", false, Some(
+            "temporary_directory" | "write_pcm16" | "inspect_pcm16" | "cleanup",
+        )) =>
+            "Temporary WAV I/O failed at the reported stage. Check temporary disk access and available space; no model was loaded.",
+        _ => return Err(MALFORMED.into()),
+    };
+    // Construct a fresh response. Never forward arbitrary Python help text,
+    // exception content, local WAV paths or unrecognized JSON fields to the UI.
+    Ok(json!({
+        "status": status,
+        "failed_stage": stage,
+        "temporary_wav_roundtrip_ok": passed,
+        "model_loaded": false,
+        "hindi_listening_verified": false,
+        "audio_playback_verified": false,
+        "help": help,
+    }))
+}
+
 /// Model-free, bounded synthetic PCM16 round-trip; never plays or synthesizes audio.
 #[tauri::command]
 async fn probe_audio_io() -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let response = invoke_python(json!({"action": "probe_audio_io"}))?;
-        response.get("result").cloned()
-            .ok_or_else(|| "Offline WAV I/O doctor returned no result.".to_string())
+        let report = response.get("result")
+            .ok_or_else(|| "Offline WAV I/O doctor returned no result.".to_string())?;
+        validate_audio_io_report(report)
     }).await.map_err(|error| error.to_string())?
 }
 
@@ -1702,6 +1738,67 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn offline_wav_report_accepts_only_fixed_pass_and_failed_stage() {
+        let passed = json!({
+            "status": "passed", "failed_stage": null,
+            "temporary_wav_roundtrip_ok": true, "model_loaded": false,
+            "hindi_listening_verified": false, "audio_playback_verified": false,
+            "help": "C:\\\\Users\\\\private\\\\speaker.wav",
+            "injected_private_filename": "secret.wav"
+        });
+        let cleaned = validate_audio_io_report(&passed).unwrap();
+        assert_eq!(cleaned["status"], "passed");
+        assert_eq!(cleaned["failed_stage"], Value::Null);
+        let serialized = cleaned.to_string();
+        assert!(!serialized.contains("private"));
+        assert!(!serialized.contains("speaker.wav"));
+        assert!(!serialized.contains("secret.wav"));
+        assert_eq!(cleaned["audio_playback_verified"], false);
+
+        for stage in ["temporary_directory", "write_pcm16", "inspect_pcm16", "cleanup"] {
+            let report = json!({
+                "status": "failed", "failed_stage": stage,
+                "temporary_wav_roundtrip_ok": false, "model_loaded": false,
+                "hindi_listening_verified": false, "audio_playback_verified": false,
+            });
+            let cleaned = validate_audio_io_report(&report).unwrap();
+            assert_eq!(cleaned["failed_stage"], stage);
+            assert_eq!(cleaned["status"], "failed");
+        }
+    }
+
+    #[test]
+    fn offline_wav_report_rejects_mismatched_or_exaggerated_claims() {
+        let valid = json!({
+            "status": "passed", "failed_stage": null,
+            "temporary_wav_roundtrip_ok": true, "model_loaded": false,
+            "hindi_listening_verified": false, "audio_playback_verified": false
+        });
+        let variants = [
+            ("status", json!("failure")),
+            ("status", json!("failed")),
+            ("temporary_wav_roundtrip_ok", json!(false)),
+            ("temporary_wav_roundtrip_ok", json!("true")),
+            ("failed_stage", json!("C:\\\\private.wav")),
+            ("failed_stage", json!("inspect_pcm16")),
+            ("model_loaded", json!(true)),
+            ("hindi_listening_verified", json!(true)),
+            ("audio_playback_verified", json!(true)),
+        ];
+        for (key, injected) in variants {
+            let mut report = valid.clone();
+            report[key] = injected;
+            let error = validate_audio_io_report(&report).unwrap_err();
+            assert!(!error.contains("private"));
+            assert!(error.contains("invalid result"));
+        }
+        let mut report = valid.clone();
+        report.as_object_mut().unwrap().remove("failed_stage");
+        assert!(validate_audio_io_report(&report).is_err());
+        assert!(validate_audio_io_report(&Value::Null).is_err());
     }
 
     #[test]
