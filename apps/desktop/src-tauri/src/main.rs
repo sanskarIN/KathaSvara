@@ -635,14 +635,30 @@ fn clear_local_inference() -> Result<(), String> {
     Ok(())
 }
 
+/// Validate again for every child process: the selected or launcher-supplied
+/// source directory may have changed since the Settings dialog was accepted.
+fn matching_inference_sources(inference: PathBuf) -> Result<PathBuf, String> {
+    if !inference.join("kathasvara").join("cli.py").is_file()
+        || !inference_source_version_matches(&inference)
+    {
+        return Err(
+            "The inference sources are missing or do not match this desktop version. Select the matching checkout in Settings.".into()
+        );
+    }
+    Ok(inference)
+}
+
 fn runtime_paths() -> Result<(PathBuf, PathBuf), String> {
     let selected = selected_inference_paths().lock()
         .map_err(|_| "Unable to read local inference settings.".to_string())?
         .clone();
     if let Some(config) = selected {
-        return Ok((config.python, config.inference));
+        return Ok((config.python, matching_inference_sources(config.inference)?));
     }
-    Ok((PathBuf::from(python_executable()), inference_directory()?))
+    // Environment and autodiscovered sources must obey the same version
+    // contract as the in-app picker; no silent cross-version CLI calls.
+    let inference = matching_inference_sources(inference_directory()?)?;
+    Ok((PathBuf::from(python_executable()), inference))
 }
 
 fn python_executable() -> String {
@@ -1900,6 +1916,7 @@ version = "{}"
         let selection = validate_session_inference_paths(&python, &source).unwrap();
         assert_eq!(selection.python, python);
         assert_eq!(selection.inference, source);
+        assert_eq!(matching_inference_sources(source.clone()).unwrap(), source);
 
         assert!(validate_session_inference_paths(Path::new("python.exe"), &source).is_err());
         assert!(validate_session_inference_paths(&python, Path::new("relative")).is_err());
@@ -1918,8 +1935,10 @@ version = "{}"
 version = "0.0.1"
 "#).unwrap();
         assert!(validate_session_inference_paths(&python, &source).is_err());
+        assert!(matching_inference_sources(source.clone()).is_err());
         fs::remove_file(source.join("pyproject.toml")).unwrap();
         assert!(validate_session_inference_paths(&python, &source).is_err());
+        assert!(matching_inference_sources(source.clone()).is_err());
 
         fs::remove_dir_all(root).unwrap();
     }
