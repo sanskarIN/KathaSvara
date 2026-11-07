@@ -103,6 +103,38 @@ def test_version_components_match_published_v054_site() -> None:
     assert "v0.5.3 · Latest experimental pre-release" not in site
 
 
+def test_post_publication_docs_archive_source_plan_and_keep_audio_gates_open() -> None:
+    """Check consistent static wording, not a substitute for live GitHub verification."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    site = (ROOT / "website/index.html").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    checklist = (
+        ROOT / "docs/releases/v0.5.4-publication-checklist.md"
+    ).read_text(encoding="utf-8")
+    qa = (ROOT / "docs/qa/windows-hindi-acceptance.md").read_text(
+        encoding="utf-8",
+    )
+    archive = (ROOT / "docs/releases/v0.5.4-notes.md").read_text(
+        encoding="utf-8",
+    )
+    for content in (readme, site, changelog, checklist, qa):
+        assert "v0.5.4" in content
+        assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4" in content
+        assert "issues/3" in content
+    assert "v0.5.4 · Latest experimental pre-release" in site
+    assert "v0.5.3 · Latest experimental pre-release" not in site
+    assert "v0.5.4 development (not yet released)" not in changelog
+    assert "published experimental developer pre-release" in changelog
+    assert "NOT PUBLISHED / NOT STABLE." not in checklist
+    assert "all seven" in checklist.lower()
+    assert "SHA256SUMS.txt" in checklist
+    assert "NOT STABLE" in archive  # retained historical source plan
+    assert "ARCHIVED PRE-PUBLICATION PLAN" in archive
+    assert "not yet passed" in qa
+    assert "KathaSvara-v0.5.4-dev-win64.exe" in qa
+    assert "v0.5.4 development only" not in qa
+
+
 def test_v054_windows_candidate_and_readme_are_unbundled() -> None:
     candidate = (
         ROOT / ".github/workflows/windows-portable-candidate.yml"
