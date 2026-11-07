@@ -131,6 +131,29 @@ if (-not $diagnostic.result.dependencies_present) {
 if (-not $diagnostic.result.temporary_write_test_passed) {
     Fail "Python cannot write temporary files; speech synthesis cannot be used safely."
 }
+# This separate, disposable PCM16 round-trip uses only the Python standard
+# library and the KathaSvara structural inspector. It helps distinguish WAV
+# filesystem problems from TTS package/model problems, but not speaker output.
+Write-Host "Testing temporary PCM16 WAV write and read-back (no model, no playback)..."
+Push-Location $inference
+try {
+    $rawWavProbe = '{"action":"probe_audio_io"}' | & $python -m kathasvara.cli
+    if ($LASTEXITCODE -ne 0 -or -not $rawWavProbe) {
+        Fail "The offline WAV I/O doctor did not respond."
+    }
+    try { $wavProbe = ($rawWavProbe | Select-Object -Last 1) | ConvertFrom-Json }
+    catch { Fail "The offline WAV I/O doctor returned unreadable JSON." }
+} finally { Pop-Location }
+if (-not $wavProbe.ok -or -not $wavProbe.result -or
+    -not $wavProbe.result.temporary_wav_roundtrip_ok) {
+    $stage = "unknown"
+    if ($wavProbe.result -and $wavProbe.result.failed_stage) {
+        $stage = [string]$wavProbe.result.failed_stage
+    }
+    Fail ("Temporary PCM16 WAV I/O self-test failed at " + $stage +
+        ". Check temporary folder permissions, free disk space and local file access.")
+}
+Write-Host "Offline WAV I/O check passed. This does NOT verify Chatterbox, Hindi speech or audio playback."
 # Discoverable packages can still fail to import because of incompatible native
 # PyTorch/SoundFile DLLs or a missing Chatterbox multilingual entrypoint.
 # This optional-import command NEVER calls from_pretrained or downloads weights.

@@ -16,6 +16,24 @@ The published [v0.5.4 experimental developer preview](https://github.com/sanskar
 
 The Windows `-DoctorOnly` helper also prints the same fixed **Recommended next step**, including when preflight fails. When optional speech packages are missing, the helper now continues into the safe, model-free import probe instead of exiting before a recommendation appears. Installing packages is **opt-in** using `-InstallDependencies`; the doctor alone does not install packages, download weights or run the speech model. A green import probe recommends the **explicit real Hindi smoke test and listening**, not an automatic model download and not a claim that KathaSvara can already speak Hindi. This actionable setup diagnostic is included in the published **v0.5.4** developer EXE, but **not** the earlier v0.5.3 or v0.5.2 executables. A model-free preflight does not certify real Hindi narration.
 
+## Post-v0.5.4 development: synthetic WAV I/O self-test (not in the published EXE)
+
+The next development branch adds a **model-free PCM16 WAV round-trip** to the Windows audio helper. It writes a deterministic, quarter-second **synthetic signal** to the selected Python interpreter's temporary directory, reopens it with KathaSvara's bounded WAV structural inspector, verifies the shape and non-silent variation, and removes the temporary file. This uses only the Python standard library and existing local source; it **does not** install packages, load Chatterbox/PyTorch, download weights, play any sound or export any of your story/voice recordings.
+
+**Desktop Settings (PR #126 development branch):** Use **Test temporary WAV I/O (no model or playback)** to run the same check through the native Windows/Python bridge. The result shows a pass or a fixed failure stage, without the temporary filename or reference-voice path. An unavailable Python bridge produces a generic setup error, not raw OS exception text. Running this button never invokes the narration command, TTS preflight, or model downloads.
+
+From the repository's `services/inference` directory in a configured Python environment, run the standalone protocol check:
+
+```powershell
+'{"action":"probe_audio_io"}' | python -m kathasvara.cli
+```
+
+A passing `temporary_wav_roundtrip_ok` means only that **temporary PCM16 file writing and structural read-back worked in that interpreter**. It does not confirm the app's final export path, Windows speakers, TTS packages, correct Hindi speech, voice identity or listening quality. A failure returns a fixed `failed_stage` code (`temporary_directory`, `write_pcm16`, `inspect_pcm16`, or `cleanup`) without revealing private paths. In the development branch, the `-DoctorOnly` helper performs this check before probing speech imports, so an import failure cannot be mistaken for a WAV-file failure.
+
+The desktop presents one fixed remediation for each failure stage: `temporary_directory` means check Python's temporary-folder access and free space; `write_pcm16` means check write permissions, free space and local security restrictions; `inspect_pcm16` means verify the matching KathaSvara source and retry the structural read; `cleanup` means check whether the temporary directory permits removing its own test file. The native bridge validates status, flags and stage against an allowlist and replaces free-form worker messages with fixed public wording; contradictory responses fail closed.
+
+This feature is **post-v0.5.4 source development only**. It is absent from the published v0.5.3 and v0.5.4 executables. The branch has passing no-model CI, but no synthetic test replaces issue #3's real Hindi listening and clean-Windows acceptance.
+
 ## Windows 11 — configure, diagnose, and start
 
 Prerequisites: obtain KathaSvara's source tree from the official GitHub repository, install **Python 3.11**, and use a developer EXE downloaded from a verified KathaSvara GitHub release with its checksum validated. No administrator privileges or persistent environment-variable changes are required by this helper.

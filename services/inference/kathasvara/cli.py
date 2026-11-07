@@ -9,6 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from .audio_self_test import probe_audio_io
 from .cache import CACHE_BUDGET_BYTES, inspect_cache, prune_cache
 from .diagnostics import diagnose
 from .dialogue import parse_dialogue, unresolved_labels
@@ -60,6 +61,8 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "result": diagnose()}
     if request.get("action") == "probe_runtime":
         return {"ok": True, "result": probe_runtime()}
+    if request.get("action") == "probe_audio_io":
+        return {"ok": True, "result": probe_audio_io()}
     if request.get("action") == "inspect_generated_wav":
         filename = request.get("path")
         if not isinstance(filename, str):
