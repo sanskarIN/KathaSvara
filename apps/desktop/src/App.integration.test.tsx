@@ -122,7 +122,7 @@ describe("explicit real Hindi model smoke test", () => {
       audioId: testId, destination: "C:\\Users\\private-story\\sample.wav",
     }));
     expect(document.body.textContent).not.toContain("private-story");
-    fireEvent.click(screen.getByRole("button", { name: "Hide and discard Hindi test" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete local Hindi test WAV" }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
     expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
     expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
