@@ -20,6 +20,8 @@ The Windows `-DoctorOnly` helper also prints the same fixed **Recommended next s
 
 The next development branch adds a **model-free PCM16 WAV round-trip** to the Windows audio helper. It writes a deterministic, quarter-second **synthetic signal** to the selected Python interpreter's temporary directory, reopens it with KathaSvara's bounded WAV structural inspector, verifies the shape and non-silent variation, and removes the temporary file. This uses only the Python standard library and existing local source; it **does not** install packages, load Chatterbox/PyTorch, download weights, play any sound or export any of your story/voice recordings.
 
+**Desktop Settings (future development branch):** Use **Test temporary WAV I/O (no model or playback)** to run the same check through the native Windows/Python bridge. The result shows a pass or a fixed failure stage, without the temporary filename or reference-voice path. An unavailable Python bridge produces a generic setup error, not raw OS exception text. Running this button never invokes the narration command, TTS preflight, or model downloads.
+
 From the repository's `services/inference` directory in a configured Python environment, run the standalone protocol check:
 
 ```powershell
