@@ -51,6 +51,250 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("explicit real Hindi model smoke test", () => {
+  const testId = "123e4567-e89b-42d3-a456-426614174055";
+  const goodWav = {
+    audio_id: testId,
+    data_url: "data:audio/wav;base64,UklGRg==",
+    preview_available: true,
+    duration_seconds: 1.6,
+    sample_rate: 24000,
+    chunks: 1,
+  };
+  const goodInspection = {
+    structure_valid: true, codec: "pcm_s16le", channels: 1,
+    sample_rate_hz: 24000, frames: 38400, duration_seconds: 1.6,
+    model_loaded: false, hindi_listening_verified: false,
+    human_review_required: true,
+    level_hints: {
+      near_silence_hint: false, dc_only_hint: false,
+      possible_clipping_hint: false, long_internal_pause_hint: false,
+      signal_review_required: false,
+    },
+  };
+  const consentLabel = /I understand that this will load real speech models/;
+  const runLabel = "Generate real Hindi test WAV (may download model)";
+
+  it("does not load a speech model until the user explicitly opts in", () => {
+    openSettings();
+    const run = screen.getByRole("button", { name: runLabel });
+    expect(run).toHaveProperty("disabled", true);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(screen.getByText(/First use may download large/)).toBeTruthy();
+  });
+
+  it("generates only the short fixed Hindi sample and exposes manual listening, never automatic acceptance", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") return goodInspection;
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(screen.getByRole("status", {
+      name: "Real Hindi audio test result",
+    })).toBeTruthy());
+    expect(mocks.invoke).toHaveBeenCalledWith("synthesize", {
+      text: "नमस्कार। यह कथास्वर की हिंदी आवाज़ की जाँच है।",
+      exaggeration: 0.5, cfgWeight: 0.5, referenceWavPath: null,
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("inspect_generated_audio", {
+      audioId: testId,
+    });
+    expect(screen.getByLabelText("Real Hindi smoke-test audio preview")).toBeTruthy();
+    expect(screen.getByText(/not an automatic language or quality pass/)).toBeTruthy();
+    expect(screen.getByText(/Listen critically for understandable Hindi/)).toBeTruthy();
+    expect(screen.getByText(/Inspected real WAV:/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
+  });
+
+  it("keeps native inference errors and private paths out of the UI", async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-story\\secret.wav"));
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(screen.getByText(/Real Hindi generation or WAV inspection could not complete/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain("private-story");
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+    expect(JSON.stringify(window.localStorage)).not.toContain("private-story");
+  });
+
+  it("exports the real model result using native validated WAV export, not synthetic audio", async () => {
+    mocks.save.mockResolvedValue("C:\\Users\\private-story\\sample.wav");
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return { ...goodWav, preview_available: false };
+      if (command === "inspect_generated_audio") return goodInspection;
+      if (command === "export_wav") return undefined;
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await screen.findByRole("status", { name: "Real Hindi audio test result" });
+    expect(screen.getByText(/exceeds inline playback limits/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Export real Hindi test WAV" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("export_wav", {
+      audioId: testId, destination: "C:\\Users\\private-story\\sample.wav",
+    }));
+    expect(document.body.textContent).not.toContain("private-story");
+    fireEvent.click(screen.getByRole("button", { name: "Delete local Hindi test WAV" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+    expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
+  });
+
+  it("retires an in-flight result when its selected local reference changes", async () => {
+    let finish: (value: typeof goodWav) => void = () => { throw new Error("Not invoked"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") {
+        return new Promise<typeof goodWav>(resolve => { finish = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command: " + command);
+    });
+    mocks.open.mockResolvedValue("C:\\Users\\private-story\\voice.wav");
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    expect(screen.getByRole("button", { name: /Generating genuine Hindi test audio/ }))
+      .toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Generating genuine Hindi test audio/ }))
+      .toHaveProperty("disabled", true);
+    expect(screen.getByText(/previous model job is still finishing/)).toBeTruthy();
+    await act(async () => { finish(goodWav); });
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+    expect(document.body.textContent).not.toContain("private-story");
+    expect(JSON.stringify(window.localStorage)).not.toContain("private-story");
+  });
+
+  it("rejects a structurally valid but effectively silent or DC-only WAV and deletes its UUID output", async () => {
+    for (const failingHint of ["near_silence_hint", "dc_only_hint"] as const) {
+      mocks.invoke.mockReset();
+      mocks.invoke.mockImplementation(async (command: string) => {
+        if (command === "synthesize") return goodWav;
+        if (command === "inspect_generated_audio") return {
+          ...goodInspection,
+          level_hints: { ...goodInspection.level_hints, [failingHint]: true, signal_review_required: true },
+        };
+        if (command === "discard_audio") return undefined;
+        throw new Error("Unexpected native call: " + command);
+      });
+      openSettings();
+      fireEvent.click(screen.getByLabelText(consentLabel));
+      fireEvent.click(screen.getByRole("button", { name: runLabel }));
+      await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+      expect(screen.getByText(/failed structural, duration or signal checks/)).toBeTruthy();
+      expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("rejects mismatched or untrusted native inspection flags rather than reporting successful Hindi", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") return {
+        ...goodInspection, hindi_listening_verified: true,
+        sample_rate_hz: 48000, duration_seconds: 2.4,
+      };
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+  });
+
+  it("shows conservative clipping and long-pause warnings but still requires listening", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") return {
+        ...goodInspection, level_hints: {
+          ...goodInspection.level_hints,
+          signal_review_required: true,
+          possible_clipping_hint: true, long_internal_pause_hint: true,
+        },
+      };
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await screen.findByRole("status", { name: "Real Hindi audio test result" });
+    expect(screen.getByText(/Signal review needed:/)).toBeTruthy();
+    expect(screen.getByText(/possible clipping/)).toBeTruthy();
+    expect(screen.getByText(/long internal quiet span/)).toBeTruthy();
+    expect(screen.getByText(/Hindi intelligibility is NOT automatically verified/)).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("discard_audio", expect.anything());
+  });
+
+  it("discards the audio if the native file inspection throws a private-path error", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") throw new Error("C:\\Users\\private-person\\secret.wav");
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+    expect(screen.getByText(/generation or WAV inspection could not complete/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private-person");
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+  });
+
+  it("retires a real WAV that becomes stale while PCM inspection is pending", async () => {
+    let finishInspection: (value: typeof goodInspection) => void = () => {
+      throw new Error("Inspection was never requested");
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") return Promise.resolve(goodWav);
+      if (command === "inspect_generated_audio") {
+        return new Promise<typeof goodInspection>(resolve => { finishInspection = resolve; });
+      }
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command " + command);
+    });
+    mocks.open.mockResolvedValue("C:\\Users\\private-story\\replaced-reference.wav");
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("inspect_generated_audio", {
+      audioId: testId,
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Generating genuine Hindi test audio/ }))
+      .toHaveProperty("disabled", true);
+    await act(async () => { finishInspection(goodInspection); });
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", { audioId: testId }));
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+    expect(document.body.textContent).not.toContain("private-story");
+    expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
+  });
+
+  it("does not start a parallel full story synthesis while the real smoke test runs", async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") return new Promise(() => {});
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    expect(screen.getByRole("button", { name: /Generate Hindi Voice/ }))
+      .toHaveProperty("disabled", true);
+    expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual(["synthesize"]);
+  });
+});
+
 describe("guided model-free speech readiness", () => {
   const python = {
     python_311: true, python_version: "3.11.11", platform: "Windows",
