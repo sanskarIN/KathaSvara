@@ -1068,6 +1068,38 @@ fn finalize_single_synthesis_wav(
     })
 }
 
+/// The Python StreamingWav writer uses <job UUID>-<random 32 hex>.partial.wav,
+/// not <job UUID>.partial.wav. After the worker has exited or been killed,
+/// remove only regular partials that match this specific unpredictable job ID.
+fn cleanup_single_synthesis_partials(folder: &Path, audio_id: &str) -> usize {
+    let Ok(id) = Uuid::parse_str(audio_id) else { return 0 };
+    let prefix = format!("{id}-");
+    let suffix = ".partial.wav";
+    let Ok(entries) = fs::read_dir(folder) else { return 0 };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        // A single writer normally owns only one partial. Limit unexpected
+        // directory churn; do not recurse into or follow arbitrary entries.
+        if removed >= 16 { break; }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(random) = name.strip_prefix(&prefix)
+            .and_then(|remaining| remaining.strip_suffix(suffix)) else { continue };
+        if random.len() != 32 ||
+            !random.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            continue;
+        }
+        let path = entry.path();
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file())
+            && fs::remove_file(path).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 fn finalize_or_remove_single_synthesis_wav(
     path: &Path, audio_id: String, response: &Value,
 ) -> Result<AudioResult, String> {
@@ -1113,14 +1145,18 @@ async fn synthesize(
                 // A terminated or timed-out Python worker cannot execute its
                 // own temporary-file cleanup. Remove only this UUID's files.
                 let _ = fs::remove_file(&path);
-                let _ = fs::remove_file(folder.join(format!("{audio_id}.partial.wav")));
+                let _ = cleanup_single_synthesis_partials(&folder, &audio_id);
                 return Err(error);
             }
         };
         // A worker success flag and nonempty WAV are insufficient: inspect the
         // opened PCM16 file and cross-check duration/rate/chunk metadata. On
         // failure delete this job's UUID audio, never publish a stale preview.
-        finalize_or_remove_single_synthesis_wav(&path, audio_id, &data)
+        let result = finalize_or_remove_single_synthesis_wav(&path, audio_id.clone(), &data);
+        // Even an unexpectedly successful worker may have left a temporary
+        // fragment. No Python subprocess remains alive by this point.
+        let _ = cleanup_single_synthesis_partials(&folder, &audio_id);
+        result
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -2503,6 +2539,46 @@ mod tests {
         ).is_err());
         drop(source);
         fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn interrupted_synthesis_removes_only_job_owned_random_partials() {
+        let folder = std::env::temp_dir().join(format!(
+            "kathasvara-speech-temp-{}", Uuid::new_v4(),
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        let current = Uuid::new_v4().to_string();
+        let other = Uuid::new_v4().to_string();
+        let random = "abcdef1234567890abcdef1234567890";
+        let owned = folder.join(format!("{current}-{random}.partial.wav"));
+        let unrelated = folder.join(format!("{other}-{random}.partial.wav"));
+        let near_match = folder.join(format!("{current}-wrong.partial.wav"));
+        let old_guess = folder.join(format!("{current}.partial.wav"));
+        for path in [&owned, &unrelated, &near_match, &old_guess] {
+            fs::write(path, b"private audio sample").unwrap();
+        }
+        let private = folder.join("private.txt");
+        fs::write(&private, b"KEEP ORIGINAL").unwrap();
+        let linked = folder.join(format!(
+            "{current}-fedcba9876543210fedcba9876543210.partial.wav",
+        ));
+        #[cfg(windows)]
+        let symlink_created = std::os::windows::fs::symlink_file(&private, &linked).is_ok();
+        #[cfg(not(windows))]
+        let symlink_created = std::os::unix::fs::symlink(&private, &linked).is_ok();
+
+        assert_eq!(cleanup_single_synthesis_partials(&folder, &current), 1);
+        assert!(!owned.exists());
+        assert_eq!(fs::read(&private).unwrap(), b"KEEP ORIGINAL");
+        assert_eq!(fs::read(&unrelated).unwrap(), b"private audio sample");
+        assert_eq!(fs::read(&near_match).unwrap(), b"private audio sample");
+        assert_eq!(fs::read(&old_guess).unwrap(), b"private audio sample");
+        if symlink_created {
+            assert!(fs::symlink_metadata(&linked).unwrap().file_type().is_symlink());
+        }
+        assert_eq!(cleanup_single_synthesis_partials(&folder, &current), 0);
+        assert_eq!(cleanup_single_synthesis_partials(&folder, "not-a-uuid"), 0);
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]
