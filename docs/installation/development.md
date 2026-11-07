@@ -79,7 +79,7 @@ test and human listening still remain essential.
 - **Export failed:** choose a new WAV filename that does not already exist (the exporter deliberately avoids overwriting files).
 - **Windows packaging:** bundle.active is false until a managed Python runtime and validated installer are implemented.
 
-## Windows: explicit real-model Hindi smoke test (v0.5.3 development only)
+## Windows: explicit real-model Hindi smoke test (experimental developer previews)
 
 The unsigned desktop EXE does **not** bundle Python, Chatterbox, or model weights.
 Run the model-free import doctor from the repository root first:
@@ -109,8 +109,9 @@ pronunciation, intelligibility, distinct characters or installation readiness.
 Listen to the generated WAV and complete the manual acceptance checklist in
 [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). The model-free
 unit tests use artificial PCM fixtures and never claim real narration. This
-verification change is proposed for v0.5.3 development and is not present in
-the published v0.5.1 Windows executable.
+smoke-test workflow is available in the published experimental v0.5.3 and
+v0.5.4 source and Windows helper, but is not present in the older v0.5.1
+release. Real speech still requires separately installed compatible model data.
 
 ## Dev-only standalone speech smoke test
 

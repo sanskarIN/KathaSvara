@@ -1,7 +1,7 @@
-"""Model-free publication safeguards for an UNPUBLISHED experimental v0.5.4.
+"""Archive the published v0.5.4 workflow and model-free release contracts.
 
-A passing source test is never permission to create a GitHub tag, claim real
-Hindi listening or bypass a separate manual workflow. SPDX-License-Identifier: MPL-2.0
+A passing source test is not a substitute for the actual GitHub publication
+or real Hindi listening. SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def test_v054_release_template_cannot_publish_a_false_draft_banner() -> None:
     assert "NOT A COMPLETE INSTALLER" in published
 
 
-def test_new_version_components_match_but_public_site_remains_v053() -> None:
+def test_version_components_match_published_v054_site() -> None:
     package = json.loads((ROOT / "apps/desktop/package.json").read_text(encoding="utf-8"))
     lock = json.loads(
         (ROOT / "apps/desktop/package-lock.json").read_text(encoding="utf-8")
@@ -96,10 +96,43 @@ def test_new_version_components_match_but_public_site_remains_v053() -> None:
     ):
         assert actual == VERSION
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
-    assert 'releases/tag/v0.5.3' in site
-    assert "v0.5.3 · Latest experimental pre-release" in site
-    assert "v0.5.4 · Latest experimental pre-release" not in site
-    assert 'v0.5.4 pre-release ↗' not in site
+    assert 'releases/tag/v0.5.4' in site
+    assert "v0.5.4 · Latest experimental pre-release" in site
+    assert 'v0.5.4 pre-release ↗' in site
+    assert "v0.5.3 · Published experimental pre-release" in site
+    assert "v0.5.3 · Latest experimental pre-release" not in site
+
+
+def test_post_publication_docs_archive_source_plan_and_keep_audio_gates_open() -> None:
+    """Check consistent static wording, not a substitute for live GitHub verification."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    site = (ROOT / "website/index.html").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    checklist = (
+        ROOT / "docs/releases/v0.5.4-publication-checklist.md"
+    ).read_text(encoding="utf-8")
+    qa = (ROOT / "docs/qa/windows-hindi-acceptance.md").read_text(
+        encoding="utf-8",
+    )
+    archive = (ROOT / "docs/releases/v0.5.4-notes.md").read_text(
+        encoding="utf-8",
+    )
+    for content in (readme, site, changelog, checklist, qa):
+        assert "v0.5.4" in content
+        assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4" in content
+        assert "issues/3" in content
+    assert "v0.5.4 · Latest experimental pre-release" in site
+    assert "v0.5.3 · Latest experimental pre-release" not in site
+    assert "v0.5.4 development (not yet released)" not in changelog
+    assert "published experimental developer pre-release" in changelog
+    assert "NOT PUBLISHED / NOT STABLE." not in checklist
+    assert "all seven" in checklist.lower()
+    assert "SHA256SUMS.txt" in checklist
+    assert "NOT STABLE" in archive  # retained historical source plan
+    assert "ARCHIVED PRE-PUBLICATION PLAN" in archive
+    assert "not yet passed" in qa
+    assert "KathaSvara-v0.5.4-dev-win64.exe" in qa
+    assert "v0.5.4 development only" not in qa
 
 
 def test_v054_windows_candidate_and_readme_are_unbundled() -> None:
