@@ -1046,8 +1046,12 @@ fn finalize_single_synthesis_wav(
     let rate = result["sample_rate"].as_u64()
         .and_then(|value| u32::try_from(value).ok())
         .ok_or("Speech worker reported an invalid audio sample rate.")?;
+    // The editor accepts at most MAX_TEXT_LENGTH characters. Even an input
+    // containing many tiny paragraphs may legitimately create >256 chunks;
+    // require a physical PCM frame per chunk without an arbitrary 256 limit.
     let chunks = result["chunks"].as_u64()
-        .filter(|&value| (1..=256).contains(&value))
+        .filter(|&value| value > 0 && value <= wav.frames &&
+            value <= MAX_TEXT_LENGTH as u64)
         .ok_or("Speech worker reported invalid synthesis chunk counts.")?;
     let duration = result["duration_seconds"].as_f64()
         .filter(|value| value.is_finite() && *value > 0.0)
@@ -2634,6 +2638,7 @@ mod tests {
             json!({"result": {"duration_seconds": 0.01, "sample_rate": 48000, "chunks": 1}}),
             json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000, "chunks": 0}}),
             json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000, "chunks": -1}}),
+            json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000, "chunks": 241}}),
             json!({"result": {"duration_seconds": "private-path", "sample_rate": 24000, "chunks": 1}}),
             json!({"result": {"duration_seconds": 0.01, "sample_rate": 24000}}),
         ] {
