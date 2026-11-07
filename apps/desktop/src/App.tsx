@@ -906,11 +906,11 @@ export default function App() {
                   <p><strong>Recommended next step:</strong> {nextProbeAction(importProbe)}</p>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
                   <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "auto" || importProbe.tts_device_mode === "cpu"
-                    ? importProbe.tts_device_mode : "Invalid override — use auto or cpu"
+                    ? importProbe.tts_device_mode : "Invalid override — use auto or cpu"}
                     {" "}({importProbe.device_configuration_valid ? "configuration accepted" : "fix before generating"})
                   </p>
                   <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "v2" || importProbe.tts_model_variant === "v3"
-                    ? importProbe.tts_model_variant : "Invalid override — use v2 or v3"
+                    ? importProbe.tts_model_variant : "Invalid override — use v2 or v3"}
                     {" "}({importProbe.model_configuration_valid ? "selection accepted" : "fix before generating"})
                   </p>
                   <p className="helper">V3 is opt-in through KATHASVARA_TTS_MODEL=v3 and may need updated
