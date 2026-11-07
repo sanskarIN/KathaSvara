@@ -73,9 +73,26 @@ const WAV_IO_REPAIR_ACTIONS: Record<NonNullable<OfflineWavProbe["failed_stage"]>
 };
 const CACHE_TARGET_MIB = 512;
 const OLD_PROBE_GUIDANCE = "Update the local KathaSvara inference sources to match this desktop build, then repeat the model-free speech probe.";
+// Interpret codes, not arbitrary Python text. A stale or mismatched worker may
+// include filesystem paths, environment values or untrusted exception strings.
+const FIXED_PROBE_ACTIONS: Record<NonNullable<RuntimeImportProbe["next_action_code"]>, string> = {
+  select_python_311: "Select a trusted Python 3.11 interpreter, then repeat the no-model check.",
+  repair_tts_imports: "Repair the failed speech packages in your selected Python 3.11 environment, then retry the no-model check.",
+  fix_device_override: "Set the TTS device to auto or cpu in the launcher configuration, then rerun the check.",
+  fix_model_selection: "Select a supported v2 or v3 Chatterbox model variant; v2 is the compatibility default.",
+  replace_reference_wav: "Select your own or consented compatible PCM16 reference WAV, or clear the session reference.",
+  update_chatterbox_api: "Update the installed Chatterbox API or choose a supported option before generating.",
+  verify_chatterbox_api: "Verify your installed Chatterbox API compatibility before attempting real generation.",
+  run_real_hindi_smoke: "Run the explicit Hindi WAV smoke test and listen to its output. Model weights and sound quality remain unverified.",
+};
+const KNOWN_IMPORT_COMPONENTS = ["numpy", "soundfile", "torch", "chatterbox_multilingual"] as const;
+const FIXED_PROBE_HELP = "This check only inspects Python imports, options and reference WAV structure. It does not load a speech model, download weights or verify audible Hindi.";
 function nextProbeAction(report: RuntimeImportProbe): string {
-  return typeof report.next_action === "string" && report.next_action.trim()
-    ? report.next_action : OLD_PROBE_GUIDANCE;
+  const code = report.next_action_code;
+  return typeof code === "string"
+    && Object.prototype.hasOwnProperty.call(FIXED_PROBE_ACTIONS, code)
+      ? FIXED_PROBE_ACTIONS[code as keyof typeof FIXED_PROBE_ACTIONS]
+      : OLD_PROBE_GUIDANCE;
 }
 function asMiB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(2) + " MiB";
@@ -502,9 +519,10 @@ export default function App() {
       setMessage(details.dependencies_present
         ? "Python dependencies appear installed. Model weights and real Hindi audio are NOT validated."
         : "Local speech dependencies are incomplete. See the diagnostics below.");
-    } catch (error) {
+    } catch {
+      // Native failures can contain interpreter or local model paths.
       setDiagnostics(null);
-      setMessage("Local diagnostic unavailable: " + errorMessage(error));
+      setMessage("Local diagnostic unavailable. Check the selected Python interpreter and inference folder.");
     } finally {
       setCheckingSetup(false);
     }
@@ -541,9 +559,9 @@ export default function App() {
       setMessage(report.preflight_ok
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
         : "TTS preflight needs attention. " + nextProbeAction(report));
-    } catch (error) {
+    } catch {
       if (probeRevision === importProbeRevision.current) {
-        setMessage("TTS import probe could not run: " + errorMessage(error));
+        setMessage("TTS import probe could not run. Check Python 3.11 and your configured inference source folder.");
       }
     } finally {
       if (probeRevision === importProbeRevision.current) {
@@ -872,12 +890,12 @@ export default function App() {
                   <h3>TTS preflight: {importProbe.preflight_ok ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
                   <p><strong>Recommended next step:</strong> {nextProbeAction(importProbe)}</p>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
-                  <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "invalid"
-                    ? "Invalid override — use auto or cpu" : importProbe.tts_device_mode}
+                  <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "auto" || importProbe.tts_device_mode === "cpu"
+                    ? importProbe.tts_device_mode : "Invalid override — use auto or cpu"
                     {" "}({importProbe.device_configuration_valid ? "configuration accepted" : "fix before generating"})
                   </p>
-                  <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "invalid"
-                    ? "Invalid override — use v2 or v3" : importProbe.tts_model_variant}
+                  <p><strong>Multilingual checkpoint:</strong> {importProbe.tts_model_variant === "v2" || importProbe.tts_model_variant === "v3"
+                    ? importProbe.tts_model_variant : "Invalid override — use v2 or v3"
                     {" "}({importProbe.model_configuration_valid ? "selection accepted" : "fix before generating"})
                   </p>
                   <p className="helper">V3 is opt-in through KATHASVARA_TTS_MODEL=v3 and may need updated
@@ -905,13 +923,16 @@ export default function App() {
                   <p className="helper">Signature checks do not load a model, verify its weights, or establish
                     that the selected voice and Hindi generation will work.</p>
                   <ul>
-                    {Object.entries(importProbe.checks).map(([module, result]) => (
-                      <li key={module}><strong>{module}</strong>: {result === "ok"
-                        ? "Imported" : result === "entrypoint_missing" ? "Required API not found" : "Import failed"}</li>
-                    ))}
+                    {KNOWN_IMPORT_COMPONENTS.map(module => {
+                      const result = importProbe.checks?.[module];
+                      return (
+                        <li key={module}><strong>{module}</strong>: {result === "ok"
+                          ? "Imported" : result === "entrypoint_missing" ? "Required API not found" : "Import failed or unavailable"}</li>
+                      );
+                    })}
                   </ul>
                   <p><strong>Model weights / real Hindi audio verified:</strong> No</p>
-                  <p>{importProbe.help}</p>
+                  <p>{FIXED_PROBE_HELP}</p>
                 </section>
               )}
               <section aria-label="Local segment-cache maintenance" className="diagnostic-report">
