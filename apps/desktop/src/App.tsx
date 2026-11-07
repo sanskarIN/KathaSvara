@@ -62,6 +62,12 @@ type RuntimeImportProbe = {
   audio_synthesis_verified: false;
   help: string;
 };
+const WAV_IO_REPAIR_ACTIONS: Record<NonNullable<OfflineWavProbe["failed_stage"]>, string> = {
+  temporary_directory: "Check whether Python can create files in its temporary directory and whether the disk has free space.",
+  write_pcm16: "Check temporary-folder write permissions, available disk space and security software restrictions.",
+  inspect_pcm16: "Update KathaSvara inference sources, then rerun the synthetic WAV check. This does not inspect your voice recording.",
+  cleanup: "Check whether the temporary folder permits deleting the test file. No story or reference voice was touched.",
+};
 const CACHE_TARGET_MIB = 512;
 const OLD_PROBE_GUIDANCE = "Update the local KathaSvara inference sources to match this desktop build, then repeat the model-free speech probe.";
 function nextProbeAction(report: RuntimeImportProbe): string {
@@ -671,7 +677,12 @@ export default function App() {
               {audioIoReport && (
                 <section aria-label="Offline WAV I/O result" className="diagnostic-report" role="status">
                   <h3>WAV I/O: {audioIoReport.temporary_wav_roundtrip_ok ? "Temporary round-trip passed" : "Temporary round-trip failed"}</h3>
-                  {audioIoReport.failed_stage && <p><strong>Failed stage:</strong> {audioIoReport.failed_stage}</p>}
+                  {audioIoReport.failed_stage && (
+                    <>
+                      <p><strong>Failed stage:</strong> {audioIoReport.failed_stage}</p>
+                      <p><strong>Recommended next step:</strong> {WAV_IO_REPAIR_ACTIONS[audioIoReport.failed_stage]}</p>
+                    </>
+                  )}
                   <p><strong>Model / Hindi speech / playback verified:</strong> No</p>
                   <p>{audioIoReport.help}</p>
                 </section>
