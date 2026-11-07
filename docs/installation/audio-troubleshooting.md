@@ -30,6 +30,8 @@ From the repository's `services/inference` directory in a configured Python envi
 
 A passing `temporary_wav_roundtrip_ok` means only that **temporary PCM16 file writing and structural read-back worked in that interpreter**. It does not confirm the app's final export path, Windows speakers, TTS packages, correct Hindi speech, voice identity or listening quality. A failure returns a fixed `failed_stage` code (`temporary_directory`, `write_pcm16`, `inspect_pcm16`, or `cleanup`) without revealing private paths. In the development branch, the `-DoctorOnly` helper performs this check before probing speech imports, so an import failure cannot be mistaken for a WAV-file failure.
 
+The desktop presents one fixed remediation for each failure stage: `temporary_directory` means check Python's temporary-folder access and free space; `write_pcm16` means check write permissions, free space and local security restrictions; `inspect_pcm16` means verify the matching KathaSvara source and retry the structural read; `cleanup` means check whether the temporary directory permits removing its own test file. The native bridge validates status, flags and stage against an allowlist and replaces free-form worker messages with fixed public wording; contradictory responses fail closed.
+
 This feature is **future development only**. It is absent from the already published v0.5.3 executable and the frozen, not-yet-published v0.5.4 source candidate. It must pass reviewed CI before merging, and no synthetic test replaces issue #3's real Hindi listening and clean-Windows acceptance.
 
 ## Windows 11 — configure, diagnose, and start
