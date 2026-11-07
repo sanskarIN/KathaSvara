@@ -50,7 +50,12 @@ interface Props {
   referenceWavPath?: string | null;
 }
 
+// Pure synchronous editor validation is authored in local TypeScript and
+// should retain its specific guidance. Native IPC errors are untrusted.
 function errorString(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+function ipcErrorString(error: unknown): string {
   return publicDesktopError(error);
 }
 
@@ -399,7 +404,7 @@ export default function CastStudio({
         : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
     } catch (error) {
       if (revision === renderRevision.current && activeRenderJob.current === id) {
-        onMessage("Scene render stopped or failed: " + errorString(error));
+        onMessage("Scene render stopped or failed: " + ipcErrorString(error));
       }
     } finally {
       // If a different story has begun rendering, this obsolete promise may
@@ -454,7 +459,7 @@ export default function CastStudio({
       onMessage("Model-free production audit complete. Review each scene before loading the speech model.");
     } catch (error) {
       if (revision === renderRevision.current && request === auditEpoch.current) {
-        onMessage("Production audit failed: " + errorString(error));
+        onMessage("Production audit failed: " + ipcErrorString(error));
       }
     } finally {
       if (request === auditEpoch.current) setAuditBusy(false);
@@ -505,7 +510,7 @@ export default function CastStudio({
       onMessage("Local history loaded. Retry is manual: the current entire story will be revalidated with a fresh job ID; only unchanged cached speech can be reused.");
     } catch (error) {
       if (revision === renderRevision.current && epoch === historyEpoch.current) {
-        onMessage("Could not read local render history: " + errorString(error));
+        onMessage("Could not read local render history: " + ipcErrorString(error));
       }
     } finally {
       if (epoch === historyEpoch.current) setLoadingHistory(false);
@@ -546,7 +551,7 @@ export default function CastStudio({
     } catch (error) {
       if (revision === renderRevision.current &&
           forgetTokens.current.get(job.job_id) === token) {
-        onMessage("Cannot forget render history: " + errorString(error));
+        onMessage("Cannot forget render history: " + ipcErrorString(error));
       }
     } finally {
       if (forgetTokens.current.get(job.job_id) === token) {
@@ -581,7 +586,7 @@ export default function CastStudio({
         // If the signalling IPC fails, explicitly allow a retry for this job.
         cancelRequest.current = null;
         setCancelStatus("idle");
-        onMessage("Unable to signal cancellation: " + errorString(error));
+        onMessage("Unable to signal cancellation: " + ipcErrorString(error));
       }
     }
   }
@@ -697,7 +702,7 @@ export default function CastStudio({
     } catch (error) {
       if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
         revision, renderRevision.current)) {
-        onMessage("Cannot export audio: " + errorString(error));
+        onMessage("Cannot export audio: " + ipcErrorString(error));
       }
     }
   }
@@ -713,7 +718,7 @@ export default function CastStudio({
       await invoke("discard_audio", { audioId: id });
       onMessage("Generated dialogue preview removed from local audio cache.");
     } catch (error) {
-      onMessage("Local cache deletion failed: " + errorString(error));
+      onMessage("Local cache deletion failed: " + ipcErrorString(error));
     }
   }
   async function parse() {
@@ -755,7 +760,7 @@ export default function CastStudio({
         : `Parsed ${response.result.scenes.length} scene(s). Save the v2 story to preserve character assignments.`);
     } catch (error) {
       if (revision === renderRevision.current) {
-        onMessage("Dialogue parsing failed: " + errorString(error));
+        onMessage("Dialogue parsing failed: " + ipcErrorString(error));
       }
     } finally {
       if (op === editorOperationEpoch.current) setBusy(false);
@@ -780,7 +785,7 @@ export default function CastStudio({
       onMessage("Version 2 story and voice profiles saved atomically in local app data.");
     } catch (error) {
       if (revision === renderRevision.current) {
-        onMessage("Unable to save version 2 story: " + errorString(error));
+        onMessage("Unable to save version 2 story: " + ipcErrorString(error));
       }
     } finally {
       if (op === editorOperationEpoch.current) setBusy(false);
@@ -808,7 +813,7 @@ export default function CastStudio({
       onMessage("Saved v2 story loaded. Legacy v0.1.x stories remain in their original folder.");
     } catch (error) {
       if (revision === renderRevision.current) {
-        onMessage("No saved v2 story for this ID: " + errorString(error));
+        onMessage("No saved v2 story for this ID: " + ipcErrorString(error));
       }
     } finally {
       if (op === editorOperationEpoch.current) setBusy(false);
