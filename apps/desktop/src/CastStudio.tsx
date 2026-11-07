@@ -424,8 +424,10 @@ export default function CastStudio({
     const request = ++planEpoch.current;
     setPlanBusy(true);
     setRenderPlan(null);
+    let nativeRequested = false;
     try {
       const selection = resolveRenderSelection(document, { sceneId });
+      nativeRequested = true;
       const result = await invoke<RenderPlan>("preflight_render", {
         project: document, ...selection,
       });
@@ -437,7 +439,7 @@ export default function CastStudio({
       onMessage("Model-free plan reviewed: no model loaded and no speech duration or voice quality assumed.");
     } catch (error) {
       if (revision === renderRevision.current && request === planEpoch.current) {
-        onMessage("Render preflight failed: " + errorString(error));
+        onMessage("Render preflight failed: " + (nativeRequested ? ipcErrorString(error) : errorString(error)));
       }
     } finally {
       if (request === planEpoch.current) setPlanBusy(false);
@@ -470,10 +472,12 @@ export default function CastStudio({
     if (!audit || busy || auditBusy || rendering || activeRenderJob.current) return;
     const revision = renderRevision.current;
     const auditRequest = auditEpoch.current;
+    let nativeRequested = false;
     try {
       // The export allowlist excludes scene/story IDs, private Hindi dialogue,
       // speaker names, voice settings and generated audio paths.
       const content = serializeProductionManifest(audit);
+      nativeRequested = true;
       const destination = await save({
         title: "Export model-free production readiness report",
         defaultPath: "kathasvara-production-audit.json",
@@ -494,7 +498,7 @@ export default function CastStudio({
     } catch (error) {
       if (revision === renderRevision.current && auditRequest === auditEpoch.current &&
           activeRenderJob.current === null) {
-        onMessage("Cannot export production report: " + errorString(error));
+        onMessage("Cannot export production report: " + (nativeRequested ? ipcErrorString(error) : errorString(error)));
       }
     }
   }
@@ -613,12 +617,14 @@ export default function CastStudio({
     const epoch = audioEpoch.current;
     const label = audioExportLabel;
     const audioId = audio.audio_id;
+    let nativeRequested = false;
     try {
       // Timings are derived from actual rendered PCM frames, not reading-speed estimates.
       // The same complete validation is used by the optional in-app preview.
       const content = buildDialogueSrt(audio.segment_timings, spokenSubtitleLines(document), {
         duration_seconds: audio.duration_seconds, sample_rate: audio.sample_rate,
       });
+      nativeRequested = true;
       const destination = await save({
         title: "Export segment-timed Hindi SubRip subtitles",
         defaultPath: suggestedOutputFile(label, "srt"),
@@ -642,7 +648,7 @@ export default function CastStudio({
     } catch (error) {
       if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
         revision, renderRevision.current)) {
-        onMessage("Cannot export dialogue subtitles: " + errorString(error));
+        onMessage("Cannot export dialogue subtitles: " + (nativeRequested ? ipcErrorString(error) : errorString(error)));
       }
     }
   }
@@ -655,8 +661,10 @@ export default function CastStudio({
     const id = audio.audio_id;
     setWavQa(null);
     setInspectingWav(true);
+    let nativeCompleted = false;
     try {
       const raw = await invoke<unknown>("inspect_generated_audio", { audioId: id });
+      nativeCompleted = true;
       const report = parseWavQuality(raw);
       if (request !== qaEpoch.current || epoch !== audioEpoch.current ||
           revision !== renderRevision.current) return;
@@ -669,7 +677,7 @@ export default function CastStudio({
     } catch (error) {
       if (request === qaEpoch.current && epoch === audioEpoch.current &&
           revision === renderRevision.current) {
-        onMessage("WAV inspection failed: " + errorString(error));
+        onMessage("WAV inspection failed: " + (nativeCompleted ? errorString(error) : ipcErrorString(error)));
       }
     } finally {
       if (request === qaEpoch.current) setInspectingWav(false);
