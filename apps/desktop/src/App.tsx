@@ -87,8 +87,23 @@ const FIXED_PROBE_ACTIONS: Record<NonNullable<RuntimeImportProbe["next_action_co
 };
 const KNOWN_IMPORT_COMPONENTS = ["numpy", "soundfile", "torch", "chatterbox_multilingual"] as const;
 const FIXED_PROBE_HELP = "This check only inspects Python imports, options and reference WAV structure. It does not load a speech model, download weights or verify audible Hindi.";
+
+/** Reports from independently installed Python sources must fail closed. */
+function isConsistentImportPreflight(report: RuntimeImportProbe): boolean {
+  return report.preflight_ok === true && report.python_311 === true
+    && report.imports_ok === true && report.device_configuration_valid === true
+    && report.model_configuration_valid === true && report.upstream_api_compatible === true
+    && (report.tts_device_mode === "auto" || report.tts_device_mode === "cpu")
+    && (report.tts_model_variant === "v2" || report.tts_model_variant === "v3")
+    && (report.reference_voice_status === "not_set" || report.reference_voice_status === "valid")
+    && report.model_weights_verified === false && report.audio_synthesis_verified === false
+    && KNOWN_IMPORT_COMPONENTS.every(module => report.checks?.[module] === "ok");
+}
 function nextProbeAction(report: RuntimeImportProbe): string {
   const code = report.next_action_code;
+  if (code === "run_real_hindi_smoke" && !isConsistentImportPreflight(report)) {
+    return OLD_PROBE_GUIDANCE;
+  }
   return typeof code === "string"
     && Object.prototype.hasOwnProperty.call(FIXED_PROBE_ACTIONS, code)
       ? FIXED_PROBE_ACTIONS[code as keyof typeof FIXED_PROBE_ACTIONS]
@@ -488,7 +503,7 @@ export default function App() {
       });
       if (revision !== readinessRevision.current) return;
       setImportProbe(imports);
-      setReadinessSummary(imports.preflight_ok
+      setReadinessSummary(isConsistentImportPreflight(imports)
         ? {
           readyForExplicitGeneration: true,
           guidance: "Environment, temporary WAV I/O and speech imports passed. The next step is explicit real Hindi generation and listening. Model weights and sound quality have NOT been verified.",
@@ -556,7 +571,7 @@ export default function App() {
       });
       if (probeRevision !== importProbeRevision.current) return;
       setImportProbe(report);
-      setMessage(report.preflight_ok
+      setMessage(isConsistentImportPreflight(report)
         ? "TTS preflight passed. Model weights, Hindi generation, and voice quality are still unverified."
         : "TTS preflight needs attention. " + nextProbeAction(report));
     } catch {
@@ -887,7 +902,7 @@ export default function App() {
                 their Python imports work and whether the device and model overrides are valid; neither test loads model weights or generates speech.</p>
               {importProbe && (
                 <section aria-label="TTS import probe result" className="diagnostic-report" role="status">
-                  <h3>TTS preflight: {importProbe.preflight_ok ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
+                  <h3>TTS preflight: {isConsistentImportPreflight(importProbe) ? "Setup passed (no model loaded)" : "Setup needs attention"}</h3>
                   <p><strong>Recommended next step:</strong> {nextProbeAction(importProbe)}</p>
                   <p>Python 3.11: {importProbe.python_311 ? "Yes" : "Required"}</p>
                   <p><strong>TTS device:</strong> {importProbe.tts_device_mode === "auto" || importProbe.tts_device_mode === "cpu"
