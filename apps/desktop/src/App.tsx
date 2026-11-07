@@ -997,7 +997,7 @@ export default function App() {
                 )}
                 {(smokeWorking || smokeAudio) && (
                   <button className="quiet-button" onClick={() => void clearRealHindiSmokeTest()}>
-                    Hide and discard Hindi test
+                    {smokeWorking ? "Hide pending test (model continues running)" : "Delete local Hindi test WAV"}
                   </button>
                 )}
                 {smokeStatus && <p role="status">{smokeStatus}</p>}
