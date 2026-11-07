@@ -1,6 +1,9 @@
 # Changelog
 
-## v0.5.4 development (not yet released)
+## v0.5.4 published experimental developer pre-release (7 November 2026)
+
+- [GitHub v0.5.4 experimental pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4) was published by [manual workflow #42336118150](https://github.com/sanskarIN/KathaSvara/actions/runs/42336118150) from immutable exact commit `1fff96cf1c784bdb211ddfe60db92a4e2e924618`. All seven jobs passed, including the GitHub-downloaded Windows executable SHA-256 check. Attached `KathaSvara-v0.5.4-dev-win64.exe`, `README.txt` and `SHA256SUMS.txt`.
+- **Distribution boundary:** this is an unsigned, unbundled developer preview. It does not include Python 3.11, Chatterbox, PyTorch, model weights, a signed installer, or human-tested Hindi speech. [Manual acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3) remains open.
 
 - **Actionable audio diagnostics:** model-free TTS preflight now recommends one deterministic next repair action, prioritized across Python version, imports, device/model overrides, local voice reference, and optional Chatterbox API compatibility. The Settings panel shows this next step without exposing private filenames or raw import errors. Adds Python and React regression tests; no model weights are loaded and no real Hindi speech is claimed.
 
