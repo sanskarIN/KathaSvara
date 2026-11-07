@@ -51,6 +51,95 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("guided model-free speech readiness", () => {
+  const python = {
+    python_311: true, python_version: "3.11.11", platform: "Windows",
+    dependencies: { numpy: true, soundfile: true, torch: true, chatterbox: true },
+    dependencies_present: true, model_weights_verified: false,
+    audio_synthesis_verified: false, help: "No model loaded",
+  };
+  const wav = {
+    status: "passed", failed_stage: null, temporary_wav_roundtrip_ok: true,
+    model_loaded: false, hindi_listening_verified: false,
+    audio_playback_verified: false, help: "Model-free test",
+  };
+
+  it("runs Python, disposable WAV and import checks in order without synthesis", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "diagnose_engine") return python;
+      if (command === "probe_audio_io") return wav;
+      if (command === "probe_tts_runtime") return GOOD_IMPORTS;
+      throw new Error("Unexpected native call");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup checks passed")).toBeTruthy());
+    const commands = mocks.invoke.mock.calls.map(([name]) => name);
+    expect(commands).toEqual(["diagnose_engine", "probe_audio_io", "probe_tts_runtime"]);
+    expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime", { referenceWavPath: null });
+    expect(screen.getByText(/Real Hindi narration, model weights and speaker playback verified:/)).toBeTruthy();
+    expect(screen.getByText(/next step is explicit real Hindi generation and listening/)).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("stops before WAV access when the interpreter is not Python 3.11", async () => {
+    mocks.invoke.mockResolvedValue({ ...python, python_311: false, python_version: "3.12.3" });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup needs attention")).toBeTruthy());
+    expect(screen.getByText(/select Python 3.11/)).toBeTruthy();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("probe_audio_io");
+  });
+
+  it("stops before speech imports when disposable WAV I/O fails", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "diagnose_engine") return python;
+      if (command === "probe_audio_io") return {
+        ...wav, status: "failed", temporary_wav_roundtrip_ok: false, failed_stage: "write_pcm16",
+      };
+      throw new Error("Unexpected import or synthesis");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup needs attention")).toBeTruthy());
+    expect(screen.getByText(/Temporary WAV I\/O is blocked/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.map(([name]) => name)).toEqual(["diagnose_engine", "probe_audio_io"]);
+    expect(screen.getByText(/write_pcm16/)).toBeTruthy();
+  });
+
+  it("does not leak native error paths when a diagnostic crashes", async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-account\\voice.wav"));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup needs attention")).toBeTruthy());
+    expect(document.body.textContent).not.toContain("private-account");
+    expect(screen.getByText(/A local diagnostic could not run/)).toBeTruthy();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables duplicate one-click requests and retires a superseded voice selection", async () => {
+    let finish: (value: typeof python) => void = () => { throw new Error("not started"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "diagnose_engine") {
+        return new Promise<typeof python>(resolve => { finish = resolve; });
+      }
+      throw new Error("No later check should run");
+    });
+    mocks.open.mockResolvedValue("C:\\Users\\private-account\\voice.wav");
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    const checking = screen.getByRole("button", { name: /Step 1\/3: Checking Python/ });
+    expect(checking).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy());
+    await act(async () => { finish(python); });
+    expect(screen.queryByRole("status", { name: "Speech readiness summary" })).toBeNull();
+    expect(mocks.invoke.mock.calls.map(([name]) => name)).toEqual(["diagnose_engine"]);
+    expect(document.body.textContent).not.toContain("private-account");
+  });
+});
+
 describe("local session inference configuration", () => {
   const python = "C:\\Users\\private-account\\speech-env\\Scripts\\python.exe";
   const source = "C:\\Users\\private-account\\KathaSvara\\services\\inference";
