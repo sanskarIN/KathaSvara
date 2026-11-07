@@ -42,6 +42,43 @@ type OfflineWavProbe = {
 };
 type ReadinessStage = "idle" | "python" | "wav" | "imports";
 type ReadinessSummary = { readyForExplicitGeneration: boolean; guidance: string };
+type RealSmokeWavInspection = {
+  structure_valid: boolean;
+  codec: string;
+  channels: number;
+  sample_rate_hz: number;
+  frames: number;
+  duration_seconds: number;
+  model_loaded: boolean;
+  hindi_listening_verified: boolean;
+  human_review_required: boolean;
+  level_hints: {
+    near_silence_hint: boolean;
+    dc_only_hint: boolean;
+    possible_clipping_hint: boolean;
+    long_internal_pause_hint: boolean;
+    signal_review_required: boolean;
+  };
+};
+function isUsableRealSmokeWav(audio: AudioResult, report: RealSmokeWavInspection): boolean {
+  const hints = report?.level_hints;
+  return report?.structure_valid === true && report.codec === "pcm_s16le"
+    && report.channels === 1 && report.model_loaded === false
+    && report.hindi_listening_verified === false && report.human_review_required === true
+    && Number.isInteger(report.sample_rate_hz) && report.sample_rate_hz === audio.sample_rate
+    && Number.isInteger(report.frames) && report.frames > 0
+    && Number.isFinite(report.duration_seconds) && report.duration_seconds > 0
+    && report.duration_seconds <= 1200
+    && Math.abs(report.duration_seconds - report.frames / report.sample_rate_hz) <= 0.002
+    && Math.abs(report.duration_seconds - audio.duration_seconds) <= 0.02
+    && hints !== null && typeof hints === "object"
+    && typeof hints.near_silence_hint === "boolean"
+    && typeof hints.dc_only_hint === "boolean"
+    && typeof hints.possible_clipping_hint === "boolean"
+    && typeof hints.long_internal_pause_hint === "boolean"
+    && typeof hints.signal_review_required === "boolean"
+    && !hints.near_silence_hint && !hints.dc_only_hint;
+}
 
 type RuntimeImportProbe = {
   python_311: boolean;
@@ -144,6 +181,7 @@ export default function App() {
   const readinessRevision = useRef(0);
   const [smokeConsent, setSmokeConsent] = useState(false);
   const [smokeAudio, setSmokeAudio] = useState<AudioResult | null>(null);
+  const [smokeInspection, setSmokeInspection] = useState<RealSmokeWavInspection | null>(null);
   const [smokeWorking, setSmokeWorking] = useState(false);
   const [smokeStatus, setSmokeStatus] = useState<string | null>(null);
   const smokeRevision = useRef(0);
@@ -317,6 +355,7 @@ export default function App() {
       });
     }
     setSmokeAudio(null);
+    setSmokeInspection(null);
     // Keep the previous native model job marked busy until it actually
     // settles. Hiding a result never terminates the Python worker.
     setSmokeConsent(false);
@@ -343,7 +382,10 @@ export default function App() {
     if (!smokeConsent || smokeWorking || working || configuringRuntime || smokeAudio) return;
     const revision = ++smokeRevision.current;
     setSmokeWorking(true);
+    setSmokeInspection(null);
     setSmokeStatus("Loading the real local Hindi model. First use may download approved model weights. No microphone or speech upload is used.");
+    let candidateAudioId: string | null = null;
+    let accepted = false;
     try {
       const result = await invoke<AudioResult>("synthesize", {
         text: REAL_HINDI_SMOKE_SAMPLE,
@@ -351,30 +393,43 @@ export default function App() {
         cfgWeight: 0.5,
         referenceWavPath,
       });
-      if (revision !== smokeRevision.current) {
-        // A changed local voice reference or runtime owns the newer state.
-        if (typeof result?.audio_id === "string") {
-          void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
-        }
-        return;
-      }
-      if (!result || typeof result.audio_id !== "string" ||
+      if (typeof result?.audio_id === "string") candidateAudioId = result.audio_id;
+      if (revision !== smokeRevision.current) return;
+      if (!result || !candidateAudioId ||
           !Number.isFinite(result.duration_seconds) || result.duration_seconds <= 0 ||
-          !Number.isFinite(result.sample_rate) || result.sample_rate < 8000 ||
-          !Number.isFinite(result.chunks) || result.chunks < 1) {
-        if (typeof result?.audio_id === "string") {
-          void invoke("discard_audio", { audioId: result.audio_id }).catch(() => {});
-        }
+          !Number.isInteger(result.sample_rate) || result.sample_rate < 8000 || result.sample_rate > 192000 ||
+          !Number.isInteger(result.chunks) || result.chunks < 1) {
         setSmokeStatus("The local model returned inconsistent WAV metadata. Do not accept this as successful Hindi narration.");
         return;
       }
+      // The same read-only WAV acceptance inspector used by scene QA checks
+      // the actual PCM16 file, sample levels and measured duration. A response
+      // from synthesize alone is NOT proof that listenable audio was saved.
+      setSmokeStatus("Model WAV created. Inspecting PCM structure and signal levels before preview…");
+      const inspected = await invoke<RealSmokeWavInspection>("inspect_generated_audio", {
+        audioId: candidateAudioId,
+      });
+      if (revision !== smokeRevision.current) return;
+      if (!isUsableRealSmokeWav(result, inspected)) {
+        setSmokeStatus("The generated WAV failed structural, duration or signal checks. The unusable local preview will be discarded; no Hindi quality pass was recorded.");
+        return;
+      }
+      accepted = true;
       setSmokeAudio(result);
-      setSmokeStatus("A model-generated WAV was produced. Listen critically for understandable Hindi, clipping and silence; success is NOT certified automatically.");
+      setSmokeInspection(inspected);
+      setSmokeStatus(inspected.level_hints.signal_review_required
+        ? "A real model WAV passed structural inspection, but clipping or long-pause hints need careful listening. Hindi intelligibility is NOT automatically verified."
+        : "A real model WAV passed structural inspection. Listen critically for understandable Hindi, clipping and silence; quality is NOT automatically verified.");
     } catch {
       if (revision === smokeRevision.current) {
-        setSmokeStatus("Real Hindi synthesis could not complete. Check model-free readiness, approved model weights and hardware, or finish any other running story render before retrying.");
+        setSmokeStatus("Real Hindi generation or WAV inspection could not complete. Check model-free readiness, model weights and hardware. No listening pass was recorded.");
       }
     } finally {
+      // A late inspection failure or invalidated reference must not leave an
+      // unreviewed UUID WAV in app data. Never display native exception paths.
+      if (candidateAudioId && !accepted) {
+        await invoke("discard_audio", { audioId: candidateAudioId }).catch(() => {});
+      }
       // No second model job can start while the previous worker is alive,
       // even if a reference/runtime change retires its result.
       setSmokeWorking(false);
@@ -405,6 +460,7 @@ export default function App() {
     }
     const previous = smokeAudio;
     setSmokeAudio(null);
+    setSmokeInspection(null);
     setSmokeConsent(false);
     if (!previous) {
       setSmokeStatus("The test result was retired. A currently running model job may still finish; its outdated WAV will be discarded.");
@@ -985,8 +1041,15 @@ export default function App() {
                 </button>
                 {smokeAudio && (
                   <div role="status" aria-label="Real Hindi audio test result">
-                    <p><strong>Model-generated WAV:</strong> {smokeAudio.duration_seconds.toFixed(1)} seconds,
-                      {smokeAudio.sample_rate} Hz. This is not an automatic language or quality pass.</p>
+                    <p><strong>Inspected real WAV:</strong> {smokeInspection?.duration_seconds.toFixed(1) ?? "—"} seconds,
+                      {smokeInspection?.sample_rate_hz ?? "—"} Hz, mono PCM16. This is not an automatic language or quality pass.</p>
+                    {smokeInspection?.level_hints.signal_review_required && (
+                      <p role="status">Signal review needed:
+                        {smokeInspection.level_hints.possible_clipping_hint ? " possible clipping;" : ""}
+                        {smokeInspection.level_hints.long_internal_pause_hint ? " long internal quiet span;" : ""}
+                        listen carefully before any acceptance decision.
+                      </p>
+                    )}
                     {smokeAudio.preview_available === false
                       ? <p>This test WAV exceeds inline playback limits. Export it and listen in a local audio player.</p>
                       : <audio ref={smokeAudioRef} controls src={smokeAudio.data_url} aria-label="Real Hindi smoke-test audio preview" />}
