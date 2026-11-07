@@ -56,7 +56,7 @@ def test_pre_release_workflow_has_exact_tag_guards_and_three_assets() -> None:
 
 def test_prerelease_disclosures_remain_explicit() -> None:
     instructions = (
-        ROOT / "docs/installation/portable-windows-v0.5.4.md"
+        ROOT / "docs/installation/portable-windows-v0.5.5.md"
     ).read_text(encoding="utf-8")
     notes = (ROOT / f"docs/releases/v{VERSION}-notes.md").read_text(encoding="utf-8")
     for content in (instructions, notes):
