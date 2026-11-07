@@ -40,6 +40,9 @@ type OfflineWavProbe = {
   audio_playback_verified: false;
   help: string;
 };
+type ReadinessStage = "idle" | "python" | "wav" | "imports";
+type ReadinessSummary = { readyForExplicitGeneration: boolean; guidance: string };
+
 type RuntimeImportProbe = {
   python_311: boolean;
   checks: Record<string, "ok" | "entrypoint_missing" | "import_failed">;
@@ -102,6 +105,9 @@ export default function App() {
   const [inspection, setInspection] = useState<TextInspection | null>(null);
   const [diagnostics, setDiagnostics] = useState<EngineDiagnostics | null>(null);
   const [checkingSetup, setCheckingSetup] = useState(false);
+  const [readinessStage, setReadinessStage] = useState<ReadinessStage>("idle");
+  const [readinessSummary, setReadinessSummary] = useState<ReadinessSummary | null>(null);
+  const readinessRevision = useRef(0);
   const [configuringRuntime, setConfiguringRuntime] = useState(false);
   const [sessionRuntimeConfigured, setSessionRuntimeConfigured] = useState(false);
   const [probingImports, setProbingImports] = useState(false);
@@ -259,13 +265,21 @@ export default function App() {
     }
   }
 
+  function invalidateReadiness() {
+    readinessRevision.current += 1;
+    setReadinessStage("idle");
+    setReadinessSummary(null);
+  }
+
   function invalidateReferenceProbe() {
+    invalidateReadiness();
     importProbeRevision.current += 1;
     setProbingImports(false);
     setImportProbe(null);
   }
 
   async function chooseLocalRuntime() {
+    invalidateReadiness();
     const revision = ++runtimePickerRevision.current;
     setConfiguringRuntime(true);
     try {
@@ -300,6 +314,7 @@ export default function App() {
   }
 
   async function clearLocalRuntime() {
+    invalidateReadiness();
     runtimePickerRevision.current += 1;
     setConfiguringRuntime(true);
     try {
@@ -414,6 +429,68 @@ export default function App() {
       setMessage("WAV exported successfully.");
     } catch (error) {
       setMessage("Export failed: " + errorMessage(error) + " Choose a new filename if the file already exists.");
+    }
+  }
+
+  async function checkSpeechReadiness() {
+    // All three checks are model-free: no synthesis, checkpoint download,
+    // package installation, file export, or microphone/speaker access.
+    const revision = ++readinessRevision.current;
+    setReadinessSummary(null);
+    setDiagnostics(null);
+    setAudioIoReport(null);
+    setImportProbe(null);
+    setReadinessStage("python");
+    try {
+      const environment = await invoke<EngineDiagnostics>("diagnose_engine");
+      if (revision !== readinessRevision.current) return;
+      setDiagnostics(environment);
+      if (environment.python_311 !== true) {
+        setReadinessSummary({
+          readyForExplicitGeneration: false,
+          guidance: "Use the local runtime chooser to select Python 3.11, then rerun this check.",
+        });
+        return;
+      }
+
+      setReadinessStage("wav");
+      const wav = await invoke<OfflineWavProbe>("probe_audio_io");
+      if (revision !== readinessRevision.current) return;
+      setAudioIoReport(wav);
+      if (!wav.temporary_wav_roundtrip_ok) {
+        setReadinessSummary({
+          readyForExplicitGeneration: false,
+          guidance: "Temporary WAV I/O is blocked. Review its fixed failure stage below before attempting speech.",
+        });
+        return;
+      }
+
+      setReadinessStage("imports");
+      const imports = await invoke<RuntimeImportProbe>("probe_tts_runtime", {
+        referenceWavPath,
+      });
+      if (revision !== readinessRevision.current) return;
+      setImportProbe(imports);
+      setReadinessSummary(imports.preflight_ok
+        ? {
+          readyForExplicitGeneration: true,
+          guidance: "Environment, temporary WAV I/O and speech imports passed. The next step is explicit real Hindi generation and listening. Model weights and sound quality have NOT been verified.",
+        }
+        : {
+          readyForExplicitGeneration: false,
+          guidance: "Speech setup needs attention. Review the first suggested repair action in the TTS preflight report below.",
+        });
+    } catch {
+      // Never display native exception text: failed Python launches and import
+      // errors may expose private user or checkpoint file paths.
+      if (revision === readinessRevision.current) {
+        setReadinessSummary({
+          readyForExplicitGeneration: false,
+          guidance: "A local diagnostic could not run. Verify the selected Python 3.11 executable and inference source folder, then retry.",
+        });
+      }
+    } finally {
+      if (revision === readinessRevision.current) setReadinessStage("idle");
     }
   }
 
@@ -725,6 +802,26 @@ export default function App() {
                 <p className="helper">This selection affects new Python jobs only and is not saved
                   after the app closes. Use the no-model checks below to confirm installation.
                   A valid interpreter location is not proof that Hindi speech works.</p>
+              </section>
+              <section aria-label="Guided speech readiness" className="diagnostic-report">
+                <h3>Guided speech readiness check</h3>
+                <p className="helper">One click checks Python, a disposable WAV read/write, and speech-library imports in order.
+                  It stops at the first blocker. It does not load checkpoints, install or download software,
+                  generate speech, test speakers, or touch your recordings.</p>
+                <button className="secondary-button" disabled={readinessStage !== "idle" || configuringRuntime}
+                  onClick={() => void checkSpeechReadiness()}>
+                  {readinessStage === "python" ? "Step 1/3: Checking Python…" :
+                    readinessStage === "wav" ? "Step 2/3: Checking temporary WAV…" :
+                      readinessStage === "imports" ? "Step 3/3: Checking speech imports…" :
+                        "Check speech readiness (no model load)"}
+                </button>
+                {readinessSummary && (
+                  <div role="status" aria-label="Speech readiness summary">
+                    <h3>{readinessSummary.readyForExplicitGeneration ? "Setup checks passed" : "Setup needs attention"}</h3>
+                    <p>{readinessSummary.guidance}</p>
+                    <p><strong>Real Hindi narration, model weights and speaker playback verified:</strong> No</p>
+                  </div>
+                )}
               </section>
               <button className="secondary-button" onClick={() => void checkRuntime()}>Check Python bridge</button>
               <button className="secondary-button" disabled={checkingSetup} onClick={() => void diagnoseRuntime()}>
