@@ -969,7 +969,16 @@ export default function App() {
                       {audio.preview_available === false
                         ? <p role="status">The generated WAV is saved locally but is too large for an inline preview.
                           Select <strong>Export WAV</strong> and listen in your audio player. The recording has not been discarded.</p>
-                        : <audio ref={audioRef} controls src={audio.data_url} aria-label="Generated Hindi WAV preview" />}
+                        : <audio ref={audioRef} controls src={audio.data_url}
+                            aria-label="Generated Hindi WAV preview"
+                            onError={event => {
+                              // A valid generated WAV may still fail to play
+                              // in a particular Windows WebView or audio device.
+                              // Avoid reporting a successful listening outcome.
+                              if (audioRef.current === event.currentTarget) {
+                                setMessage("The built-in audio player could not play the generated WAV. Use Export WAV and try a trusted local audio player; Hindi listening remains unverified.");
+                              }
+                            }} />}
                       <div className="audio-meta">{audio.duration_seconds.toFixed(1)} sec · {audio.sample_rate} Hz · {audio.chunks} chunk(s)</div>
                       <div className="preview-actions">
                         {audio.preview_available !== false && <button className="quiet-button"
