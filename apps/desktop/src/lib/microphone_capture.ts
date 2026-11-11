@@ -2,7 +2,6 @@
 // User-initiated, memory-only microphone capture. No network or STT model access.
 export const MICROPHONE_MAX_SECONDS = 30;
 export const MICROPHONE_RATE = 16_000;
-const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
 
 export function encodeMonoPcm16(
   channels: readonly Float32Array[], sourceRate: number, targetRate = MICROPHONE_RATE,
@@ -63,101 +62,118 @@ export function wavToBase64(wav: Uint8Array): string {
 
 export type MicrophoneCapture = { stop: () => void; discard: () => void };
 
+/**
+ * Record raw Web Audio samples rather than MediaRecorder's compressed
+ * WebM/Opus/MP4 blobs. WebView decoding support for MediaRecorder output is
+ * inconsistent; a bounded PCM pipeline avoids a decodeAudioData round-trip.
+ *
+ * ScriptProcessorNode is a compatibility path for WebView2. A future
+ * AudioWorklet may replace it after real-device acceptance. Never connect
+ * actual microphone samples to speakers: the processor output is zeroed.
+ */
 export async function beginMicrophoneCapture(
   completed: (wavBase64: string) => void,
   failed: (message: string) => void,
 ): Promise<MicrophoneCapture> {
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+  if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
     throw new Error("Microphone recording is unavailable. Check Windows and WebView2 permissions.");
   }
-  // The caller invokes this only in a direct user action after explicit consent.
+  // This is called only after explicit consent and a Start button click.
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     video: false,
   });
   const closeTracks = () => stream.getTracks().forEach(track => track.stop());
-  let recorder: MediaRecorder;
-  try {
-    recorder = new MediaRecorder(stream);
-  } catch {
-    closeTracks();
-    throw new Error("This WebView cannot record microphone audio.");
-  }
-  let canceled = false;
-  let done = false;
-  let total = 0;
-  const chunks: Blob[] = [];
-  let limitTimer: ReturnType<typeof setTimeout> | undefined;
+  let context: AudioContext | null = null;
+  let source: MediaStreamAudioSourceNode | null = null;
+  let processor: ScriptProcessorNode | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancelled = false;
+  let stopped = false;
+  let received = 0;
+  let samples: Float32Array | null = null;
+
   const release = () => {
-    if (limitTimer) clearTimeout(limitTimer);
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    if (processor) {
+      processor.onaudioprocess = null;
+      processor.disconnect();
+    }
+    source?.disconnect();
     closeTracks();
+    if (context) void context.close().catch(() => {});
   };
+
   const handle: MicrophoneCapture = {
     stop: () => {
-      if (!done && recorder.state !== "inactive") {
-        done = true;
-        if (limitTimer) clearTimeout(limitTimer);
-        recorder.stop();
-        closeTracks();
+      if (stopped) return;
+      stopped = true;
+      release();
+      try {
+        if (!samples || !context || received === 0) {
+          throw new Error("Empty microphone recording.");
+        }
+        const wav = encodeMonoPcm16([samples.subarray(0, received)], context.sampleRate);
+        const encoded = wavToBase64(wav);
+        // The UI marks stop as "processing" immediately after this call.
+        // Deliver results in the next microtask so "ready" wins, and allow
+        // a synchronous discard/navigation to cancel even a queued result.
+        queueMicrotask(() => { if (!cancelled) completed(encoded); });
+      } catch {
+        queueMicrotask(() => {
+          if (!cancelled) failed("No usable microphone samples were captured. Check Windows microphone access.");
+        });
+      } finally {
+        samples?.fill(0);
+        samples = null;
       }
     },
     discard: () => {
-      canceled = true;
-      done = true;
-      if (recorder.state !== "inactive") recorder.stop();
-      release();
-      chunks.length = 0;
+      cancelled = true;
+      if (!stopped) {
+        stopped = true;
+        release();
+      }
+      samples?.fill(0);
+      samples = null;
     },
   };
-  recorder.ondataavailable = (event) => {
-    if (canceled || !event.data.size) return;
-    total += event.data.size;
-    if (total > MAX_COMPRESSED_BYTES) {
-      canceled = true;
-      handle.discard();
-      failed("Microphone recording exceeded its local size limit.");
-    } else {
-      chunks.push(event.data);
-    }
-  };
-  recorder.addEventListener("error", () => {
-    if (canceled) return;
-    handle.discard();
-    failed("Microphone recording failed. Verify Windows microphone permissions.");
-  });
-  recorder.onstop = async () => {
-    release();
-    if (canceled) return;
-    try {
-      if (!chunks.length || !total || total > MAX_COMPRESSED_BYTES) {
-        throw new Error("No microphone audio was captured.");
-      }
-      if (typeof AudioContext === "undefined") {
-        throw new Error("Audio decoding is not supported by this WebView.");
-      }
-      const context = new AudioContext();
-      let wav: Uint8Array;
-      try {
-        const data = await new Blob(chunks).arrayBuffer();
-        const audio = await context.decodeAudioData(data);
-        const channels = Array.from({ length: audio.numberOfChannels },
-          (_, n) => audio.getChannelData(n));
-        wav = encodeMonoPcm16(channels, audio.sampleRate);
-      } finally {
-        await context.close();
-        chunks.length = 0;
-      }
-      if (!canceled) completed(wavToBase64(wav));
-    } catch {
-      if (!canceled) failed("Could not decode this short recording. Try again or select a PCM16 WAV.");
-    }
-  };
+
   try {
-    recorder.start(250);
-    limitTimer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
+    context = new AudioContext();
+    const rate = context.sampleRate;
+    if (!Number.isFinite(rate) || rate < 8_000 || rate > 192_000 ||
+        typeof context.createScriptProcessor !== "function") {
+      throw new Error("Unsupported microphone audio graph.");
+    }
+    const maxFrames = Math.floor(rate * MICROPHONE_MAX_SECONDS);
+    samples = new Float32Array(maxFrames);
+    source = context.createMediaStreamSource(stream);
+    processor = context.createScriptProcessor(4096, 1, 1);
+    processor.onaudioprocess = (event) => {
+      if (stopped || !samples) return;
+      try {
+        // ScriptProcessor must have an output connection to receive events,
+        // but no recorded sound is ever fed into the speakers.
+        event.outputBuffer.getChannelData(0).fill(0);
+        const input = event.inputBuffer.getChannelData(0);
+        const take = Math.min(input.length, samples.length - received);
+        if (take > 0) samples.set(input.subarray(0, take), received);
+        received += take;
+        if (received >= maxFrames) handle.stop();
+      } catch {
+        handle.discard();
+        failed("Microphone audio capture failed. Check Windows input permissions.");
+      }
+    };
+    source.connect(processor);
+    processor.connect(context.destination);
+    await context.resume();
+    if (!stopped) timer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
+    return handle;
   } catch {
     handle.discard();
-    throw new Error("Microphone capture could not start.");
+    throw new Error("Microphone audio capture could not start. Check Windows and WebView2.");
   }
-  return handle;
 }
