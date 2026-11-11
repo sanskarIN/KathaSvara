@@ -2604,6 +2604,51 @@ mod tests {
     }
 
     #[test]
+    fn generated_wav_export_uses_canonical_uuid_and_preserves_existing_files() {
+        let root = std::env::temp_dir().join(format!(
+            "kathasvara-export-job-{}", Uuid::new_v4()
+        ));
+        fs::create_dir_all(root.join("audio")).unwrap();
+        let id = Uuid::new_v4();
+        let source = root.join("audio").join(format!("{id}.wav"));
+        let destination = root.join("review.wav");
+
+        let samples = vec![0_u8; 480];
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36_u32 + samples.len() as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&24_000_u32.to_le_bytes());
+        wav.extend_from_slice(&48_000_u32.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+        wav.extend_from_slice(&samples);
+        fs::write(&source, &wav).unwrap();
+
+        // Reject path-like or unknown identifiers before destination creation.
+        assert!(export_generated_wav(&root, "../private", &destination).is_err());
+        assert!(!destination.exists());
+        assert!(export_generated_wav(&root, &Uuid::new_v4().to_string(), &destination).is_err());
+        assert!(!destination.exists());
+
+        // The same app-owned WAV is found even with an uppercase UUID input;
+        // the worker resolves it to its canonical filename.
+        export_generated_wav(&root, &id.to_string().to_uppercase(), &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), wav);
+        assert_eq!(fs::read(&source).unwrap(), wav);
+
+        // A repeated save must fail without touching existing user output.
+        assert!(export_generated_wav(&root, &id.to_string(), &destination).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), wav);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn tiny_generated_pcm_preview_contains_verified_render_bytes() {
         let path = std::env::temp_dir().join(format!("kathasvara-preview-{}.wav", Uuid::new_v4()));
         let samples = vec![0_u8; 480];
