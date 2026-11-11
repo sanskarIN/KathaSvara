@@ -9,16 +9,22 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   save: vi.fn(),
   open: vi.fn(),
+  microphone: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: mocks.save, open: mocks.open }));
 vi.mock("./CastStudio", () => ({ default: () => null }));
+vi.mock("./lib/microphone_capture", () => ({
+  MICROPHONE_MAX_SECONDS: 30,
+  beginMicrophoneCapture: mocks.microphone,
+}));
 
 beforeEach(() => {
   mocks.invoke.mockReset();
   mocks.save.mockReset();
   mocks.open.mockReset();
+  mocks.microphone.mockReset();
   window.localStorage.clear();
 });
 afterEach(() => cleanup());
@@ -50,6 +56,69 @@ function openSettings() {
   render(<App />);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
+
+describe("consented short microphone to Hindi transcript", () => {
+  const modelTranscript = {
+    text: "नमस्ते भारत", duration_seconds: 2,
+    language: "hi", engine: "faster-whisper-local",
+    speech_detected: true, human_review_required: true, network_used: false,
+  };
+
+  it("does not request a microphone or run STT without consent", async () => {
+    openSettings();
+    const start = screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    fireEvent.click(start);
+    expect(mocks.microphone).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+  });
+
+  it("keeps a stopped mic recording in memory until the user separately transcribes", async () => {
+    const discarded = vi.fn();
+    mocks.microphone.mockImplementation(async (completed: (wav: string) => void) => ({
+      stop: () => queueMicrotask(() => completed("UklGRi4AAABXQVZF")),
+      discard: discarded,
+    }));
+    mocks.open.mockResolvedValueOnce("C:\\private\\local-stt-model");
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "transcribe_microphone_wav") return modelTranscript;
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText("Microphone is recording now.")).toBeTruthy());
+    expect(mocks.microphone).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe recorded Hindi offline" }));
+    await waitFor(() => expect((screen.getByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement).value)
+      .toBe("नमस्ते भारत"));
+    expect(mocks.invoke).toHaveBeenCalledWith("transcribe_microphone_wav", {
+      wavBase64: "UklGRi4AAABXQVZF",
+      modelPath: "C:\\private\\local-stt-model",
+    });
+    expect(document.body.textContent).not.toContain("C:\\private");
+    expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
+  });
+
+  it("discards a running capture immediately when consent is withdrawn", async () => {
+    const discard = vi.fn();
+    mocks.microphone.mockResolvedValue({ stop: vi.fn(), discard });
+    openSettings();
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ });
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText("Microphone is recording now.")).toBeTruthy());
+    fireEvent.click(consent);
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+    expect((screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
 
 describe("offline speech-to-text setup diagnostics", () => {
   const missingModel = {

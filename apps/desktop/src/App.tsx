@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
+import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
@@ -260,6 +261,11 @@ export default function App() {
   const [sttSetup, setSttSetup] = useState<SttSetupReport | null>(null);
   const [sttResult, setSttResult] = useState<SttResult | null>(null);
   const [sttStatus, setSttStatus] = useState<string | null>(null);
+  const [micStatus, setMicStatus] = useState<"idle" | "requesting" | "recording" | "processing" | "ready">("idle");
+  const [micWav, setMicWav] = useState<string | null>(null);
+  const [micGuidance, setMicGuidance] = useState<string | null>(null);
+  const micSession = useRef<MicrophoneCapture | null>(null);
+  const micRevision = useRef(0);
   const sttRevision = useRef(0);
   // Native dialogs and no-model Python probes can resolve out of order.
   const referencePickerRevision = useRef(0);
@@ -288,6 +294,40 @@ export default function App() {
     localStorage.setItem("kathasvara-exaggeration", String(exaggeration));
     localStorage.setItem("kathasvara-guidance", String(cfgWeight));
   }, [exaggeration, cfgWeight]);
+
+  useEffect(() => {
+    // Never keep capturing after leaving the Settings page or closing the app.
+    if (page !== "settings") {
+      micRevision.current += 1;
+      micSession.current?.discard();
+      micSession.current = null;
+      setMicWav(null);
+      setMicStatus("idle");
+    }
+  }, [page]);
+
+  useEffect(() => {
+    const revoke = () => {
+      micRevision.current += 1;
+      micSession.current?.discard();
+      micSession.current = null;
+    };
+    const visibility = () => {
+      if (document.hidden) {
+        revoke();
+        setMicWav(null);
+        setMicStatus("idle");
+        setMicGuidance("Microphone capture discarded because the window is hidden.");
+      }
+    };
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("beforeunload", revoke);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("beforeunload", revoke);
+      revoke();
+    };
+  }, []);
 
   function invalidateGeneration() {
     generationRevision.current += 1;
@@ -606,7 +646,93 @@ export default function App() {
     }
   }
 
+  function discardMicrophone() {
+    micRevision.current += 1;
+    micSession.current?.discard();
+    micSession.current = null;
+    setMicWav(null);
+    setMicStatus("idle");
+    setMicGuidance(null);
+  }
+
+  async function startMicrophone() {
+    if (!sttConsent || sttWorking || sttChecking || micStatus !== "idle") return;
+    const revision = ++micRevision.current;
+    setMicWav(null);
+    setMicGuidance("Requesting microphone access. Windows may ask for permission.");
+    setMicStatus("requesting");
+    try {
+      const recording = await beginMicrophoneCapture(
+        (wav) => {
+          if (revision !== micRevision.current) return;
+          micSession.current = null;
+          setMicWav(wav);
+          setMicStatus("ready");
+          setMicGuidance("Microphone capture stopped. Review consent and transcribe only when ready.");
+        },
+        () => {
+          if (revision !== micRevision.current) return;
+          micSession.current = null;
+          setMicWav(null);
+          setMicStatus("idle");
+          setMicGuidance("Microphone recording failed. Check OS permissions or use an existing WAV.");
+        },
+      );
+      if (revision !== micRevision.current) {
+        recording.discard();
+        return;
+      }
+      micSession.current = recording;
+      setMicStatus("recording");
+      setMicGuidance("Microphone recording is active. Stop when finished (30-second maximum).");
+    } catch {
+      if (revision === micRevision.current) {
+        setMicStatus("idle");
+        setMicGuidance("Microphone unavailable or permission denied. Check Windows microphone access and WebView2, or select a local WAV.");
+      }
+    }
+  }
+
+  function stopMicrophone() {
+    if (micStatus !== "recording") return;
+    micSession.current?.stop();
+    micSession.current = null;
+    setMicStatus("processing");
+    setMicGuidance("Converting the recording to short mono PCM16 WAV in memory.");
+  }
+
+  async function transcribeMicrophone() {
+    if (!sttConsent || !micWav || !sttModelPath || sttWorking || sttChecking) return;
+    const revision = ++sttRevision.current;
+    setSttWorking(true);
+    setSttResult(null);
+    setSttStatus("Transcribing this locally recorded WAV only after your request.");
+    try {
+      const result = await invoke<SttResult>("transcribe_microphone_wav", {
+        wavBase64: micWav, modelPath: sttModelPath,
+      });
+      if (revision !== sttRevision.current) return;
+      if (!isValidSttResult(result)) {
+        setSttStatus("Recorded-audio transcription returned an invalid result.");
+        return;
+      }
+      setSttResult(result);
+      setSttStatus(result.speech_detected ?
+        "Hindi recognition completed. Review the words against your recording." :
+        "No recognizable Hindi speech was returned. Try a clearer recording.");
+    } catch {
+      if (revision === sttRevision.current) {
+        setSttStatus("Local microphone transcription failed. Check the STT setup, model files and recording.");
+      }
+    } finally {
+      if (revision === sttRevision.current) setSttWorking(false);
+      // Do not retain microphone WAV in application state after transcription.
+      if (revision === sttRevision.current) discardMicrophone();
+    }
+  }
+
   function resetSttResult() {
+    discardMicrophone();
     sttRevision.current += 1;
     setSttResult(null);
     setSttStatus(null);
@@ -1208,7 +1334,7 @@ export default function App() {
                   local multilingual CTranslate2 faster-whisper model folder containing
                   <code> config.json</code>, <code>model.bin</code> and <code>tokenizer.json</code>.
                   Install the optional <code>.[stt]</code> Python extra separately in your selected Python 3.11 environment.
-                  No microphone capture, cloud upload, automatic model download or fabricated transcript.
+                  Microphone capture is available only after explicit consent and a browser/Windows permission prompt, with a 30-second automatic stop. Neither WAV capture nor model inference uploads audio or downloads weights; generated transcripts may contain errors.
                   Model output is not guaranteed accurate; review it before using it.</p>
                 <div className="preview-actions">
                   <button className="secondary-button" disabled={sttWorking || sttChecking}
@@ -1223,6 +1349,31 @@ export default function App() {
                       setSttConsent(false);
                     }}>Clear STT selection</button>
                 </div>
+                <section aria-label="Record short Hindi microphone sample" className="diagnostic-report">
+                  <h4>Record Hindi from microphone (experimental)</h4>
+                  <p className="helper">Only starts when you click Start with permission checked. Stops automatically after {MICROPHONE_MAX_SECONDS} seconds.
+                    Audio is kept in memory until you explicitly transcribe or discard; it is never added to a story automatically.
+                    Windows microphone permission may be requested. This feature has not yet passed real-device testing.</p>
+                  <div className="preview-actions">
+                    <button className="secondary-button"
+                      disabled={!sttConsent || sttWorking || sttChecking || micStatus !== "idle"}
+                      onClick={() => void startMicrophone()}>
+                      Start microphone recording
+                    </button>
+                    <button className="secondary-button" disabled={micStatus !== "recording"}
+                      onClick={stopMicrophone}>Stop recording</button>
+                    <button className="quiet-button" disabled={micStatus === "idle" && !micWav}
+                      onClick={discardMicrophone}>Discard microphone audio</button>
+                  </div>
+                  <p role="status">{micGuidance || "Microphone is off. No audio captured."}</p>
+                  {micStatus === "recording" && <p role="status"><strong>Microphone is recording now.</strong></p>}
+                  {micStatus === "ready" && micWav && (
+                    <button className="secondary-button" disabled={!sttConsent || !sttModelPath || sttWorking || sttChecking}
+                      onClick={() => void transcribeMicrophone()}>
+                      Transcribe recorded Hindi offline
+                    </button>
+                  )}
+                </section>
                 <p className="helper">WAV: {sttWavPath ? "Selected privately" : "Not selected"}.
                   Offline model: {sttModelPath ? "Selected privately" : "Not selected"}.</p>
                 <button className="secondary-button" disabled={sttChecking || sttWorking}

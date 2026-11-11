@@ -49,13 +49,58 @@ The actual WAV and recognition model still require a separate consented run.
    Review every word against your recording. The editor can accept a reviewed
    transcript of at most 3000 characters after overwrite confirmation.
 
-The first version supports an **existing file**, not live microphone
-recording. It requires **mono, 16-bit PCM WAV**, sample rate 8, 16, 24 or
+The original v0.5.6 STT source supported an **existing file** only.
+The new development branch adds a short microphone capture path with
+explicit permission and a separate transcription action. It requires **mono, 16-bit PCM WAV**, sample rate 8, 16, 24 or
 48 kHz, duration **1 frame to 60 seconds**, and size **44 bytes to 6 MiB**.
 Larger/multichannel/compressed recordings must be converted externally with
 trusted local tooling. Paths remain session-local and are never displayed in
 UI status. Input audio is never uploaded by KathaSvara, and no transcript is
 silently written to the story editor or persistent project.
+
+## Experimental microphone capture (new source branch only)
+
+A separate, opt-in **microphone → short Hindi transcript** path is now
+implemented in the development source. It is **NOT present in the already
+published v0.5.6 Windows executable**, and native WebView2 / Windows
+microphone permissions and real Hindi recognition have not been verified on
+a user's machine.
+
+1. In Settings → Speech to text, choose an existing local offline
+   faster-whisper model and run **Check offline STT setup (no model load)**.
+2. Read the separate permission checkbox. Clicking **Start microphone
+   recording** uses the webview's `getUserMedia({audio:...})` and asks the
+   operating system/webview for microphone access when required. It does
+   **not** bypass a denied permission or access the camera.
+3. A visible recording indicator stays on screen. Click **Stop recording**
+   or let the 30-second cap stop capture. Browser media is decoded and
+   converted to 16 kHz mono PCM16 WAV. Recording is held in memory and
+   **does not automatically launch the STT model**.
+4. With consent still checked, click **Transcribe recorded Hindi offline**
+   to send the bounded WAV to local Tauri IPC. The native bridge creates a
+   random private temporary WAV, invokes the previously configured local
+   offline recognizer, then deletes the temporary WAV on completion or
+   failure. It does not save audio into a project, upload data, or
+   download recognition model weights.
+5. **Discard microphone audio** removes the in-memory recording. Navigating
+   away from Settings, hiding or closing the window and withdrawing
+   consent also stop active microphone tracks; invalid/oversized recordings
+   are rejected with fixed user-facing guidance.
+
+The Tauri bridge validates canonical PCM16 WAV headers, mono 16 kHz sample
+rate, encoded size and short duration independently of the webview.
+WebView2's microphone permission prompt and the Windows Settings →
+Privacy & security → Microphone options must be checked manually when the
+browser engine denies access. Windows audio input device availability is a
+separate dependency. No microphone access is added to the Tauri
+`dialog:allow-open` capability: it is a separate webview/OS permission.
+
+**Human acceptance still required:** Windows microphone permission prompt,
+start/stop indicator, track release after Cancel/Discard/navigation,
+automatic timeout, audibility, noise and silence handling, actual Hindi
+accuracy, CPU/memory, temporary-file cleanup and transcription into the
+editor. A JS test or Windows compilation is not evidence these work on
+a real user's microphone.
 
 ## Limits and acceptance
 
@@ -65,9 +110,9 @@ silently written to the story editor or persistent project.
   evidence; transcripts require human review before story use.
 - The local model and STT Python dependencies are **not bundled**, just as
   TTS dependencies and weights are not bundled in the developer EXE.
-- Microphone capture, continuous dictation, translation, SRT generation from
-  recognized words and long recordings remain **future separate features**.
-  Do not advertise them as implemented.
+- Continuous dictation, translation, SRT generation from recognized
+  words, advanced recording management and long recordings remain
+  **future separate features**. Do not advertise them as implemented.
 - The release process for the next version remains manually controlled; this
   source PR does not publish an executable or create a tag.
 
