@@ -1696,11 +1696,29 @@ fn copy_validated_wav(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Only accept generated UUID-owned audio under the app's private audio
+/// directory. Canonicalizing the UUID avoids alternate textual encodings.
+fn export_generated_wav(root: &Path, audio_id: &str, destination: &Path) -> Result<(), String> {
+    let id = Uuid::parse_str(audio_id).map_err(|_| "Invalid audio ID.".to_string())?;
+    let source = root.join("audio").join(format!("{id}.wav"));
+    copy_validated_wav(&source, destination)
+}
+
 #[tauri::command]
-fn export_wav(app: tauri::AppHandle, audio_id: String, destination: String) -> Result<(), String> {
-    Uuid::parse_str(&audio_id).map_err(|_| "Invalid audio ID.")?;
-    let source = app_dir(&app)?.join("audio").join(format!("{audio_id}.wav"));
-    copy_validated_wav(&source, Path::new(&destination))
+async fn export_wav(
+    app: tauri::AppHandle,
+    audio_id: String,
+    destination: String,
+) -> Result<(), String> {
+    let root = app_dir(&app)?;
+    // File copies can exceed 25 MiB (the inline preview ceiling). Keep
+    // potentially long, bounded disk I/O away from the WebView/UI thread.
+    // The worker retains the existing strict WAV check and create_new rule.
+    tauri::async_runtime::spawn_blocking(move || {
+        export_generated_wav(&root, &audio_id, Path::new(&destination))
+    })
+    .await
+    .map_err(|_| "WAV export worker stopped unexpectedly.".to_string())?
 }
 
 fn parse_srt_milliseconds(value: &str) -> Result<u64, String> {
