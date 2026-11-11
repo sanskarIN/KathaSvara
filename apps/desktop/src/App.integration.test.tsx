@@ -173,7 +173,7 @@ describe("local session inference configuration", () => {
     mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-account\\missing.exe"));
     openSettings();
     fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
-    await waitFor(() => expect(screen.getByText(/Could not configure the local Python runtime/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not configure the local speech runtime/)).toBeTruthy());
     expect(document.body.textContent).not.toContain("private-account");
     expect(screen.getByText(/Launcher-provided Python and source discovery/)).toBeTruthy();
   });
