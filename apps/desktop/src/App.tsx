@@ -439,22 +439,30 @@ export default function App() {
 
   async function exportSmokeWav() {
     if (!smokeAudio) return;
+    const revision = smokeRevision.current;
+    const audioId = smokeAudio.audio_id;
     try {
       const destination = await save({
         title: "Export real Hindi model smoke-test recording",
         defaultPath: "kathasvara-hindi-smoke-test.wav",
         filters: [{ name: "Uncompressed Wave audio", extensions: ["wav"] }],
       });
-      if (!destination) return;
-      await invoke("export_wav", { audioId: smokeAudio.audio_id, destination });
+      // An OS save picker can stay open while the user deletes the test WAV,
+      // switches the reference/runtime, or starts another test. Never export
+      // an outdated UUID or write a stale success message in those cases.
+      if (revision !== smokeRevision.current || !destination) return;
+      await invoke("export_wav", { audioId, destination });
+      if (revision !== smokeRevision.current) return;
       setSmokeStatus("Test WAV exported. Manually listen and verify Hindi pronunciation and quality before marking any acceptance checklist complete.");
     } catch {
-      setSmokeStatus("Test WAV export failed. Select a new destination and retry; the local test result remains available.");
+      if (revision === smokeRevision.current) {
+        setSmokeStatus("Test WAV export failed. Select a new destination and retry; the local test result remains available.");
+      }
     }
   }
 
   async function clearRealHindiSmokeTest() {
-    smokeRevision.current += 1;
+    const revision = ++smokeRevision.current;
     if (smokeAudioRef.current) {
       smokeAudioRef.current.pause();
       smokeAudioRef.current.currentTime = 0;
@@ -469,9 +477,13 @@ export default function App() {
     }
     try {
       await invoke("discard_audio", { audioId: previous.audio_id });
-      setSmokeStatus("The local Hindi smoke-test WAV was deleted.");
+      if (revision === smokeRevision.current) {
+        setSmokeStatus("The local Hindi smoke-test WAV was deleted.");
+      }
     } catch {
-      setSmokeStatus("Test preview hidden, but deleting the local WAV could not be confirmed.");
+      if (revision === smokeRevision.current) {
+        setSmokeStatus("Test preview hidden, but deleting the local WAV could not be confirmed.");
+      }
     }
   }
 
