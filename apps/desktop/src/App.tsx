@@ -525,10 +525,10 @@ export default function App() {
       setDiagnostics(null);
       setAudioIoReport(null);
       invalidateReferenceProbe();
-      setMessage("Local Python and inference sources configured for this app session. Run the TTS preflight; speech model and Hindi audio remain unverified.");
+      setMessage("Working Python 3.11 and matching KathaSvara source verified for this app session. Run the TTS preflight; packages, weights and real Hindi audio remain unverified.");
     } catch {
       if (revision === runtimePickerRevision.current) {
-        setMessage("Could not configure the local Python runtime. Choose an existing Python executable and the source folder containing kathasvara/cli.py.");
+        setMessage("Could not configure the local speech runtime. Choose a working Python 3.11 interpreter and KathaSvara inference sources matching this desktop version. The previous selection, if any, remains unchanged.");
       }
     } finally {
       if (revision === runtimePickerRevision.current) setConfiguringRuntime(false);
@@ -1014,9 +1014,9 @@ export default function App() {
               <section aria-label="Local Python setup" className="diagnostic-report">
                 <h3>Connect your local speech runtime</h3>
                 <p className="helper">To enable narration, character renders and audio export on a developer EXE,
-                  select your trusted Python 3.11 interpreter and the matching KathaSvara
+                  select your trusted, working Python 3.11 interpreter and the matching KathaSvara
                   <code>services/inference</code> folder. Speech libraries and authorized model weights
-                  must already be installed separately. Selecting files never installs packages,
+                  must already be installed separately. The desktop checks the Python 3.11 version and matching source version before activating. Selecting files never installs packages,
                   loads a model, changes system settings, or uploads a recording.</p>
                 <button className="secondary-button" disabled={configuringRuntime || working}
                   onClick={() => void chooseLocalRuntime()}>
