@@ -6,8 +6,10 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+import importlib
 import os
 import stat
+import sys
 import wave
 from pathlib import Path
 
@@ -53,6 +55,46 @@ def verify_local_model_folder(model_folder: Path) -> None:
             raise ValueError(
                 "Local STT model is incomplete. Provide config.json, model.bin and tokenizer.json."
             )
+
+
+
+def inspect_stt_setup(model_path: str | None = None) -> dict[str, object]:
+    """Check interpreter, local package import and model files, never load weights.
+
+    The response is a fixed, privacy-safe readiness *hint*, not an assertion
+    that a model works, the audio decodes or the transcript is intelligible.
+    """
+    python_311 = sys.version_info[:2] == (3, 11)
+    import_ok = False
+    try:
+        module = importlib.import_module("faster_whisper")
+        import_ok = callable(getattr(module, "WhisperModel", None))
+    except Exception:  # noqa: BLE001 - optional native DLL imports can fail
+        import_ok = False
+    model_files_present = False
+    if isinstance(model_path, str) and model_path:
+        try:
+            verify_local_model_folder(Path(model_path))
+            model_files_present = True
+        except (ValueError, OSError):
+            model_files_present = False
+    ready = python_311 and import_ok and model_files_present
+    next_action = (
+        "select_python_311" if not python_311
+        else "install_stt_extra" if not import_ok
+        else "select_local_model" if not model_files_present
+        else "run_transcription"
+    )
+    return {
+        "python_311": python_311,
+        "stt_import_ok": import_ok,
+        "model_files_present": model_files_present,
+        "ready_to_transcribe": ready,
+        "next_action_code": next_action,
+        "model_loaded": False,
+        "audio_transcribed": False,
+        "network_used": False,
+    }
 
 
 def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
