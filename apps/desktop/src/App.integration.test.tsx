@@ -356,6 +356,49 @@ describe("explicit real Hindi model smoke test", () => {
     expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
   });
 
+  it("rejects a contradictory signal report that would hide clipping warnings", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") return {
+        ...goodInspection,
+        level_hints: {
+          ...goodInspection.level_hints,
+          possible_clipping_hint: true,
+          signal_review_required: false,
+        },
+      };
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected native command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", {
+      audioId: testId,
+    }));
+    expect(screen.getByText(/failed structural, duration or signal checks/)).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Real Hindi audio test result" })).toBeNull();
+  });
+
+  it("rejects a missing inline WAV URL rather than offering a broken preview", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return {
+        ...goodWav, preview_available: true, data_url: "",
+      };
+      if (command === "inspect_generated_audio") return goodInspection;
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected native command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", {
+      audioId: testId,
+    }));
+    expect(screen.getByText(/failed structural, duration or signal checks/)).toBeTruthy();
+    expect(screen.queryByLabelText("Real Hindi smoke-test audio preview")).toBeNull();
+  });
+
   it("shows conservative clipping and long-pause warnings but still requires listening", async () => {
     mocks.invoke.mockImplementation(async (command: string) => {
       if (command === "synthesize") return goodWav;
