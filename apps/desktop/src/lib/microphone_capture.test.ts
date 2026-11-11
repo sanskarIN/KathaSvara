@@ -160,6 +160,63 @@ describe("microphone Web Audio recording lifecycle", () => {
     expect(failed).not.toHaveBeenCalled();
   });
 
+  it("abandons a pending permission prompt and releases any late-granted tracks", async () => {
+    const audio = mockWebAudioCapture();
+    let grant!: (stream: { getTracks: () => typeof audio.track[] }) => void;
+    audio.getUserMedia.mockImplementationOnce(() =>
+      new Promise(resolve => { grant = resolve; }));
+    const controller = new AbortController();
+    const completed = vi.fn(), failed = vi.fn();
+    const starting = beginMicrophoneCapture(completed, failed, controller.signal);
+    expect(audio.getUserMedia).toHaveBeenCalledOnce();
+    controller.abort();
+    await expect(starting).rejects.toThrow("Microphone request cancelled");
+    // The OS may grant permission AFTER the UI has already dismissed startup.
+    grant({ getTracks: () => [audio.track] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.resume).not.toHaveBeenCalled();
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("stops granted tracks immediately if startup AudioContext.resume hangs", async () => {
+    const audio = mockWebAudioCapture();
+    let finishResume!: () => void;
+    audio.resume.mockImplementationOnce(() =>
+      new Promise<void>(resolve => { finishResume = resolve; }));
+    const controller = new AbortController();
+    const completed = vi.fn(), failed = vi.fn();
+    const starting = beginMicrophoneCapture(completed, failed, controller.signal);
+    await vi.waitFor(() => expect(audio.resume).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(starting).rejects.toThrow("Microphone request cancelled");
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.source.disconnect).toHaveBeenCalledOnce();
+    expect(audio.processor.disconnect).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
+    // Even a delayed native resolution must never restart recording.
+    finishResume();
+    await Promise.resolve();
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("aborts an active recording and leaves neither audio nor live tracks", async () => {
+    const audio = mockWebAudioCapture();
+    const controller = new AbortController();
+    const completed = vi.fn(), failed = vi.fn();
+    const session = await beginMicrophoneCapture(completed, failed, controller.signal);
+    audio.sendSamples(new Float32Array(480).fill(0.25));
+    controller.abort();
+    session.stop();
+    await Promise.resolve();
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
   it("releases granted microphone tracks when the audio graph cannot start", async () => {
     const audio = mockWebAudioCapture();
     audio.resume.mockRejectedValueOnce(new Error("Private OS audio failure"));
