@@ -39,10 +39,10 @@ def inspect_stt_wav(path: Path) -> dict[str, object]:
     except ValueError as exc:
         # Only our own bounded errors leave this function; third-party
         # decoder/file details never cross the desktop JSON boundary.
-        if str(exc) in (
-            "Select a regular PCM16 WAV under 6 MiB.",
-        ):
+        if str(exc) == "Select a regular PCM16 WAV under 6 MiB.":
             raise
+        if str(exc) == "Expected mono PCM16 WAV of at most 20 minutes.":
+            raise ValueError("Use mono PCM16 WAV audio of 60 seconds or less.") from exc
         raise ValueError("Selected recording is not a readable PCM16 WAV.") from exc
 
     sample_rate = report["sample_rate_hz"]
