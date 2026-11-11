@@ -62,6 +62,28 @@ describe("private native errors in Voice Studio", () => {
     expect(screen.getByText(/Local operation failed/)).toBeTruthy();
   });
 
+  it("keeps a real generated WAV exportable if built-in Voice Studio playback fails", async () => {
+    const wav = {
+      audio_id: "123e4567-e89b-42d3-a456-426614174011",
+      data_url: "data:audio/wav;base64,UklGRg==", preview_available: true,
+      duration_seconds: 1.25, sample_rate: 24000, chunks: 1,
+    };
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return wav;
+      if (command === "discard_audio") return undefined;
+      throw new Error("Unexpected native command: " + command);
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Generate Hindi Voice/ }));
+    await screen.findByRole("button", { name: /Export WAV/ });
+    const preview = screen.getByLabelText("Generated Hindi WAV preview");
+    fireEvent.error(preview);
+    expect(screen.getByText(/built-in audio player could not play the generated WAV/)).toBeTruthy();
+    expect(screen.getByText(/Hindi listening remains unverified/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Export WAV/ })).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("discard_audio", expect.anything());
+  });
+
   it("never displays a private export filename or token on WAV copy failure", async () => {
     const wav = {
       audio_id: "123e4567-e89b-42d3-a456-426614174000",
