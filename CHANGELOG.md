@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.6 development — NOT PUBLISHED / NOT STABLE
+
+- **Guided model-free speech readiness:** one Settings action checks Python, temporary PCM WAV I/O and optional TTS imports with fixed next steps; passing checks do not prove speech ([merged PR #132](https://github.com/sanskarIN/KathaSvara/pull/132)).
+- **Verified local runtime:** check selected Python 3.11 interpreter and matching bounded inference source identity/version while keeping session selections reversible and path-private ([merged PR #133](https://github.com/sanskarIN/KathaSvara/pull/133)).
+- **Explicit opt-in real Hindi smoke test:** load an already-authorized model only with separate consent, inspect actual PCM output, listen/export/delete and handle stale results and failed preview; native WAV exports retain no-overwrite protections and run off the UI thread ([merged PR #134](https://github.com/sanskarIN/KathaSvara/pull/134)).
+- **Publication boundary:** source version 0.5.6 is in preparation, while [v0.5.5](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.5) remains the latest published experimental preview. The future Windows EXE is unsigned and unbundled. Third-party model weights require explicit approval; actual Hindi listening and clean-Windows acceptance remain open under [#3](https://github.com/sanskarIN/KathaSvara/issues/3) and [#129](https://github.com/sanskarIN/KathaSvara/issues/129). Track [v0.5.6 preparation #138](https://github.com/sanskarIN/KathaSvara/issues/138).
+
 ## v0.5.5 published experimental developer pre-release (11 November 2026)
 
 - **Disposable WAV plumbing doctor:** the Python inference source now verifies that it can write, read back, inspect and clean up a 250 ms synthetic PCM16 WAV without touching the user's story, reference voice, speaker output or the TTS model. Rust validates its fixed result schema and the Settings UI provides stage-specific repair guidance. [Merged PR #126](https://github.com/sanskarIN/KathaSvara/pull/126).
