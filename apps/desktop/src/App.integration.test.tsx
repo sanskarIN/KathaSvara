@@ -182,6 +182,96 @@ describe("explicit real Hindi model smoke test", () => {
     expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
   });
 
+  it("does not export a retired WAV if its save dialog resolves after deletion", async () => {
+    let finishSave: (value: string | null) => void = () => {
+      throw new Error("Save dialog never opened");
+    };
+    mocks.save.mockImplementation(() => new Promise<string | null>(resolve => {
+      finishSave = resolve;
+    }));
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") return goodInspection;
+      if (command === "discard_audio") return undefined;
+      if (command === "export_wav") throw new Error("A retired WAV must never be exported");
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await screen.findByRole("status", { name: "Real Hindi audio test result" });
+    fireEvent.click(screen.getByRole("button", { name: "Export real Hindi test WAV" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Delete local Hindi test WAV" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", {
+      audioId: testId,
+    }));
+    await act(async () => {
+      finishSave("C:\\Users\\private-story\\outdated-export.wav");
+    });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("export_wav", expect.anything());
+    expect(screen.getByText(/local Hindi smoke-test WAV was deleted/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private-story");
+  });
+
+  it("does not report a stale export success after its test WAV is deleted", async () => {
+    let finishExport: () => void = () => { throw new Error("Export never started"); };
+    mocks.save.mockResolvedValue("C:\\Users\\private-story\\export.wav");
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") return Promise.resolve(goodWav);
+      if (command === "inspect_generated_audio") return Promise.resolve(goodInspection);
+      if (command === "export_wav") return new Promise<void>(resolve => {
+        finishExport = resolve;
+      });
+      if (command === "discard_audio") return Promise.resolve();
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await screen.findByRole("status", { name: "Real Hindi audio test result" });
+    fireEvent.click(screen.getByRole("button", { name: "Export real Hindi test WAV" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("export_wav", {
+      audioId: testId, destination: "C:\\Users\\private-story\\export.wav",
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete local Hindi test WAV" }));
+    await screen.findByText(/local Hindi smoke-test WAV was deleted/);
+    await act(async () => { finishExport(); });
+    expect(screen.getByText(/local Hindi smoke-test WAV was deleted/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Test WAV exported");
+    expect(document.body.textContent).not.toContain("private-story");
+  });
+
+  it("does not overwrite a new test status with an older WAV deletion result", async () => {
+    let finishDeletion: () => void = () => { throw new Error("Deletion never started"); };
+    let syntheses = 0;
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "synthesize") {
+        syntheses += 1;
+        return syntheses === 1 ? Promise.resolve(goodWav) : new Promise(() => {});
+      }
+      if (command === "inspect_generated_audio") return Promise.resolve(goodInspection);
+      if (command === "discard_audio") return new Promise<void>(resolve => {
+        finishDeletion = resolve;
+      });
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await screen.findByRole("status", { name: "Real Hindi audio test result" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete local Hindi test WAV" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("discard_audio", {
+      audioId: testId,
+    }));
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    expect(screen.getByText(/Loading the real local Hindi model/)).toBeTruthy();
+    await act(async () => { finishDeletion(); });
+    expect(screen.getByText(/Loading the real local Hindi model/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("local Hindi smoke-test WAV was deleted");
+  });
+
   it("retires an in-flight result when its selected local reference changes", async () => {
     let finish: (value: typeof goodWav) => void = () => { throw new Error("Not invoked"); };
     mocks.invoke.mockImplementation((command: string) => {
