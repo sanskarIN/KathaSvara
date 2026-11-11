@@ -64,6 +64,35 @@ describe("consented short microphone to Hindi transcript", () => {
     speech_detected: true, human_review_required: true, network_used: false,
   };
 
+  it.each([
+    ["NotAllowedError", /Microphone access was denied or blocked/],
+    ["NotFoundError", /No compatible microphone was found/],
+    ["NotReadableError", /selected microphone cannot be read/],
+    ["OverconstrainedError", /does not support the requested recording constraints/],
+    ["SecurityError", /Microphone access is disabled in this WebView/],
+  ])("shows fixed %s guidance without exposing private exception details", async (name, guidance) => {
+    const privateData = "C:\\\\private\\\\microphone-id=secret";
+    mocks.microphone.mockRejectedValueOnce(Object.assign(new Error(privateData), { name }));
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText(guidance)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateData);
+    expect((screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement)
+      .disabled).toBe(false);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+  });
+
+  it("uses generic guidance for unknown WebView errors instead of leaking OS paths", async () => {
+    const privateData = "C:\\\\Users\\\\private\\\\story.wav";
+    mocks.microphone.mockRejectedValueOnce(new Error(privateData));
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText(/Microphone startup failed/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateData);
+  });
+
   it("does not request a microphone or run STT without consent", async () => {
     openSettings();
     const start = screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement;

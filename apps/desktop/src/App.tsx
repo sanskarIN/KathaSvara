@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
+import { publicMicrophoneStartupError } from "./lib/microphone_errors";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -730,11 +731,13 @@ export default function App() {
       micSession.current = recording;
       setMicStatus("recording");
       setMicGuidance("Microphone recording is active. Stop when finished (30-second maximum).");
-    } catch {
+    } catch (error) {
       if (micStartup.current === controller) micStartup.current = null;
       if (revision === micRevision.current && !controller.signal.aborted) {
         setMicStatus("idle");
-        setMicGuidance("Microphone unavailable or permission denied. Check Windows microphone access and WebView2, or select a local WAV.");
+        // Only show a fixed message selected by the standardized DOMException
+        // name, never an OS/WebView exception message or private device ID.
+        setMicGuidance(publicMicrophoneStartupError(error));
       }
     }
   }
@@ -1440,7 +1443,9 @@ export default function App() {
                   <h4>Record Hindi from microphone (experimental)</h4>
                   <p className="helper">Only starts when you click Start with permission checked. Stops automatically after {MICROPHONE_MAX_SECONDS} seconds.
                     Audio is kept in memory until you explicitly transcribe or discard; it is never added to a story automatically.
-                    Windows microphone permission may be requested. This feature has not yet passed real-device testing.</p>
+                    Windows microphone permission may be requested. If it fails, KathaSvara explains common
+                    permission or input-device issues without displaying private OS error text.
+                    This feature has not yet passed real-device testing.</p>
                   <div className="preview-actions">
                     <button className="secondary-button"
                       disabled={!sttConsent || sttWorking || sttChecking || micStatus !== "idle"}

@@ -97,6 +97,22 @@ a user's machine.
    consent also stop active microphone tracks; invalid/oversized recordings
    are rejected with fixed user-facing guidance.
 
+## Microphone permission and device error guidance (development source)
+
+A denied or unsupported recording request now produces **fixed, actionable
+guidance**, based only on the browser's standardized error category. Windows
+privacy blocking, absence of a usable input device, a busy or unreadable
+microphone, unsupported constraints, an inactive window and unsupported
+WebView2 capture APIs have separate user-facing hints. The app never renders
+raw browser/OS error text, device identifiers, file paths, stack traces or
+constraint details. Unknown errors use generic guidance.
+
+These messages are troubleshooting *hints*, not a diagnosis of a user's
+particular Windows permissions. They cannot change Windows settings, force
+access to a microphone, substitute for consent or certify that STT works.
+A user may instead select a short existing PCM16 WAV and transcribe it
+without granting any microphone access.
+
 The Web Audio compatibility capture uses ScriptProcessorNode, which is
 deprecated but currently supported by the targeted WebView2 runtime. It
 feeds silence to the audio output; it never monitors recorded microphone
