@@ -512,9 +512,8 @@ fn inference_source_version_matches(inference: &Path) -> bool {
     if !metadata.is_file() || metadata.len() > MAX_INFERENCE_PROJECT_METADATA_BYTES {
         return false;
     }
-    // Use the same opened handle for metadata and parsing, and bound the actual
-    // read: replacing a path after its size check must not allocate unlimited
-    // memory or parse a different checkout's manifest.
+    // Use the same opened handle for metadata and parsing, and bound the
+    // read even if the file grows after the metadata check.
     let mut bytes = Vec::new();
     if (&mut file).take(MAX_INFERENCE_PROJECT_METADATA_BYTES + 1)
         .read_to_end(&mut bytes).is_err()
@@ -523,25 +522,46 @@ fn inference_source_version_matches(inference: &Path) -> bool {
         return false;
     }
     let Ok(source) = std::str::from_utf8(&bytes) else { return false };
-    let mut project_section = false;
+    let expected_version = format!("\"{}\"", env!("CARGO_PKG_VERSION"));
+    let mut in_project = false;
+    let mut saw_project = false;
+    let mut valid_name = false;
+    let mut valid_version = false;
     for line in source.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
-            project_section = trimmed == "[project]";
+            in_project = trimmed == "[project]";
+            // Repeated project tables are invalid TOML. Never accept the
+            // first matching version before finding a duplicate section.
+            if in_project {
+                if saw_project { return false; }
+                saw_project = true;
+            }
             continue;
         }
-        if !project_section || trimmed.starts_with('#') {
+        if !in_project || trimmed.starts_with('#') {
             continue;
         }
         let Some((name, value)) = trimmed.split_once('=') else { continue };
-        if name.trim() != "version" {
-            continue;
+        match name.trim() {
+            "name" => {
+                if valid_name || value.trim() != "\"kathasvara-inference\"" {
+                    return false;
+                }
+                valid_name = true;
+            }
+            "version" => {
+                if valid_version || value.trim() != expected_version.as_str() {
+                    return false;
+                }
+                valid_version = true;
+            }
+            _ => {}
         }
-        // The source distribution uses an explicit PEP 621 quoted version.
-        // Never accept ambiguous computed expressions or other TOML sections.
-        return value.trim() == format!("\"{}\"", env!("CARGO_PKG_VERSION"));
     }
-    false
+    // An unrelated project with a coincidentally matching version is not
+    // a compatible KathaSvara inference checkout.
+    saw_project && valid_name && valid_version
 }
 
 /// Explicitly execute only the interpreter selected by the user; -I prevents
@@ -1940,6 +1960,37 @@ version = "{}"
 
         // A filename alone cannot prove the selected file is Python.
         assert!(verify_selected_python_311(&python).is_err());
+
+        // A colliding version is not enough: both project identity and
+        // version must match, without duplicate metadata entries or tables.
+        for invalid_manifest in [
+            format!(r#"[project]
+name = "unrelated-inference"
+version = "{}"
+"#, env!("CARGO_PKG_VERSION")),
+            format!(r#"[project]
+version = "{}"
+"#, env!("CARGO_PKG_VERSION")),
+            format!(r#"[project]
+name = "kathasvara-inference"
+name = "kathasvara-inference"
+version = "{}"
+"#, env!("CARGO_PKG_VERSION")),
+            format!(r#"[project]
+name = "kathasvara-inference"
+version = "{}"
+version = "{}"
+"#, env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_VERSION")),
+            format!(r#"[project]
+name = "kathasvara-inference"
+version = "{}"
+[project]
+"#, env!("CARGO_PKG_VERSION")),
+        ] {
+            fs::write(source.join("pyproject.toml"), invalid_manifest).unwrap();
+            assert!(!inference_source_version_matches(&source));
+            assert!(matching_inference_sources(source.clone()).is_err());
+        }
 
         // A valid CLI path with a stale or tampered package version is rejected.
         fs::write(source.join("pyproject.toml"), r#"[project]
