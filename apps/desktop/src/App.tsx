@@ -51,6 +51,33 @@ function isConsistentSttSetup(result: SttSetupReport): boolean {
     result.model_loaded === false && result.audio_transcribed === false &&
     result.network_used === false;
 }
+type SttWavReport = {
+  sample_rate: number; frames: number; duration_seconds: number;
+  near_silence_hint: boolean; dc_only_hint: boolean;
+  possible_clipping_hint: boolean; long_internal_pause_hint: boolean;
+  signal_review_required: boolean;
+  model_loaded: false; audio_transcribed: false; network_used: false;
+};
+function isConsistentSttWavReport(report: SttWavReport): boolean {
+  if (typeof report !== "object" || report === null) return false;
+  const rate = report.sample_rate;
+  return [8000, 16000, 24000, 48000].includes(rate)
+    && Number.isSafeInteger(report.frames)
+    && report.frames > 0 && report.frames <= rate * 60
+    && Number.isFinite(report.duration_seconds)
+    && report.duration_seconds > 0 && report.duration_seconds <= 60
+    && Math.abs(report.duration_seconds - report.frames / rate) <= 0.002
+    && typeof report.near_silence_hint === "boolean"
+    && typeof report.dc_only_hint === "boolean"
+    && typeof report.possible_clipping_hint === "boolean"
+    && typeof report.long_internal_pause_hint === "boolean"
+    && report.signal_review_required === (
+      report.near_silence_hint || report.dc_only_hint ||
+      report.possible_clipping_hint || report.long_internal_pause_hint
+    )
+    && report.model_loaded === false && report.audio_transcribed === false
+    && report.network_used === false;
+}
 type SttResult = {
   text: string; language: "hi"; engine: "faster-whisper-local";
   duration_seconds: number; speech_detected: boolean;
@@ -259,6 +286,9 @@ export default function App() {
   const [sttWorking, setSttWorking] = useState(false);
   const [sttChecking, setSttChecking] = useState(false);
   const [sttSetup, setSttSetup] = useState<SttSetupReport | null>(null);
+  const [sttWavReport, setSttWavReport] = useState<SttWavReport | null>(null);
+  const [sttWavChecking, setSttWavChecking] = useState(false);
+  const sttWavProbeRevision = useRef(0);
   const [sttResult, setSttResult] = useState<SttResult | null>(null);
   const [sttStatus, setSttStatus] = useState<string | null>(null);
   const [micStatus, setMicStatus] = useState<"idle" | "requesting" | "recording" | "processing" | "ready">("idle");
@@ -745,6 +775,7 @@ export default function App() {
   }
 
   async function chooseSttWav() {
+    if (sttWavChecking || sttChecking || sttWorking) return;
     const revision = ++sttRevision.current;
     setSttResult(null);
     setSttStatus(null);
@@ -755,6 +786,8 @@ export default function App() {
         filters: [{ name: "Short mono PCM16 WAV", extensions: ["wav"] }],
       });
       if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      sttWavProbeRevision.current += 1;
+      setSttWavReport(null);
       setSttWavPath(chosen);
       setSttStatus("Local WAV selected (private path hidden).");
     } catch {
@@ -781,6 +814,34 @@ export default function App() {
       if (revision === sttRevision.current) {
         setSttStatus("Unable to select the local STT model folder.");
       }
+    }
+  }
+
+  async function checkSttWav() {
+    if (!sttWavPath || sttWavChecking || sttChecking || sttWorking) return;
+    const revision = ++sttWavProbeRevision.current;
+    setSttWavChecking(true);
+    setSttWavReport(null);
+    setSttStatus("Inspecting the selected WAV locally. No speech model or network.");
+    try {
+      const report = await invoke<SttWavReport>("probe_stt_wav", { wavPath: sttWavPath });
+      if (revision !== sttWavProbeRevision.current) return;
+      if (!isConsistentSttWavReport(report)) {
+        setSttStatus("WAV inspection returned an invalid report. Update matching inference sources.");
+        return;
+      }
+      setSttWavReport(report);
+      setSttStatus(report.near_silence_hint || report.dc_only_hint
+        ? "This WAV has no usable speech-level signal. Check your microphone and re-record."
+        : report.signal_review_required
+          ? "WAV structure passed. Review clipping or long pauses before transcription."
+          : "WAV structure and basic signal levels passed. Hindi speech is not yet verified.");
+    } catch {
+      if (revision === sttWavProbeRevision.current) {
+        setSttStatus("WAV inspection failed. Select a readable, short mono PCM16 WAV and retry.");
+      }
+    } finally {
+      setSttWavChecking(false);
     }
   }
 
@@ -812,7 +873,8 @@ export default function App() {
   }
 
   async function transcribeLocalStt() {
-    if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking) return;
+    if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking ||
+        sttWavChecking || sttWavReport?.near_silence_hint || sttWavReport?.dc_only_hint) return;
     const revision = ++sttRevision.current;
     setSttWorking(true);
     setSttResult(null);
@@ -832,7 +894,7 @@ export default function App() {
         : "No recognizable Hindi speech was returned. Try a clearer, short mono WAV.");
     } catch {
       if (revision === sttRevision.current) {
-        setSttStatus("Offline transcription failed. Check Python 3.11, the optional STT package, a complete local model folder and a mono PCM16 WAV under 60 seconds.");
+        setSttStatus("Offline transcription failed. Check Python 3.11, the optional STT package, a complete local model and the WAV. Use the model-free WAV signal check to diagnose silence.");
       }
     } finally {
       // Native recognition is still running after consent changes; only the
@@ -1343,12 +1405,14 @@ export default function App() {
                   Microphone capture is available only after explicit consent and a browser/Windows permission prompt, with a 30-second automatic stop. Neither WAV capture nor model inference uploads audio or downloads weights; generated transcripts may contain errors.
                   Model output is not guaranteed accurate; review it before using it.</p>
                 <div className="preview-actions">
-                  <button className="secondary-button" disabled={sttWorking || sttChecking}
+                  <button className="secondary-button" disabled={sttWorking || sttChecking || sttWavChecking}
                     onClick={() => void chooseSttWav()}>Select Hindi WAV</button>
                   <button className="secondary-button" disabled={sttWorking || sttChecking}
                     onClick={() => void chooseSttModel()}>Choose offline STT model folder</button>
-                  <button className="quiet-button" disabled={sttWorking || sttChecking}
+                  <button className="quiet-button" disabled={sttWorking || sttChecking || sttWavChecking}
                     onClick={() => {
+                      sttWavProbeRevision.current += 1;
+                      setSttWavReport(null);
                       resetSttResult();
                       setSttWavPath(null);
                       setSttModelPath(null);
@@ -1382,7 +1446,25 @@ export default function App() {
                 </section>
                 <p className="helper">WAV: {sttWavPath ? "Selected privately" : "Not selected"}.
                   Offline model: {sttModelPath ? "Selected privately" : "Not selected"}.</p>
-                <button className="secondary-button" disabled={sttChecking || sttWorking}
+                <button className="secondary-button"
+                  disabled={!sttWavPath || sttWavChecking || sttChecking || sttWorking}
+                  onClick={() => void checkSttWav()}>
+                  {sttWavChecking ? "Checking selected WAV signal…" : "Check selected WAV signal (no model)"}
+                </button>
+                {sttWavReport && (
+                  <section aria-label="Selected STT WAV signal report" className="diagnostic-report" role="status">
+                    <h4>Selected WAV: {sttWavReport.near_silence_hint || sttWavReport.dc_only_hint
+                      ? "No usable signal detected" : "Readable PCM16 audio"}</h4>
+                    <p>{sttWavReport.sample_rate} Hz · {sttWavReport.duration_seconds.toFixed(1)} seconds.</p>
+                    {sttWavReport.near_silence_hint && <p>Very quiet or silent recording. Check microphone input and volume.</p>}
+                    {sttWavReport.dc_only_hint && <p>Constant audio offset with no useful variation. Re-record with a working microphone.</p>}
+                    {sttWavReport.possible_clipping_hint && <p>Possible clipping. Check recording levels before relying on recognition.</p>}
+                    {sttWavReport.long_internal_pause_hint && <p>Long internal pause detected. Review the recording.</p>}
+                    <p className="helper">This checks only local PCM structure and signal levels. No model loaded,
+                      network used, Hindi words recognized or listening quality verified.</p>
+                  </section>
+                )}
+                <button className="secondary-button" disabled={sttChecking || sttWorking || sttWavChecking}
                   onClick={() => void checkSttSetup()}>
                   {sttChecking ? "Checking STT setup without a model…" : "Check offline STT setup (no model load)"}
                 </button>
@@ -1402,7 +1484,8 @@ export default function App() {
                   I have permission to transcribe this recording and understand the local model may use CPU and memory.
                 </label>
                 <button className="secondary-button"
-                  disabled={!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking}
+                  disabled={!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking ||
+                    sttWavChecking || sttWavReport?.near_silence_hint || sttWavReport?.dc_only_hint}
                   onClick={() => void transcribeLocalStt()}>
                   {sttWorking ? "Recognizing Hindi locally…" : "Transcribe Hindi WAV offline"}
                 </button>
