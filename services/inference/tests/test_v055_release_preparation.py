@@ -13,9 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = "0.5.5"
 PREVIOUS = "0.5.4"
+CURRENT_SOURCE_VERSION = "0.5.6"
 
 
-def test_v055_is_consistent_across_all_runtime_and_desktop_versions() -> None:
+def test_current_source_versions_remain_synchronized_after_v055_publication() -> None:
     package = json.loads(
         (ROOT / "apps/desktop/package.json").read_text(encoding="utf-8")
     )
@@ -38,7 +39,7 @@ def test_v055_is_consistent_across_all_runtime_and_desktop_versions() -> None:
         tauri["version"],
         cargo["package"]["version"],
         python["project"]["version"],
-    } == {VERSION}
+    } == {CURRENT_SOURCE_VERSION}
 
 
 def test_v055_workflow_is_immutable_manual_and_predecessor_gated() -> None:
@@ -119,8 +120,8 @@ def test_v055_windows_candidate_and_published_site_confirm_publication() -> None
     ).read_text(encoding="utf-8")
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "KathaSvara-v0.5.5-dev-win64.exe" in candidate
-    assert "portable-windows-v0.5.5.md" in candidate
+    assert "KathaSvara-v0.5.6-dev-win64.exe" in candidate
+    assert "portable-windows-v0.5.6.md" in candidate
     assert "KathaSvara-v0.5.4-dev-win64.exe" not in candidate
     for page in (site, readme):
         assert "releases/tag/v0.5.5" in page
