@@ -781,6 +781,8 @@ fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) ->
         Some("inspect_generated_wav") => Duration::from_secs(180),
         // Offline ASR can take minutes on CPU. No downloads are permitted.
         Some("transcribe_hindi_wav") => Duration::from_secs(600),
+        // Import STT libraries without loading or downloading checkpoint weights.
+        Some("probe_stt_setup") => Duration::from_secs(90),
         // Torch and Chatterbox imports can be slow on Windows, but never
         // download weights during this probe.
         Some("probe_runtime") => Duration::from_secs(90),
@@ -994,6 +996,60 @@ fn validate_stt_result(result: &Value) -> Result<Value, String> {
         "human_review_required": true,
         "network_used": false,
     }))
+}
+
+const STT_SETUP_INVALID: &str =
+    "Offline STT setup returned an invalid report. Update matching inference sources.";
+
+/// Validate the complete fixed-shape Python diagnostic before exposing it in UI.
+fn validate_stt_setup_report(report: &Value) -> Result<Value, String> {
+    let python = report.get("python_311").and_then(Value::as_bool)
+        .ok_or(STT_SETUP_INVALID)?;
+    let import = report.get("stt_import_ok").and_then(Value::as_bool)
+        .ok_or(STT_SETUP_INVALID)?;
+    let model = report.get("model_files_present").and_then(Value::as_bool)
+        .ok_or(STT_SETUP_INVALID)?;
+    let ready = report.get("ready_to_transcribe").and_then(Value::as_bool)
+        .ok_or(STT_SETUP_INVALID)?;
+    let next = report.get("next_action_code").and_then(Value::as_str)
+        .ok_or(STT_SETUP_INVALID)?;
+    let expected = if !python { "select_python_311" }
+        else if !import { "install_stt_extra" }
+        else if !model { "select_local_model" }
+        else { "run_transcription" };
+    if ready != (python && import && model) || next != expected
+        || report.get("model_loaded") != Some(&Value::Bool(false))
+        || report.get("audio_transcribed") != Some(&Value::Bool(false))
+        || report.get("network_used") != Some(&Value::Bool(false))
+    {
+        return Err(STT_SETUP_INVALID.into());
+    }
+    Ok(json!({
+        "python_311": python,
+        "stt_import_ok": import,
+        "model_files_present": model,
+        "ready_to_transcribe": ready,
+        "next_action_code": next,
+        "model_loaded": false,
+        "audio_transcribed": false,
+        "network_used": false,
+    }))
+}
+
+/// Bounded, model-free setup probe: no WAV read, microphone or model loading.
+#[tauri::command]
+async fn probe_stt_setup(model_path: Option<String>) -> Result<Value, String> {
+    if model_path.as_ref().is_some_and(|path| path.len() > 4096) {
+        return Err("Offline STT model selection exceeds the path limit.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = invoke_python(json!({
+            "action": "probe_stt_setup", "model_path": model_path,
+        }))?;
+        let report = response.get("result")
+            .ok_or_else(|| STT_SETUP_INVALID.to_string())?;
+        validate_stt_setup_report(report)
+    }).await.map_err(|_| "Offline STT setup worker stopped unexpectedly.".to_string())?
 }
 
 /// User-consented local WAV to Hindi text, separate from text-to-speech.
@@ -2021,7 +2077,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            configure_local_inference, clear_local_inference, transcribe_local_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, probe_stt_setup, transcribe_local_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -2032,6 +2088,33 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn stt_setup_probe_rejects_inconsistent_or_model_loaded_report() {
+        let valid = json!({
+            "python_311": true,
+            "stt_import_ok": true,
+            "model_files_present": false,
+            "ready_to_transcribe": false,
+            "next_action_code": "select_local_model",
+            "model_loaded": false,
+            "audio_transcribed": false,
+            "network_used": false
+        });
+        assert_eq!(validate_stt_setup_report(&valid).unwrap(), valid);
+        let mut broken = valid.clone();
+        broken["ready_to_transcribe"] = json!(true);
+        assert!(validate_stt_setup_report(&broken).is_err());
+        broken = valid.clone();
+        broken["model_loaded"] = json!(true);
+        assert!(validate_stt_setup_report(&broken).is_err());
+        broken = valid.clone();
+        broken["next_action_code"] = json!("C:\\\\private");
+        assert!(validate_stt_setup_report(&broken).is_err());
+        broken = valid.clone();
+        broken["network_used"] = json!(true);
+        assert!(validate_stt_setup_report(&broken).is_err());
+    }
 
     #[test]
     fn stt_result_rejects_false_network_and_human_review_claims() {
