@@ -99,8 +99,9 @@ def test_v055_components_match_while_site_retains_historical_v054() -> None:
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     assert 'releases/tag/v0.5.4' in site  # Historical predecessor remains.
     assert "v0.5.4 · Historical experimental pre-release" in site
-    assert "v0.5.5 · Latest experimental pre-release" in site
-    assert 'v0.5.5 pre-release ↗' in site
+    assert "v0.5.5 · Historical experimental pre-release" in site
+    assert "v0.5.6 · Latest experimental pre-release" in site
+    assert 'v0.5.6 pre-release ↗' in site
     assert "v0.5.3 · Published experimental pre-release" in site
     assert "v0.5.3 · Latest experimental pre-release" not in site
 
@@ -123,10 +124,10 @@ def test_post_publication_docs_archive_source_plan_and_keep_audio_gates_open() -
         assert "v0.5.4" in content  # Historical release remains discoverable.
         assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4" in content
         assert "issues/3" in content
-    assert "releases/tag/v0.5.5" in qa
+    assert "releases/tag/v0.5.6" in qa
     assert "issues/3" in qa
     assert "v0.5.4 · Historical experimental pre-release" in site
-    assert "v0.5.5 · Latest experimental pre-release" in site
+    assert "v0.5.6 · Latest experimental pre-release" in site
     assert "v0.5.3 · Latest experimental pre-release" not in site
     assert "v0.5.4 development (not yet released)" not in changelog
     assert "published experimental developer pre-release" in changelog
@@ -136,7 +137,7 @@ def test_post_publication_docs_archive_source_plan_and_keep_audio_gates_open() -
     assert "NOT STABLE" in archive  # retained historical source plan
     assert "ARCHIVED PRE-PUBLICATION PLAN" in archive
     assert "not yet passed" in qa
-    assert "KathaSvara-v0.5.5-dev-win64.exe" in qa
+    assert "KathaSvara-v0.5.6-dev-win64.exe" in qa
     assert "v0.5.4 development only" not in qa
 
 

@@ -1,11 +1,11 @@
 # Changelog
 
-## v0.5.6 development — NOT PUBLISHED / NOT STABLE
+## v0.5.6 published experimental developer pre-release (11 November 2026)
 
 - **Guided model-free speech readiness:** one Settings action checks Python, temporary PCM WAV I/O and optional TTS imports with fixed next steps; passing checks do not prove speech ([merged PR #132](https://github.com/sanskarIN/KathaSvara/pull/132)).
 - **Verified local runtime:** check selected Python 3.11 interpreter and matching bounded inference source identity/version while keeping session selections reversible and path-private ([merged PR #133](https://github.com/sanskarIN/KathaSvara/pull/133)).
 - **Explicit opt-in real Hindi smoke test:** load an already-authorized model only with separate consent, inspect actual PCM output, listen/export/delete and handle stale results and failed preview; native WAV exports retain no-overwrite protections and run off the UI thread ([merged PR #134](https://github.com/sanskarIN/KathaSvara/pull/134)).
-- **Publication boundary:** source version 0.5.6 is in preparation, while [v0.5.5](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.5) remains the latest published experimental preview. The future Windows EXE is unsigned and unbundled. Third-party model weights require explicit approval; actual Hindi listening and clean-Windows acceptance remain open under [#3](https://github.com/sanskarIN/KathaSvara/issues/3) and [#129](https://github.com/sanskarIN/KathaSvara/issues/129). Track [v0.5.6 preparation #138](https://github.com/sanskarIN/KathaSvara/issues/138).
+- **Publication verified:** [KathaSvara v0.5.6](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6) published by explicit [manual workflow #42971289274](https://github.com/sanskarIN/KathaSvara/actions/runs/42971289274) on 11 November 2026 at immutable source/tag SHA `5bdd1688295995b49e71a431d938c491c4069d9e`. All seven jobs passed, including GitHub-downloaded SHA256 verification. Three published assets: `KathaSvara-v0.5.6-dev-win64.exe`, `README.txt`, `SHA256SUMS.txt`. GitHub reports EXE SHA-256 `5d22bd89209214aec67c79c6470c178bdb2055bfc868bffaba2c8c70ebfbe612`. The Windows EXE is **unsigned, unbundled, NOT A COMPLETE INSTALLER**. Model weights, speech runtime and device acceptance are external. Real Hindi listening/voice distinction and clean Windows verification remain open under [#3](https://github.com/sanskarIN/KathaSvara/issues/3) and [#129](https://github.com/sanskarIN/KathaSvara/issues/129).
 
 ## v0.5.5 published experimental developer pre-release (11 November 2026)
 
