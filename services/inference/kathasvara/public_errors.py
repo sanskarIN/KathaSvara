@@ -14,6 +14,18 @@ from .voice_reference import REFERENCE_CHANGED_ERROR, REFERENCE_ERROR
 # text (even if it begins with a known phrase) is never sent to the desktop.
 _SAFE_FIXED_MESSAGES = frozenset({
     "Unsupported action.",
+    "Select an absolute local PCM16 WAV recording.",
+    "Select a regular PCM16 WAV under 6 MiB.",
+    "Use mono PCM16 WAV audio of 60 seconds or less.",
+    "Selected recording is not a readable PCM16 WAV.",
+    "Choose a local faster-whisper model folder before transcribing.",
+    "Local STT model is incomplete. Provide config.json, model.bin and tokenizer.json.",
+    "Offline transcription is unavailable. Install the optional STT Python dependencies.",
+    "Transcription exceeds the 200-segment review limit.",
+    "Transcription exceeds the 8000-character review limit.",
+    "Speech model produced invalid transcription text.",
+    "Local STT inference failed. Check the model files and available memory.",
+    "Select a WAV file and local STT model folder.",
     "Unsupported TTS device override. Use auto or cpu.",
     "Unsupported TTS model variant. Use v2 or v3.",
     ("Installed Chatterbox does not support the selected V3 checkpoint. "
