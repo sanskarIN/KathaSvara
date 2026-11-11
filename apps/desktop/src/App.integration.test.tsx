@@ -198,6 +198,97 @@ describe("local offline Hindi speech to text", () => {
     expect(document.body.textContent).not.toContain("C:\\private");
   });
 
+
+
+  it("keeps Hindi recognition disabled while an offline setup probe is active", async () => {
+    let finishProbe!: (result: object) => void;
+    const pending = new Promise<object>(resolve => { finishProbe = resolve; });
+    mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
+      .mockResolvedValueOnce("C:\\private\\whisper-model");
+    mocks.invoke.mockImplementation((name: string) => {
+      if (name === "probe_stt_setup") return pending;
+      if (name === "transcribe_local_wav") return valid;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check offline STT setup (no model load)" }));
+
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    expect(transcribe.disabled).toBe(true);
+    fireEvent.click(transcribe);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+
+    finishProbe({
+      python_311: true, stt_import_ok: true, model_files_present: true,
+      ready_to_transcribe: true, next_action_code: "run_transcription",
+      model_loaded: false, audio_transcribed: false, network_used: false,
+    });
+    await waitFor(() => expect(transcribe.disabled).toBe(false));
+  });
+
+  it("does not unlock native recognition when consent is withdrawn mid-flight", async () => {
+    let finishRecognition!: (result: typeof valid) => void;
+    const pending = new Promise<typeof valid>(resolve => { finishRecognition = resolve; });
+    mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
+      .mockResolvedValueOnce("C:\\private\\whisper-model");
+    mocks.invoke.mockImplementation((name: string) => {
+      if (name === "transcribe_local_wav") return pending;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ });
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    fireEvent.click(consent);
+    fireEvent.click(transcribe);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    fireEvent.click(consent);
+    fireEvent.click(consent);
+    expect(transcribe.disabled).toBe(true);
+    fireEvent.click(transcribe);
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+    finishRecognition(valid);
+    await waitFor(() => expect(transcribe.disabled).toBe(false));
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(document.body.textContent).not.toContain("C:\\private");
+  });
+
+  it("does not unlock another STT setup probe until the stale probe finishes", async () => {
+    let finishProbe!: (result: object) => void;
+    const pending = new Promise<object>(resolve => { finishProbe = resolve; });
+    mocks.invoke.mockImplementation((name: string) => {
+      if (name === "probe_stt_setup") return pending;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    const probe = screen.getByRole("button", { name: "Check offline STT setup (no model load)" }) as HTMLButtonElement;
+    fireEvent.click(probe);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ });
+    fireEvent.click(consent);
+    expect(probe.disabled).toBe(true);
+    fireEvent.click(probe);
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+    finishProbe({
+      python_311: true, stt_import_ok: true, model_files_present: false,
+      ready_to_transcribe: false, next_action_code: "select_local_model",
+      model_loaded: false, audio_transcribed: false, network_used: false,
+    });
+    await waitFor(() => expect(probe.disabled).toBe(false));
+    expect(screen.queryByText(/Offline STT setup: Needs attention/)).toBeNull();
+  });
+
   it("rejects an inconsistent or privacy-unsafe native recognition response", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
       .mockResolvedValueOnce("C:\\private\\whisper-model");
