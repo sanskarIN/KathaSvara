@@ -78,6 +78,19 @@ function isUsableRealSmokeWav(audio: AudioResult, report: RealSmokeWavInspection
     && typeof hints.possible_clipping_hint === "boolean"
     && typeof hints.long_internal_pause_hint === "boolean"
     && typeof hints.signal_review_required === "boolean"
+    // A contradictory worker hint must not hide clipping or pause warnings.
+    && hints.signal_review_required === (
+      hints.near_silence_hint || hints.dc_only_hint ||
+      hints.possible_clipping_hint || hints.long_internal_pause_hint
+    )
+    // The native bridge emits an inline WAV data URL only when preview is
+    // available. Never render an empty or unrelated URL as verified audio.
+    && (audio.preview_available === false || (
+      audio.preview_available === true &&
+      typeof audio.data_url === "string" &&
+      audio.data_url.startsWith("data:audio/wav;base64,") &&
+      audio.data_url.length > "data:audio/wav;base64,".length
+    ))
     && !hints.near_silence_hint && !hints.dc_only_hint;
 }
 
