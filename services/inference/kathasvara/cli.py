@@ -15,7 +15,7 @@ from .diagnostics import diagnose
 from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
-from .local_stt import transcribe_hindi_wav
+from .local_stt import inspect_stt_setup, transcribe_hindi_wav
 from .production import render_story
 from .production_audit import audit_production_readiness
 from .pronunciation import apply_glossary
@@ -62,6 +62,11 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "result": diagnose()}
     if request.get("action") == "probe_runtime":
         return {"ok": True, "result": probe_runtime()}
+    if request.get("action") == "probe_stt_setup":
+        model_path = request.get("model_path")
+        if model_path is not None and not isinstance(model_path, str):
+            raise TypeError("Select an offline STT model folder.")
+        return {"ok": True, "result": inspect_stt_setup(model_path)}
     if request.get("action") == "transcribe_hindi_wav":
         wav_path = request.get("wav_path")
         model_path = request.get("model_path")
