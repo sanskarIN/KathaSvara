@@ -1052,6 +1052,106 @@ async fn probe_stt_setup(model_path: Option<String>) -> Result<Value, String> {
     }).await.map_err(|_| "Offline STT setup worker stopped unexpectedly.".to_string())?
 }
 
+const MAX_MIC_WAV_BYTES: usize = 16_000 * 2 * 31 + 44;
+const MAX_MIC_WAV_B64_CHARS: usize = 1_500_000;
+const INVALID_MIC_WAV: &str = "Microphone recording must be a short 16 kHz mono PCM16 WAV.";
+
+/// The browser only creates canonical 44-byte mono PCM16 WAVs. Reject extra
+/// chunks/codecs, payload injection, oversized captures and truncated frames.
+fn decode_microphone_wav(encoded: &str) -> Result<Vec<u8>, String> {
+    if encoded.len() < 64 || encoded.len() > MAX_MIC_WAV_B64_CHARS {
+        return Err(INVALID_MIC_WAV.into());
+    }
+    let bytes = STANDARD.decode(encoded).map_err(|_| INVALID_MIC_WAV.to_string())?;
+    if bytes.len() < 46 || bytes.len() > MAX_MIC_WAV_BYTES
+        || &bytes[0..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt "
+        || u32::from_le_bytes(bytes[16..20].try_into().map_err(|_| INVALID_MIC_WAV)?) != 16
+        || &bytes[36..40] != b"data"
+        || u32::from_le_bytes(bytes[24..28].try_into().map_err(|_| INVALID_MIC_WAV)?) != 16_000
+        || u32::from_le_bytes(bytes[40..44].try_into().map_err(|_| INVALID_MIC_WAV)?) as usize
+            != bytes.len() - 44
+    {
+        return Err(INVALID_MIC_WAV.into());
+    }
+    inspect_wav(&bytes).map_err(|_| INVALID_MIC_WAV.to_string())?;
+    Ok(bytes)
+}
+
+/// RAII cleanup: the captured recording survives only while the Python child
+/// is running. It is never persisted in a project or returned to the UI.
+struct TransientMicrophoneWav {
+    path: PathBuf,
+}
+impl Drop for TransientMicrophoneWav {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn write_transient_microphone_wav(
+    root: &Path, bytes: &[u8],
+) -> Result<TransientMicrophoneWav, String> {
+    let dir = root.join("stt-microphone");
+    fs::create_dir_all(&dir)
+        .map_err(|_| "Cannot prepare the private microphone scratch directory.".to_string())?;
+    let meta = fs::symlink_metadata(&dir)
+        .map_err(|_| "Cannot inspect the private microphone scratch directory.".to_string())?;
+    if !meta.file_type().is_dir() {
+        return Err("Private microphone scratch directory is not safe.".into());
+    }
+    let path = dir.join(format!("{}.wav", Uuid::new_v4()));
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|_| "Cannot create a private microphone scratch recording.".to_string())?;
+    let scratch = TransientMicrophoneWav { path };
+    file.write_all(bytes).and_then(|_| file.sync_all())
+        .map_err(|_| "Cannot save the temporary microphone recording.".to_string())?;
+    drop(file);
+    Ok(scratch)
+}
+
+fn transcribe_recorded_microphone(
+    root: &Path, wav_base64: &str, model_path: &str,
+) -> Result<Value, String> {
+    let bytes = decode_microphone_wav(wav_base64)?;
+    // The model must be already present; never download one from this command.
+    let model = Path::new(model_path);
+    if !model.is_absolute() {
+        return Err("Choose an existing absolute local STT model folder.".into());
+    }
+    let scratch = write_transient_microphone_wav(root, &bytes)?;
+    verify_stt_paths(&scratch.path, model)?;
+    let response = invoke_python(json!({
+        "action": "transcribe_hindi_wav",
+        "wav_path": scratch.path,
+        "model_path": model_path,
+    }))?;
+    let result = response.get("result")
+        .ok_or_else(|| "Offline STT did not return a transcript.".to_string())?;
+    validate_stt_result(result)
+}
+
+/// Explicit second action after stopping recording. The WAV is never placed
+/// in a persistent project, and cleanup runs after success, failure or timeout.
+#[tauri::command]
+async fn transcribe_microphone_wav(
+    app: tauri::AppHandle,
+    wav_base64: String,
+    model_path: String,
+) -> Result<Value, String> {
+    if wav_base64.len() > MAX_MIC_WAV_B64_CHARS
+        || model_path.len() > 4096
+    {
+        return Err("Local microphone transcription request exceeds its size limit.".into());
+    }
+    let guard = RealSpeechJobGuard::start()?;
+    let root = app_dir(&app)
+        .map_err(|_| "Cannot access private microphone scratch storage.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        transcribe_recorded_microphone(&root, &wav_base64, &model_path)
+    }).await.map_err(|_| "Microphone transcription worker stopped unexpectedly.".to_string())?
+}
+
 /// User-consented local WAV to Hindi text, separate from text-to-speech.
 #[tauri::command]
 async fn transcribe_local_wav(
@@ -2077,7 +2177,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            configure_local_inference, clear_local_inference, probe_stt_setup, transcribe_local_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, probe_stt_setup, transcribe_local_wav, transcribe_microphone_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -2088,6 +2188,34 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn microphone_payload_is_bounded_and_exactly_canonical_pcm16() {
+        let mut pcm = minimal_pcm_wav();
+        pcm[24..28].copy_from_slice(&16_000u32.to_le_bytes());
+        pcm[28..32].copy_from_slice(&32_000u32.to_le_bytes());
+        let encoded = STANDARD.encode(&pcm);
+        assert_eq!(decode_microphone_wav(&encoded).unwrap(), pcm);
+        let mut incorrect = pcm.clone();
+        incorrect[24..28].copy_from_slice(&48_000u32.to_le_bytes());
+        assert!(decode_microphone_wav(&STANDARD.encode(incorrect)).is_err());
+        assert!(decode_microphone_wav("not-base64").is_err());
+        assert!(decode_microphone_wav(&STANDARD.encode(vec![0u8; MAX_MIC_WAV_BYTES + 1])).is_err());
+        let mut invalid = pcm.clone();
+        invalid[40..44].copy_from_slice(&4u32.to_le_bytes());
+        assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
+    }
+
+    #[test]
+    fn microphone_scratch_wav_is_deleted_even_without_transcription() {
+        let root = std::env::temp_dir().join(format!("kathasvara-mic-test-{}", Uuid::new_v4()));
+        let scratch = write_transient_microphone_wav(&root, &minimal_pcm_wav()).unwrap();
+        assert!(scratch.path.exists());
+        let file = scratch.path.clone();
+        drop(scratch);
+        assert!(!file.exists(), "Temporary microphone WAV must not survive the guard.");
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn stt_setup_probe_rejects_inconsistent_or_model_loaded_report() {
