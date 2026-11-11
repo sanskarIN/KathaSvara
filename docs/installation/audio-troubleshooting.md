@@ -42,6 +42,12 @@ This feature helps when the Windows developer EXE is launched by double-clicking
 
 Clearing the session selection restores launcher environment values or source discovery for subsequent jobs. Existing jobs already spawned with an older interpreter are not retroactively changed. If the source folder or interpreter was moved, reselect the current paths. Missing dependencies or incorrect Python versions will be reported by the no-model doctor; successful setup does not establish actual Hindi pronunciation or speech playback.
 
+## Next development: one-click model-free speech readiness
+
+**Not included in the published v0.5.4 executable or the prepared v0.5.5 release candidate.** After v0.5.5 is finalized, the next development branch adds **Settings → Check speech readiness (no model load)**. This runs the already-available Python environment doctor, synthetic WAV write/read check and optional Chatterbox import/API preflight **in that order**. It stops early when Python is not 3.11 or synthetic WAV I/O fails; successful WAV plumbing proceeds to the model-free speech-library check.
+
+The result shows the first practical blocker using fixed, path-free guidance. Individual speech import diagnostics also display only known package names and fixed, locally defined repair text; unknown worker-provided help strings, environment values and exception paths are not echoed into the UI. Native exception messages are never displayed, and changing the session voice reference or local interpreter selection retires a stale readiness report. A passing readiness result means **only** that the interpreter, temporary-file system, and configured optional imports responded as expected. It does not download weights, load Chatterbox checkpoints, synthesize speech, test speakers, prove character voice identity, or check exported WAV/SRT content. Real Hindi narration must still be explicitly generated and listened to under [manual issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+
 ## Windows 11 — configure, diagnose, and start
 
 Prerequisites: obtain KathaSvara's source tree from the official GitHub repository, install **Python 3.11**, and use a developer EXE downloaded from a verified KathaSvara GitHub release with its checksum validated. No administrator privileges or persistent environment-variable changes are required by this helper.
