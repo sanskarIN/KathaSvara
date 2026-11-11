@@ -1070,10 +1070,19 @@ fn decode_microphone_wav(encoded: &str) -> Result<Vec<u8>, String> {
         || u32::from_le_bytes(bytes[24..28].try_into().map_err(|_| INVALID_MIC_WAV)?) != 16_000
         || u32::from_le_bytes(bytes[40..44].try_into().map_err(|_| INVALID_MIC_WAV)?) as usize
             != bytes.len() - 44
+        || u32::from_le_bytes(bytes[4..8].try_into().map_err(|_| INVALID_MIC_WAV)?) as usize
+            != bytes.len() - 8
+        || u16::from_le_bytes(bytes[20..22].try_into().map_err(|_| INVALID_MIC_WAV)?) != 1
+        || u16::from_le_bytes(bytes[22..24].try_into().map_err(|_| INVALID_MIC_WAV)?) != 1
+        || u32::from_le_bytes(bytes[28..32].try_into().map_err(|_| INVALID_MIC_WAV)?) != 32_000
+        || u16::from_le_bytes(bytes[32..34].try_into().map_err(|_| INVALID_MIC_WAV)?) != 2
+        || u16::from_le_bytes(bytes[34..36].try_into().map_err(|_| INVALID_MIC_WAV)?) != 16
+        || !(bytes.len() - 44).is_multiple_of(2)
     {
         return Err(INVALID_MIC_WAV.into());
     }
-    inspect_wav(&bytes).map_err(|_| INVALID_MIC_WAV.to_string())?;
+    // Canonical 44-byte WAV header and a contiguous data chunk: no unknown
+    // codecs, channels, variable chunk offsets or arbitrary metadata.
     Ok(bytes)
 }
 
@@ -2203,6 +2212,18 @@ mod tests {
         assert!(decode_microphone_wav(&STANDARD.encode(vec![0u8; MAX_MIC_WAV_BYTES + 1])).is_err());
         let mut invalid = pcm.clone();
         invalid[40..44].copy_from_slice(&4u32.to_le_bytes());
+        assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
+        let mut invalid = pcm.clone();
+        invalid[28..32].copy_from_slice(&1u32.to_le_bytes());
+        assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
+        let mut invalid = pcm.clone();
+        invalid[22..24].copy_from_slice(&2u16.to_le_bytes());
+        assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
+        let mut invalid = pcm.clone();
+        invalid[4..8].copy_from_slice(&0u32.to_le_bytes());
+        assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
+        let mut invalid = pcm.clone();
+        invalid[20..22].copy_from_slice(&3u16.to_le_bytes());
         assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
     }
 
