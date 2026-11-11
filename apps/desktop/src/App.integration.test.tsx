@@ -146,6 +146,24 @@ describe("explicit real Hindi model smoke test", () => {
     expect(screen.getByRole("button", { name: runLabel })).toHaveProperty("disabled", true);
   });
 
+  it("reports built-in playback failure without claiming Hindi was heard, and keeps export available", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "synthesize") return goodWav;
+      if (command === "inspect_generated_audio") return goodInspection;
+      throw new Error("Unexpected command: " + command);
+    });
+    openSettings();
+    fireEvent.click(screen.getByLabelText(consentLabel));
+    fireEvent.click(screen.getByRole("button", { name: runLabel }));
+    await screen.findByRole("status", { name: "Real Hindi audio test result" });
+    const player = screen.getByLabelText("Real Hindi smoke-test audio preview");
+    fireEvent.error(player);
+    expect(screen.getByText(/built-in audio player could not play this WAV/)).toBeTruthy();
+    expect(screen.getByText(/Hindi listening remains unverified/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Export real Hindi test WAV" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Hindi listening passed");
+  });
+
   it("keeps native inference errors and private paths out of the UI", async () => {
     mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-story\\secret.wav"));
     openSettings();
