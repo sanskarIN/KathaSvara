@@ -51,6 +51,95 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("guided model-free speech readiness", () => {
+  const python = {
+    python_311: true, python_version: "3.11.11", platform: "Windows",
+    dependencies: { numpy: true, soundfile: true, torch: true, chatterbox: true },
+    dependencies_present: true, model_weights_verified: false,
+    audio_synthesis_verified: false, help: "No model loaded",
+  };
+  const wav = {
+    status: "passed", failed_stage: null, temporary_wav_roundtrip_ok: true,
+    model_loaded: false, hindi_listening_verified: false,
+    audio_playback_verified: false, help: "Model-free test",
+  };
+
+  it("runs Python, disposable WAV and import checks in order without synthesis", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "diagnose_engine") return python;
+      if (command === "probe_audio_io") return wav;
+      if (command === "probe_tts_runtime") return GOOD_IMPORTS;
+      throw new Error("Unexpected native call");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup checks passed")).toBeTruthy());
+    const commands = mocks.invoke.mock.calls.map(([name]) => name);
+    expect(commands).toEqual(["diagnose_engine", "probe_audio_io", "probe_tts_runtime"]);
+    expect(mocks.invoke).toHaveBeenCalledWith("probe_tts_runtime", { referenceWavPath: null });
+    expect(screen.getByText(/Real Hindi narration, model weights and speaker playback verified:/)).toBeTruthy();
+    expect(screen.getByText(/next step is explicit real Hindi generation and listening/)).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("stops before WAV access when the interpreter is not Python 3.11", async () => {
+    mocks.invoke.mockResolvedValue({ ...python, python_311: false, python_version: "3.12.3" });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup needs attention")).toBeTruthy());
+    expect(screen.getByText(/select Python 3.11/)).toBeTruthy();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("probe_audio_io");
+  });
+
+  it("stops before speech imports when disposable WAV I/O fails", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "diagnose_engine") return python;
+      if (command === "probe_audio_io") return {
+        ...wav, status: "failed", temporary_wav_roundtrip_ok: false, failed_stage: "write_pcm16",
+      };
+      throw new Error("Unexpected import or synthesis");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup needs attention")).toBeTruthy());
+    expect(screen.getByText(/Temporary WAV I\/O is blocked/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.map(([name]) => name)).toEqual(["diagnose_engine", "probe_audio_io"]);
+    expect(screen.getByText(/write_pcm16/)).toBeTruthy();
+  });
+
+  it("does not leak native error paths when a diagnostic crashes", async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-account\\voice.wav"));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    await waitFor(() => expect(screen.getByText("Setup needs attention")).toBeTruthy());
+    expect(document.body.textContent).not.toContain("private-account");
+    expect(screen.getByText(/A local diagnostic could not run/)).toBeTruthy();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables duplicate one-click requests and retires a superseded voice selection", async () => {
+    let finish: (value: typeof python) => void = () => { throw new Error("not started"); };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "diagnose_engine") {
+        return new Promise<typeof python>(resolve => { finish = resolve; });
+      }
+      throw new Error("No later check should run");
+    });
+    mocks.open.mockResolvedValue("C:\\Users\\private-account\\voice.wav");
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    const checking = screen.getByRole("button", { name: /Step 1\/3: Checking Python/ });
+    expect(checking).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Choose local reference WAV" }));
+    await waitFor(() => expect(screen.getByText(/Local recording selected \(private path hidden\)/)).toBeTruthy());
+    await act(async () => { finish(python); });
+    expect(screen.queryByRole("status", { name: "Speech readiness summary" })).toBeNull();
+    expect(mocks.invoke.mock.calls.map(([name]) => name)).toEqual(["diagnose_engine"]);
+    expect(document.body.textContent).not.toContain("private-account");
+  });
+});
+
 describe("local session inference configuration", () => {
   const python = "C:\\Users\\private-account\\speech-env\\Scripts\\python.exe";
   const source = "C:\\Users\\private-account\\KathaSvara\\services\\inference";
@@ -516,6 +605,127 @@ describe("local TTS import doctor (no model)", () => {
   });
 });
 
+
+describe("contradictory imported-runtime readiness results", () => {
+  it("never marks setup ready when the worker claims success but an import failed", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      preflight_ok: true,
+      imports_ok: false,
+      checks: { ...GOOD_IMPORTS.checks, torch: "import_failed" },
+      next_action_code: "run_real_hindi_smoke",
+      next_action: "Pretend everything works",
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/TTS preflight: Setup needs attention/)).toBeTruthy();
+    expect(within(report).getByText(/Recommended next step:/).parentElement?.textContent)
+      .toContain("Update the local KathaSvara inference sources");
+    expect(report.textContent).not.toContain("Pretend everything works");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("guidance remains blocked if a final probe contradicts its own success flag", async () => {
+    const python = {
+      python_311: true, python_version: "3.11.11", platform: "Windows",
+      dependencies: { numpy: true, soundfile: true, torch: true, chatterbox: true },
+      dependencies_present: true, model_weights_verified: false,
+      audio_synthesis_verified: false, help: "No model loaded",
+    };
+    const wav = {
+      status: "passed", failed_stage: null, temporary_wav_roundtrip_ok: true,
+      model_loaded: false, hindi_listening_verified: false,
+      audio_playback_verified: false, help: "Synthetic WAV test passed",
+    };
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "diagnose_engine") return python;
+      if (command === "probe_audio_io") return wav;
+      if (command === "probe_tts_runtime") return {
+        ...GOOD_IMPORTS, preflight_ok: true, imports_ok: false,
+        checks: { ...GOOD_IMPORTS.checks, torch: "import_failed" },
+      };
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check speech readiness (no model load)" }));
+    const summary = await screen.findByRole("status", { name: "Speech readiness summary" });
+    expect(within(summary).getByText("Setup needs attention")).toBeTruthy();
+    expect(within(summary).getByText(/Real Hindi narration, model weights and speaker playback verified:/)).toBeTruthy();
+    expect(mocks.invoke.mock.calls.map(([name]) => name))
+      .toEqual(["diagnose_engine", "probe_audio_io", "probe_tts_runtime"]);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+});
+
+describe("privacy boundary for individual Settings diagnostics", () => {
+  const privateFragment = "private-folder-DO-NOT-DISPLAY";
+
+  it("renders only allowlisted import components and fixed action guidance", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      preflight_ok: false,
+      next_action_code: "repair_tts_imports",
+      next_action: "C:\\Users\\private-folder-DO-NOT-DISPLAY\\voice.wav",
+      help: "Sensitive runtime detail private-folder-DO-NOT-DISPLAY",
+      checks: {
+        ...GOOD_IMPORTS.checks,
+        "C:\\Users\\private-folder-DO-NOT-DISPLAY\\module.py": "import_failed",
+      },
+      tts_device_mode: "C:\\Users\\private-folder-DO-NOT-DISPLAY",
+      device_configuration_valid: false,
+      tts_model_variant: "private-folder-DO-NOT-DISPLAY",
+      model_configuration_valid: false,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    const recommendation = within(report).getByText(/Recommended next step:/);
+    expect(recommendation.parentElement?.textContent).toContain("Repair the failed speech packages");
+    expect(within(report).getByText(/Invalid override — use auto or cpu/)).toBeTruthy();
+    expect(within(report).getByText(/Invalid override — use v2 or v3/)).toBeTruthy();
+    expect(within(report).getByText(/Model weights \/ real Hindi audio verified:/)).toBeTruthy();
+    expect(report.textContent).not.toContain(privateFragment);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+
+  it("uses fallback text for a worker returning an unknown action code", async () => {
+    mocks.invoke.mockResolvedValue({
+      ...GOOD_IMPORTS,
+      preflight_ok: false,
+      next_action_code: "C:\\Users\\private-folder-DO-NOT-DISPLAY",
+      next_action: "Leak: private-folder-DO-NOT-DISPLAY",
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    const report = await screen.findByRole("status", { name: "TTS import probe result" });
+    expect(within(report).getByText(/Recommended next step:/).parentElement?.textContent)
+      .toContain("Update the local KathaSvara inference sources");
+    expect(report.textContent).not.toContain(privateFragment);
+  });
+
+  it("redacts Python and import-probe exceptions instead of echoing local paths", async () => {
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-folder-DO-NOT-DISPLAY\\python.exe"));
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect local TTS setup" }));
+    await waitFor(() => expect(screen.getByText(/Local diagnostic unavailable/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateFragment);
+
+    mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-folder-DO-NOT-DISPLAY\\voice.wav"));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Verify speech library imports (no model load)",
+    }));
+    await waitFor(() => expect(screen.getByText(/TTS import probe could not run/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateFragment);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("synthesize", expect.anything());
+  });
+});
 
 describe("actionable model-free speech setup guidance", () => {
   it("shows compatibility guidance rather than undefined for an older Python bridge", async () => {
