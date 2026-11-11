@@ -725,7 +725,9 @@ export default function App() {
         setSttStatus("Local microphone transcription failed. Check the STT setup, model files and recording.");
       }
     } finally {
-      if (revision === sttRevision.current) setSttWorking(false);
+      // Only one native STT worker can be in flight: even a consent change
+      // must not make another user action start a second model load.
+      setSttWorking(false);
       // Do not retain microphone WAV in application state after transcription.
       if (revision === sttRevision.current) discardMicrophone();
     }
@@ -736,8 +738,9 @@ export default function App() {
     sttRevision.current += 1;
     setSttResult(null);
     setSttStatus(null);
-    setSttWorking(false);
-    setSttChecking(false);
+    // Revoking consent invalidates results, not the already-running native
+    // inference worker or no-model probe. Keep busy controls locked until
+    // those operations actually finish, even if their replies are stale.
     setSttSetup(null);
   }
 
@@ -803,7 +806,8 @@ export default function App() {
         setSttStatus("Unable to check STT dependencies. Verify Python 3.11 and matching inference sources.");
       }
     } finally {
-      if (revision === sttRevision.current) setSttChecking(false);
+      // Stale diagnostic responses must still release the single-flight lock.
+      setSttChecking(false);
     }
   }
 
@@ -831,7 +835,9 @@ export default function App() {
         setSttStatus("Offline transcription failed. Check Python 3.11, the optional STT package, a complete local model folder and a mono PCM16 WAV under 60 seconds.");
       }
     } finally {
-      if (revision === sttRevision.current) setSttWorking(false);
+      // Native recognition is still running after consent changes; only the
+      // actual completion releases the UI lock, while its result stays retired.
+      setSttWorking(false);
     }
   }
 
