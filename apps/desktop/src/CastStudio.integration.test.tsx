@@ -88,6 +88,26 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("privacy of scene render errors", () => {
+  it("uses fixed repair guidance rather than leaking native audio or voice filenames", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "render_story_v2") {
+        throw new Error("C:\\Users\\private-narrator\\secret-voice.wav token-secret");
+      }
+      return undefined;
+    });
+    const { onMessage } = mount();
+    fireEvent.click(screen.getByRole("button", { name: "Generate story dialogue WAV" }));
+    await waitFor(() => expect(onMessage).toHaveBeenCalledWith(
+      "Scene render stopped or failed: Local operation failed. Check the selected inputs, runtime setup and disk permissions, then retry.",
+    ));
+    expect(onMessage.mock.calls.flat().join(" ")).not.toContain("private-narrator");
+    expect(onMessage.mock.calls.flat().join(" ")).not.toContain("token-secret");
+    expect(document.body.textContent).not.toContain("private-narrator");
+    expect(JSON.stringify(window.localStorage)).not.toContain("private-narrator");
+  });
+});
+
 describe("real React/Tauri desktop controls with mocked IPC (no voice model)", () => {
   it("uses session voice reference only as an explicit render argument", async () => {
     const privatePath = "C:\\Users\\private\\narrator.wav";
@@ -508,7 +528,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(attempts).toBe(1);
     await act(async () => { rejectFirst(new Error("Temporary cancellation IPC failure")); });
     expect(onMessage.mock.calls.some(([msg]) =>
-      String(msg).includes("Unable to signal cancellation: Temporary cancellation IPC failure")))
+      String(msg).includes("Unable to signal cancellation: Local operation failed.")))
       .toBe(true);
     expect((screen.getByRole("button", { name: "Cancel render" }) as HTMLButtonElement).disabled)
       .toBe(false);
@@ -1086,7 +1106,7 @@ describe("real React/Tauri desktop controls with mocked IPC (no voice model)", (
     expect(attempts).toBe(1);
     await act(async () => { failFirst(new Error("Storage temporarily locked")); });
     expect(onMessage.mock.calls.some(([msg]) =>
-      String(msg).includes("Cannot forget render history: Storage temporarily locked"))).toBe(true);
+      String(msg).includes("Cannot forget render history: Local operation failed."))).toBe(true);
     expect((screen.getByRole("button", { name: "Forget record" }) as HTMLButtonElement).disabled)
       .toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Forget record" }));

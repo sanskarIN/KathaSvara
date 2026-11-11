@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { AudioResult } from "./lib/story";
+import { publicDesktopError } from "./lib/public_errors";
 import { buildDialogueCues, buildDialogueSrt, type DialogueCue } from "./lib/subtitles";
 import { parseWavQuality, qualityReviewHints, type WavQualityReport } from "./lib/wav_quality";
 import { resolveRenderSelection } from "./lib/render_selection";
@@ -49,8 +50,13 @@ interface Props {
   referenceWavPath?: string | null;
 }
 
+// Pure synchronous editor validation is authored in local TypeScript and
+// should retain its specific guidance. Native IPC errors are untrusted.
 function errorString(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+function ipcErrorString(error: unknown): string {
+  return publicDesktopError(error);
 }
 
 function spokenSubtitleLines(doc: StoryV2) {
@@ -398,7 +404,7 @@ export default function CastStudio({
         : "A generated WAV is ready. Listen critically: multiple distinct character voices have NOT been verified.");
     } catch (error) {
       if (revision === renderRevision.current && activeRenderJob.current === id) {
-        onMessage("Scene render stopped or failed: " + errorString(error));
+        onMessage("Scene render stopped or failed: " + ipcErrorString(error));
       }
     } finally {
       // If a different story has begun rendering, this obsolete promise may
@@ -418,8 +424,10 @@ export default function CastStudio({
     const request = ++planEpoch.current;
     setPlanBusy(true);
     setRenderPlan(null);
+    let nativeRequested = false;
     try {
       const selection = resolveRenderSelection(document, { sceneId });
+      nativeRequested = true;
       const result = await invoke<RenderPlan>("preflight_render", {
         project: document, ...selection,
       });
@@ -431,7 +439,7 @@ export default function CastStudio({
       onMessage("Model-free plan reviewed: no model loaded and no speech duration or voice quality assumed.");
     } catch (error) {
       if (revision === renderRevision.current && request === planEpoch.current) {
-        onMessage("Render preflight failed: " + errorString(error));
+        onMessage("Render preflight failed: " + (nativeRequested ? ipcErrorString(error) : errorString(error)));
       }
     } finally {
       if (request === planEpoch.current) setPlanBusy(false);
@@ -453,7 +461,7 @@ export default function CastStudio({
       onMessage("Model-free production audit complete. Review each scene before loading the speech model.");
     } catch (error) {
       if (revision === renderRevision.current && request === auditEpoch.current) {
-        onMessage("Production audit failed: " + errorString(error));
+        onMessage("Production audit failed: " + ipcErrorString(error));
       }
     } finally {
       if (request === auditEpoch.current) setAuditBusy(false);
@@ -464,10 +472,12 @@ export default function CastStudio({
     if (!audit || busy || auditBusy || rendering || activeRenderJob.current) return;
     const revision = renderRevision.current;
     const auditRequest = auditEpoch.current;
+    let nativeRequested = false;
     try {
       // The export allowlist excludes scene/story IDs, private Hindi dialogue,
       // speaker names, voice settings and generated audio paths.
       const content = serializeProductionManifest(audit);
+      nativeRequested = true;
       const destination = await save({
         title: "Export model-free production readiness report",
         defaultPath: "kathasvara-production-audit.json",
@@ -488,7 +498,7 @@ export default function CastStudio({
     } catch (error) {
       if (revision === renderRevision.current && auditRequest === auditEpoch.current &&
           activeRenderJob.current === null) {
-        onMessage("Cannot export production report: " + errorString(error));
+        onMessage("Cannot export production report: " + (nativeRequested ? ipcErrorString(error) : errorString(error)));
       }
     }
   }
@@ -504,7 +514,7 @@ export default function CastStudio({
       onMessage("Local history loaded. Retry is manual: the current entire story will be revalidated with a fresh job ID; only unchanged cached speech can be reused.");
     } catch (error) {
       if (revision === renderRevision.current && epoch === historyEpoch.current) {
-        onMessage("Could not read local render history: " + errorString(error));
+        onMessage("Could not read local render history: " + ipcErrorString(error));
       }
     } finally {
       if (epoch === historyEpoch.current) setLoadingHistory(false);
@@ -545,7 +555,7 @@ export default function CastStudio({
     } catch (error) {
       if (revision === renderRevision.current &&
           forgetTokens.current.get(job.job_id) === token) {
-        onMessage("Cannot forget render history: " + errorString(error));
+        onMessage("Cannot forget render history: " + ipcErrorString(error));
       }
     } finally {
       if (forgetTokens.current.get(job.job_id) === token) {
@@ -580,7 +590,7 @@ export default function CastStudio({
         // If the signalling IPC fails, explicitly allow a retry for this job.
         cancelRequest.current = null;
         setCancelStatus("idle");
-        onMessage("Unable to signal cancellation: " + errorString(error));
+        onMessage("Unable to signal cancellation: " + ipcErrorString(error));
       }
     }
   }
@@ -607,12 +617,14 @@ export default function CastStudio({
     const epoch = audioEpoch.current;
     const label = audioExportLabel;
     const audioId = audio.audio_id;
+    let nativeRequested = false;
     try {
       // Timings are derived from actual rendered PCM frames, not reading-speed estimates.
       // The same complete validation is used by the optional in-app preview.
       const content = buildDialogueSrt(audio.segment_timings, spokenSubtitleLines(document), {
         duration_seconds: audio.duration_seconds, sample_rate: audio.sample_rate,
       });
+      nativeRequested = true;
       const destination = await save({
         title: "Export segment-timed Hindi SubRip subtitles",
         defaultPath: suggestedOutputFile(label, "srt"),
@@ -636,7 +648,7 @@ export default function CastStudio({
     } catch (error) {
       if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
         revision, renderRevision.current)) {
-        onMessage("Cannot export dialogue subtitles: " + errorString(error));
+        onMessage("Cannot export dialogue subtitles: " + (nativeRequested ? ipcErrorString(error) : errorString(error)));
       }
     }
   }
@@ -649,8 +661,10 @@ export default function CastStudio({
     const id = audio.audio_id;
     setWavQa(null);
     setInspectingWav(true);
+    let nativeCompleted = false;
     try {
       const raw = await invoke<unknown>("inspect_generated_audio", { audioId: id });
+      nativeCompleted = true;
       const report = parseWavQuality(raw);
       if (request !== qaEpoch.current || epoch !== audioEpoch.current ||
           revision !== renderRevision.current) return;
@@ -663,7 +677,7 @@ export default function CastStudio({
     } catch (error) {
       if (request === qaEpoch.current && epoch === audioEpoch.current &&
           revision === renderRevision.current) {
-        onMessage("WAV inspection failed: " + errorString(error));
+        onMessage("WAV inspection failed: " + (nativeCompleted ? errorString(error) : ipcErrorString(error)));
       }
     } finally {
       if (request === qaEpoch.current) setInspectingWav(false);
@@ -696,7 +710,7 @@ export default function CastStudio({
     } catch (error) {
       if (isCurrentExportSession(label, audioId, epoch, audioEpoch.current,
         revision, renderRevision.current)) {
-        onMessage("Cannot export audio: " + errorString(error));
+        onMessage("Cannot export audio: " + ipcErrorString(error));
       }
     }
   }
@@ -712,7 +726,7 @@ export default function CastStudio({
       await invoke("discard_audio", { audioId: id });
       onMessage("Generated dialogue preview removed from local audio cache.");
     } catch (error) {
-      onMessage("Local cache deletion failed: " + errorString(error));
+      onMessage("Local cache deletion failed: " + ipcErrorString(error));
     }
   }
   async function parse() {
@@ -754,7 +768,7 @@ export default function CastStudio({
         : `Parsed ${response.result.scenes.length} scene(s). Save the v2 story to preserve character assignments.`);
     } catch (error) {
       if (revision === renderRevision.current) {
-        onMessage("Dialogue parsing failed: " + errorString(error));
+        onMessage("Dialogue parsing failed: " + ipcErrorString(error));
       }
     } finally {
       if (op === editorOperationEpoch.current) setBusy(false);
@@ -779,7 +793,7 @@ export default function CastStudio({
       onMessage("Version 2 story and voice profiles saved atomically in local app data.");
     } catch (error) {
       if (revision === renderRevision.current) {
-        onMessage("Unable to save version 2 story: " + errorString(error));
+        onMessage("Unable to save version 2 story: " + ipcErrorString(error));
       }
     } finally {
       if (op === editorOperationEpoch.current) setBusy(false);
@@ -807,7 +821,7 @@ export default function CastStudio({
       onMessage("Saved v2 story loaded. Legacy v0.1.x stories remain in their original folder.");
     } catch (error) {
       if (revision === renderRevision.current) {
-        onMessage("No saved v2 story for this ID: " + errorString(error));
+        onMessage("No saved v2 story for this ID: " + ipcErrorString(error));
       }
     } finally {
       if (op === editorOperationEpoch.current) setBusy(false);

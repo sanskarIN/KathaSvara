@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { setGlossary, type PronunciationRuleV2, type StoryV2 } from "./lib/story_v2";
+import { publicDesktopError } from "./lib/public_errors";
 
 type Preview = {
   original: string;
@@ -39,7 +40,7 @@ export default function PronunciationStudio({ document, edit, onMessage }: Props
       void invoke<Preview>("preview_pronunciation", { project: document, segmentId: selected })
         .then(result => { if (!cancelled) setPreview(result); })
         .catch(reason => {
-          if (!cancelled) setPreviewError("Preview unavailable: " + String(reason));
+          if (!cancelled) setPreviewError("Preview unavailable: " + publicDesktopError(reason));
         });
     }, 250);
     return () => { cancelled = true; window.clearTimeout(timeout); };
@@ -54,7 +55,7 @@ export default function PronunciationStudio({ document, edit, onMessage }: Props
       setOriginal("");
       setSpoken("");
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      onMessage(publicDesktopError(error));
     }
   }
   function addOrSave() {
