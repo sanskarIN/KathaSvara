@@ -1402,7 +1402,7 @@ export default function App() {
                   local multilingual CTranslate2 faster-whisper model folder containing
                   <code> config.json</code>, <code>model.bin</code> and <code>tokenizer.json</code>.
                   Install the optional <code>.[stt]</code> Python extra separately in your selected Python 3.11 environment.
-                  Microphone capture is available only after explicit consent and a browser/Windows permission prompt, with a 30-second automatic stop. Neither WAV capture nor model inference uploads audio or downloads weights; generated transcripts may contain errors.
+                  Microphone capture uses local Web Audio PCM after explicit consent and a browser/Windows permission prompt, with a 30-second automatic stop. Neither WAV capture nor model inference uploads audio or downloads weights; generated transcripts may contain errors.
                   Model output is not guaranteed accurate; review it before using it.</p>
                 <div className="preview-actions">
                   <button className="secondary-button" disabled={sttWorking || sttChecking || sttWavChecking}
