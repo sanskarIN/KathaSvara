@@ -1065,7 +1065,18 @@ export default function App() {
                     )}
                     {smokeAudio.preview_available === false
                       ? <p>This test WAV exceeds inline playback limits. Export it and listen in a local audio player.</p>
-                      : <audio ref={smokeAudioRef} controls src={smokeAudio.data_url} aria-label="Real Hindi smoke-test audio preview" />}
+                      : <audio ref={smokeAudioRef} controls src={smokeAudio.data_url}
+                          aria-label="Real Hindi smoke-test audio preview"
+                          onError={event => {
+                            // The WAV file passed structural inspection, but
+                            // a WebView codec/device failure is a separate
+                            // outcome. Never present it as successful playback.
+                            // Media errors may contain private browser details:
+                            // display only fixed local guidance.
+                            if (smokeAudioRef.current === event.currentTarget) {
+                              setSmokeStatus("The built-in audio player could not play this WAV. Export the test WAV and try a trusted local audio player. Hindi listening remains unverified.");
+                            }
+                          }} />}
                     <button className="secondary-button" onClick={() => void exportSmokeWav()}>
                       Export real Hindi test WAV
                     </button>
