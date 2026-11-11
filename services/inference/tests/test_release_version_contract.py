@@ -11,7 +11,7 @@ from pathlib import Path
 
 VERSION = "0.5.6"
 # Public landing page must match the last actually published GitHub prerelease.
-PUBLISHED_VERSION = "0.5.5"
+PUBLISHED_VERSION = "0.5.6"
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -99,7 +99,7 @@ def test_manual_windows_qa_uses_latest_published_preview() -> None:
     assert f"releases/tag/v{PUBLISHED_VERSION}" in qa
     assert f"KathaSvara-v{PUBLISHED_VERSION}-dev-win64.exe" in qa
     assert "Latest verified published experimental pre-release" in qa
-    assert "v0.5.5" in qa and "unpublished source release candidate" not in qa
+    assert "v0.5.6" in qa and "unpublished source release candidate" not in qa
     assert "not-tested" in qa
     assert "real-model" in qa.lower() and "listening" in qa.lower()
 

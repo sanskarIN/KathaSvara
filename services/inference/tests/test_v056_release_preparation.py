@@ -14,7 +14,7 @@ VERSION = "0.5.6"
 PREVIOUS = "0.5.5"
 
 
-def test_v056_version_consistency_and_current_public_preview() -> None:
+def test_v056_version_consistency_and_published_current_preview() -> None:
     package = json.loads((ROOT / "apps/desktop/package.json").read_text(encoding="utf-8"))
     lock = json.loads((ROOT / "apps/desktop/package-lock.json").read_text(encoding="utf-8"))
     tauri = json.loads((ROOT / "apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
@@ -26,10 +26,11 @@ def test_v056_version_consistency_and_current_public_preview() -> None:
     } == {VERSION}
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "v0.5.5 · Latest experimental pre-release" in site
-    assert "v0.5.6 · Latest experimental pre-release" not in site
+    assert "v0.5.5 · Historical experimental pre-release" in site
+    assert "v0.5.6 · Latest experimental pre-release" in site
     assert "releases/tag/v0.5.5" in site and "releases/tag/v0.5.5" in readme
-    assert "Latest experimental developer pre-release: [KathaSvara v0.5.5]" in readme
+    assert "releases/tag/v0.5.6" in site and "releases/tag/v0.5.6" in readme
+    assert "Latest experimental developer pre-release: [KathaSvara v0.5.6]" in readme
 
 
 def test_v056_release_is_exclusively_manual_and_predecessor_gated() -> None:
@@ -85,7 +86,9 @@ def test_v056_publication_safe_notes_and_unsigned_windows_candidate() -> None:
     checklist = (ROOT / "docs/releases/v0.5.6-publication-checklist.md").read_text(
         encoding="utf-8"
     )
-    assert "DRAFT — NOT PUBLISHED" in draft and "DRAFT — NOT PUBLISHED" in checklist
+    assert "DRAFT — NOT PUBLISHED" in draft
+    assert "PUBLISHED 11 NOVEMBER 2026" in checklist
+    assert "DRAFT — NOT PUBLISHED" not in checklist
     assert "DRAFT — NOT PUBLISHED" not in published
     assert "DRAFT — NOT PUBLISHED" in workflow
     assert "--notes-file docs/releases/v0.5.6-published-notes.md" in workflow
