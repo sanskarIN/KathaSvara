@@ -73,8 +73,11 @@ a user's machine.
    operating system/webview for microphone access when required. It does
    **not** bypass a denied permission or access the camera.
 3. A visible recording indicator stays on screen. Click **Stop recording**
-   or let the 30-second cap stop capture. Browser media is decoded and
-   converted to 16 kHz mono PCM16 WAV. Recording is held in memory and
+   or let the 30-second cap stop capture. The next development source
+   uses bounded Web Audio raw PCM capture, then converts the samples directly
+   to 16 kHz mono PCM16 WAV, avoiding MediaRecorder's compressed-container
+   decoding step. An unsupported Web Audio capture graph fails safely and
+   releases microphone tracks. Captured audio is held in memory and
    **does not automatically launch the STT model**.
 4. With consent still checked, click **Transcribe recorded Hindi offline**
    to send the bounded WAV to local Tauri IPC. The native bridge creates a
@@ -86,6 +89,14 @@ a user's machine.
    away from Settings, hiding or closing the window and withdrawing
    consent also stop active microphone tracks; invalid/oversized recordings
    are rejected with fixed user-facing guidance.
+
+The Web Audio compatibility capture uses ScriptProcessorNode, which is
+deprecated but currently supported by the targeted WebView2 runtime. It
+feeds silence to the audio output; it never monitors recorded microphone
+audio through the speakers. Replace it with AudioWorklet only after
+hardware permission and cancellation behavior are manually accepted.
+Passing mocked Web Audio tests or a Windows build is not evidence that
+WebView2 or Windows actually granted a microphone.
 
 The Tauri bridge validates canonical PCM16 WAV headers, mono 16 kHz sample
 rate, encoded size and short duration independently of the webview.
