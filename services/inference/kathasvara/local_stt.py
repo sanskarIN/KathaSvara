@@ -7,11 +7,11 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import importlib
-import os
 import stat
 import sys
-import wave
 from pathlib import Path
+
+from .wav_acceptance import inspect_wav_candidate
 
 MAX_STT_WAV_BYTES = 6 * 1024 * 1024
 MAX_STT_SECONDS = 60
@@ -19,30 +19,54 @@ MAX_TRANSCRIPT_CHARS = 8_000
 MODEL_FILES = ("config.json", "model.bin", "tokenizer.json")
 
 
-def inspect_stt_wav(path: Path) -> dict[str, int | float]:
-    """Inspect local audio before ever importing the recognition model."""
+def inspect_stt_wav(path: Path) -> dict[str, object]:
+    """Inspect only bounded local PCM16 audio; do not load recognition weights.
+
+    Reuse the structural and streamed signal inspector from WAV acceptance:
+    plain wave.open() alone can accept duplicate/trailing RIFF chunks or a
+    truncated/misleading header that the recognition decoder reads differently.
+    The returned fixed-shape hints contain no WAV path, digest or transcript.
+    """
     if not path.is_absolute() or path.suffix.lower() != ".wav":
         raise ValueError("Select an absolute local PCM16 WAV recording.")
     try:
         metadata = path.lstat()
         if not stat.S_ISREG(metadata.st_mode) or not 44 <= metadata.st_size <= MAX_STT_WAV_BYTES:
             raise ValueError("Select a regular PCM16 WAV under 6 MiB.")
-        with path.open("rb") as audio:
-            opened = os.fstat(audio.fileno())
-            if not stat.S_ISREG(opened.st_mode) or not 44 <= opened.st_size <= MAX_STT_WAV_BYTES:
-                raise ValueError("Select a regular PCM16 WAV under 6 MiB.")
-            with wave.open(audio, "rb") as wav:
-                rate = wav.getframerate()
-                frames = wav.getnframes()
-                if (wav.getcomptype() != "NONE" or wav.getnchannels() != 1
-                        or wav.getsampwidth() != 2 or rate not in (8000, 16000, 24000, 48000)
-                        or frames <= 0 or frames > rate * MAX_STT_SECONDS
-                        or frames * 2 > opened.st_size - 44):
-                    raise ValueError("Use mono PCM16 WAV audio of 60 seconds or less.")
-                return {"sample_rate": rate, "frames": frames,
-                        "duration_seconds": round(frames / rate, 3)}
-    except (OSError, EOFError, wave.Error) as exc:
+        report = inspect_wav_candidate(path)
+    except OSError as exc:
         raise ValueError("Selected recording is not a readable PCM16 WAV.") from exc
+    except ValueError as exc:
+        # Only our own bounded errors leave this function; third-party
+        # decoder/file details never cross the desktop JSON boundary.
+        if str(exc) in (
+            "Select a regular PCM16 WAV under 6 MiB.",
+        ):
+            raise
+        raise ValueError("Selected recording is not a readable PCM16 WAV.") from exc
+
+    sample_rate = report["sample_rate_hz"]
+    frames = report["frames"]
+    if sample_rate not in (8_000, 16_000, 24_000, 48_000) or frames > sample_rate * MAX_STT_SECONDS:
+        raise ValueError("Use mono PCM16 WAV audio of 60 seconds or less.")
+    hints = report["level_hints"]
+    quiet = bool(hints["near_silence_hint"])
+    dc_only = bool(hints["dc_only_hint"])
+    clipping = bool(hints["possible_clipping_hint"])
+    long_pause = bool(hints["long_internal_pause_hint"])
+    return {
+        "sample_rate": sample_rate,
+        "frames": frames,
+        "duration_seconds": report["duration_seconds"],
+        "near_silence_hint": quiet,
+        "dc_only_hint": dc_only,
+        "possible_clipping_hint": clipping,
+        "long_internal_pause_hint": long_pause,
+        "signal_review_required": quiet or dc_only or clipping or long_pause,
+        "model_loaded": False,
+        "audio_transcribed": False,
+        "network_used": False,
+    }
 
 
 def verify_local_model_folder(model_folder: Path) -> None:
@@ -104,6 +128,12 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
     recording = Path(wav_path)
     model_folder = Path(model_path)
     info = inspect_stt_wav(recording)
+    # Refuse effectively silent and DC-only recordings before constructing a
+    # resource-heavy model; on silence Whisper can invent plausible words.
+    if info["near_silence_hint"] or info["dc_only_hint"]:
+        raise ValueError(
+            "Recording has no usable speech-level signal. Check microphone input and try again."
+        )
     verify_local_model_folder(model_folder)
     try:
         from faster_whisper import WhisperModel
