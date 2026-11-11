@@ -73,7 +73,7 @@ def test_v054_release_template_cannot_publish_a_false_draft_banner() -> None:
     assert "NOT A COMPLETE INSTALLER" in published
 
 
-def test_next_version_components_match_while_site_remains_published_v054() -> None:
+def test_v055_components_match_while_site_retains_historical_v054() -> None:
     package = json.loads((ROOT / "apps/desktop/package.json").read_text(encoding="utf-8"))
     lock = json.loads(
         (ROOT / "apps/desktop/package-lock.json").read_text(encoding="utf-8")
@@ -97,9 +97,10 @@ def test_next_version_components_match_while_site_remains_published_v054() -> No
     ):
         assert actual == NEXT_VERSION
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
-    assert 'releases/tag/v0.5.4' in site
-    assert "v0.5.4 · Latest experimental pre-release" in site
-    assert 'v0.5.4 pre-release ↗' in site
+    assert 'releases/tag/v0.5.4' in site  # Historical predecessor remains.
+    assert "v0.5.4 · Historical experimental pre-release" in site
+    assert "v0.5.5 · Latest experimental pre-release" in site
+    assert 'v0.5.5 pre-release ↗' in site
     assert "v0.5.3 · Published experimental pre-release" in site
     assert "v0.5.3 · Latest experimental pre-release" not in site
 
@@ -118,11 +119,14 @@ def test_post_publication_docs_archive_source_plan_and_keep_audio_gates_open() -
     archive = (ROOT / "docs/releases/v0.5.4-notes.md").read_text(
         encoding="utf-8",
     )
-    for content in (readme, site, changelog, checklist, qa):
-        assert "v0.5.4" in content
+    for content in (readme, site, changelog, checklist):
+        assert "v0.5.4" in content  # Historical release remains discoverable.
         assert "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4" in content
         assert "issues/3" in content
-    assert "v0.5.4 · Latest experimental pre-release" in site
+    assert "releases/tag/v0.5.5" in qa
+    assert "issues/3" in qa
+    assert "v0.5.4 · Historical experimental pre-release" in site
+    assert "v0.5.5 · Latest experimental pre-release" in site
     assert "v0.5.3 · Latest experimental pre-release" not in site
     assert "v0.5.4 development (not yet released)" not in changelog
     assert "published experimental developer pre-release" in changelog
@@ -132,7 +136,7 @@ def test_post_publication_docs_archive_source_plan_and_keep_audio_gates_open() -
     assert "NOT STABLE" in archive  # retained historical source plan
     assert "ARCHIVED PRE-PUBLICATION PLAN" in archive
     assert "not yet passed" in qa
-    assert "KathaSvara-v0.5.4-dev-win64.exe" in qa
+    assert "KathaSvara-v0.5.5-dev-win64.exe" in qa
     assert "v0.5.4 development only" not in qa
 
 

@@ -1,10 +1,10 @@
 # Changelog
 
-## v0.5.5 development — NOT PUBLISHED / NOT STABLE
+## v0.5.5 published experimental developer pre-release (11 November 2026)
 
 - **Disposable WAV plumbing doctor:** the Python inference source now verifies that it can write, read back, inspect and clean up a 250 ms synthetic PCM16 WAV without touching the user's story, reference voice, speaker output or the TTS model. Rust validates its fixed result schema and the Settings UI provides stage-specific repair guidance. [Merged PR #126](https://github.com/sanskarIN/KathaSvara/pull/126).
 - **In-app local runtime selection:** the user can deliberately choose a trusted Python executable and a matching `services/inference` folder in desktop Settings. The selection is session-only, private, reversible and applies to new jobs without changing OS environment variables. Python/TTS dependencies and model weights are still external. [Merged PR #128](https://github.com/sanskarIN/KathaSvara/pull/128).
-- **Future preview preparation:** exact-version checks and a SHA-pinned, manually dispatched v0.5.5 GitHub release workflow are proposed. The latest *published* release remains v0.5.4 until an authorized workflow succeeds. No human-tested Hindi voice quality, cross-machine standalone installer or stable release is claimed. See [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) and [full activation issue #129](https://github.com/sanskarIN/KathaSvara/issues/129).
+- **Verified publication:** [KathaSvara v0.5.5](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.5) was published by the explicitly dispatched [manual workflow #42960743457](https://github.com/sanskarIN/KathaSvara/actions/runs/42960743457), with all seven jobs successful at immutable source SHA `7347dc3133434a5657d7d5f20222bbe92aa78047`. GitHub reports `prerelease=true`, `draft=false`, and three nonempty assets: `KathaSvara-v0.5.5-dev-win64.exe`, `README.txt`, `SHA256SUMS.txt`. The developer EXE SHA-256 is `a5d05438001c4ce15b073f671c2c1447b14b363123365caa7b438a15f220cb32`. **Not stable, unsigned and unbundled.** Python/TTS dependencies and authorized model weights are not included. No real Hindi listening or clean-Windows test is claimed; keep [#3](https://github.com/sanskarIN/KathaSvara/issues/3) and [#129](https://github.com/sanskarIN/KathaSvara/issues/129) open.
 
 ## v0.5.4 published experimental developer pre-release (7 November 2026)
 

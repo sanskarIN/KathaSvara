@@ -113,7 +113,7 @@ def test_v055_published_notes_cannot_be_false_draft() -> None:
     assert "SHA256SUMS.txt" in windows
 
 
-def test_v055_windows_candidate_and_published_site_remain_distinct() -> None:
+def test_v055_windows_candidate_and_published_site_confirm_publication() -> None:
     candidate = (
         ROOT / ".github/workflows/windows-portable-candidate.yml"
     ).read_text(encoding="utf-8")
@@ -123,11 +123,15 @@ def test_v055_windows_candidate_and_published_site_remain_distinct() -> None:
     assert "portable-windows-v0.5.5.md" in candidate
     assert "KathaSvara-v0.5.4-dev-win64.exe" not in candidate
     for page in (site, readme):
-        assert "releases/tag/v0.5.4" in page
-        assert "v0.5.4" in page
-    assert "v0.5.4 · Latest experimental pre-release" in site
-    assert "v0.5.5 · Latest experimental pre-release" not in site
-    assert "v0.5.5 pre-release ↗" not in site
+        assert "releases/tag/v0.5.5" in page
+        assert "v0.5.5" in page
+        assert "releases/tag/v0.5.4" in page  # Retain predecessor history.
+    assert "v0.5.5 · Latest experimental pre-release" in site
+    assert "v0.5.5 pre-release ↗" in site
+    assert "v0.5.4 · Historical experimental pre-release" in site
+    assert "v0.5.4 · Latest experimental pre-release" not in site
+    assert "Latest experimental developer pre-release: [KathaSvara v0.5.5]" in readme
+    assert "The v0.5.5 source includes model-free diagnostics" in site
 
 
 def test_v055_new_features_are_not_mistaken_for_real_speech() -> None:
