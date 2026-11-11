@@ -812,7 +812,7 @@ export default function App() {
   }
 
   async function transcribeLocalStt() {
-    if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking) return;
+    if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking) return;
     const revision = ++sttRevision.current;
     setSttWorking(true);
     setSttResult(null);
@@ -1402,7 +1402,7 @@ export default function App() {
                   I have permission to transcribe this recording and understand the local model may use CPU and memory.
                 </label>
                 <button className="secondary-button"
-                  disabled={!sttConsent || !sttWavPath || !sttModelPath || sttWorking}
+                  disabled={!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking}
                   onClick={() => void transcribeLocalStt()}>
                   {sttWorking ? "Recognizing Hindi locally…" : "Transcribe Hindi WAV offline"}
                 </button>
