@@ -779,6 +779,8 @@ fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) ->
         }
         // WAV inspection scans up to the allowed file size twice.
         Some("inspect_generated_wav") => Duration::from_secs(180),
+        // Offline ASR can take minutes on CPU. No downloads are permitted.
+        Some("transcribe_hindi_wav") => Duration::from_secs(600),
         // Torch and Chatterbox imports can be slow on Windows, but never
         // download weights during this probe.
         Some("probe_runtime") => Duration::from_secs(90),
@@ -935,6 +937,86 @@ async fn inspect_script(text: String) -> Result<TextInspection, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+const MAX_STT_WAV_BYTES: u64 = 6 * 1024 * 1024;
+
+/// Never expose arbitrary user-selected files or Python/decoder errors in IPC.
+/// The selected WAV is never copied or uploaded by this command.
+fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
+    if !wav_path.is_absolute()
+        || !wav_path.extension().and_then(|value| value.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+        || !model_path.is_absolute()
+    {
+        return Err("Select a local WAV and an absolute offline model folder.".into());
+    }
+    let wav = fs::symlink_metadata(wav_path)
+        .map_err(|_| "Selected STT WAV cannot be accessed.".to_string())?;
+    if !wav.file_type().is_file() || !(44..=MAX_STT_WAV_BYTES).contains(&wav.len()) {
+        return Err("Select a regular WAV recording under 6 MiB.".into());
+    }
+    let model = fs::symlink_metadata(model_path)
+        .map_err(|_| "Select an installed local faster-whisper model folder.".to_string())?;
+    if !model.file_type().is_dir() {
+        return Err("Select an installed local faster-whisper model folder.".into());
+    }
+    for required in ["config.json", "model.bin", "tokenizer.json"] {
+        let entry = fs::symlink_metadata(model_path.join(required))
+            .map_err(|_| "Offline STT model files are missing.".to_string())?;
+        if !entry.file_type().is_file() {
+            return Err("Offline STT model files are missing.".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_stt_result(result: &Value) -> Result<Value, String> {
+    const INVALID: &str = "Offline STT returned an invalid transcript. Update inference sources.";
+    let text = result.get("text").and_then(Value::as_str).ok_or(INVALID)?;
+    let duration = result.get("duration_seconds").and_then(Value::as_f64).ok_or(INVALID)?;
+    if text.chars().count() > 8_000 || text.chars().any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+        || !duration.is_finite() || !(0.0..=60.0).contains(&duration)
+        || result.get("language").and_then(Value::as_str) != Some("hi")
+        || result.get("engine").and_then(Value::as_str) != Some("faster-whisper-local")
+        || result.get("network_used") != Some(&Value::Bool(false))
+        || result.get("human_review_required") != Some(&Value::Bool(true))
+        || result.get("speech_detected") != Some(&Value::Bool(!text.trim().is_empty()))
+    {
+        return Err(INVALID.into());
+    }
+    Ok(json!({
+        "text": text,
+        "duration_seconds": duration,
+        "language": "hi",
+        "engine": "faster-whisper-local",
+        "speech_detected": !text.trim().is_empty(),
+        "human_review_required": true,
+        "network_used": false,
+    }))
+}
+
+/// User-consented local WAV to Hindi text, separate from text-to-speech.
+#[tauri::command]
+async fn transcribe_local_wav(
+    wav_path: String,
+    model_path: String,
+) -> Result<Value, String> {
+    verify_stt_paths(Path::new(&wav_path), Path::new(&model_path))?;
+    let guard = RealSpeechJobGuard::start()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        // Revalidate after switching threads, immediately before child launch.
+        verify_stt_paths(Path::new(&wav_path), Path::new(&model_path))?;
+        let response = invoke_python(json!({
+            "action": "transcribe_hindi_wav",
+            "wav_path": wav_path,
+            "model_path": model_path,
+        }))?;
+        let result = response.get("result")
+            .ok_or_else(|| "Offline STT did not return a transcript.".to_string())?;
+        validate_stt_result(result)
+    }).await.map_err(|_| "Local STT worker stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1939,7 +2021,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            configure_local_inference, clear_local_inference, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, transcribe_local_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -1950,6 +2032,48 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn stt_result_rejects_false_network_and_human_review_claims() {
+        let good = json!({
+            "text": "नमस्ते भारत",
+            "duration_seconds": 1.0,
+            "language": "hi", "engine": "faster-whisper-local",
+            "speech_detected": true, "human_review_required": true,
+            "network_used": false
+        });
+        assert_eq!(validate_stt_result(&good).unwrap(), good);
+        let mut bad = good.clone();
+        bad["network_used"] = json!(true);
+        assert!(validate_stt_result(&bad).is_err());
+        bad = good.clone();
+        bad["speech_detected"] = json!(false);
+        assert!(validate_stt_result(&bad).is_err());
+        bad = good.clone();
+        bad["text"] = json!("private\u{0000}path");
+        assert!(validate_stt_result(&bad).is_err());
+    }
+
+    #[test]
+    fn stt_requires_absolute_regular_wav_and_local_model_only() {
+        let root = std::env::temp_dir().join(format!(
+            "kathasvara-stt-check-{}", Uuid::new_v4()
+        ));
+        let model = root.join("model");
+        fs::create_dir_all(&model).unwrap();
+        let wav = root.join("recording.wav");
+        fs::write(&wav, b"RIFFplaceholder content not real audio").unwrap();
+        assert!(verify_stt_paths(&wav, &model).is_err());
+        for filename in ["config.json", "model.bin", "tokenizer.json"] {
+            fs::write(model.join(filename), b"fixture").unwrap();
+        }
+        assert!(verify_stt_paths(&wav, &model).is_err()); // under 44 bytes
+        fs::write(&wav, vec![0_u8; 64]).unwrap();
+        assert!(verify_stt_paths(&wav, &model).is_ok()); // Python verifies PCM
+        assert!(verify_stt_paths(Path::new("relative.wav"), &model).is_err());
+        assert!(verify_stt_paths(&root.join("private.txt"), &model).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn selected_reference_is_child_scoped_and_restricted_to_audio_actions() {

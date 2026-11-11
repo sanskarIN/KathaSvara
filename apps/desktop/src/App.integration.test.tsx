@@ -51,6 +51,67 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("local offline Hindi speech to text", () => {
+  const valid = {
+    text: "नमस्ते भारत", duration_seconds: 1,
+    language: "hi", engine: "faster-whisper-local",
+    speech_detected: true, human_review_required: true, network_used: false,
+  };
+
+  it("is disabled without user consent, an audio file and a local model folder", async () => {
+    openSettings();
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" });
+    expect((transcribe as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(transcribe);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+    mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
+      .mockResolvedValueOnce("C:\\private\\whisper-model");
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    expect((transcribe as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.textContent).not.toContain("C:\\private");
+  });
+
+  it("uses local IPC once consented and only shows the actual recognized text", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
+      .mockResolvedValueOnce("C:\\private\\whisper-model");
+    mocks.invoke.mockImplementation(async (name: string) => {
+      if (name === "transcribe_local_wav") return valid;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await waitFor(() => expect((screen.getByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement).value)
+      .toBe("नमस्ते भारत"));
+    expect(mocks.invoke).toHaveBeenCalledWith("transcribe_local_wav", {
+      wavPath: "C:\\private\\speech.wav", modelPath: "C:\\private\\whisper-model",
+    });
+    expect(document.body.textContent).not.toContain("C:\\private");
+  });
+
+  it("rejects an inconsistent or privacy-unsafe native recognition response", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
+      .mockResolvedValueOnce("C:\\private\\whisper-model");
+    mocks.invoke.mockResolvedValueOnce({ ...valid, network_used: true });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await waitFor(() => expect(screen.getByText(/invalid result/)).toBeTruthy());
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+  });
+});
+
 describe("private native errors in Voice Studio", () => {
   it("never displays an OS path from a failed full-story generation", async () => {
     mocks.invoke.mockRejectedValueOnce(new Error("C:\\Users\\private-singer\\secret.wav"));

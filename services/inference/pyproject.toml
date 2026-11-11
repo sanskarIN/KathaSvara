@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 tts = ["chatterbox-tts", "numpy>=1.24", "soundfile>=0.12"]
+stt = ["faster-whisper>=1.1,<2"]
 test = ["pytest>=8", "ruff>=0.7", "numpy>=1.24", "soundfile>=0.12"]
 
 [tool.setuptools.packages.find]

@@ -21,6 +21,21 @@ import {
 } from "./lib/story";
 
 type Page = "studio" | "cast" | "projects" | "settings" | "about";
+type SttResult = {
+  text: string; language: "hi"; engine: "faster-whisper-local";
+  duration_seconds: number; speech_detected: boolean;
+  human_review_required: true; network_used: false;
+};
+function isValidSttResult(value: SttResult): boolean {
+  return typeof value?.text === "string" && [...value.text].length <= 8000
+    && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value.text)
+    && value.language === "hi" && value.engine === "faster-whisper-local"
+    && typeof value.duration_seconds === "number"
+    && Number.isFinite(value.duration_seconds) && value.duration_seconds > 0
+    && value.duration_seconds <= 60
+    && value.human_review_required === true && value.network_used === false
+    && value.speech_detected === (value.text.trim().length > 0);
+}
 type Theme = "dark" | "light";
 type CacheStats = { files: number; bytes: number; ignored_entries: number };
 type CachePruneReport = {
@@ -208,6 +223,13 @@ export default function App() {
   const [importProbe, setImportProbe] = useState<RuntimeImportProbe | null>(null);
   // Never persist the user's private reference WAV path to projects or localStorage.
   const [referenceWavPath, setReferenceWavPath] = useState<string | null>(null);
+  const [sttWavPath, setSttWavPath] = useState<string | null>(null);
+  const [sttModelPath, setSttModelPath] = useState<string | null>(null);
+  const [sttConsent, setSttConsent] = useState(false);
+  const [sttWorking, setSttWorking] = useState(false);
+  const [sttResult, setSttResult] = useState<SttResult | null>(null);
+  const [sttStatus, setSttStatus] = useState<string | null>(null);
+  const sttRevision = useRef(0);
   // Native dialogs and no-model Python probes can resolve out of order.
   const referencePickerRevision = useRef(0);
   const runtimePickerRevision = useRef(0);
@@ -551,6 +573,90 @@ export default function App() {
     } finally {
       setConfiguringRuntime(false);
     }
+  }
+
+  function resetSttResult() {
+    sttRevision.current += 1;
+    setSttResult(null);
+    setSttStatus(null);
+    setSttWorking(false);
+  }
+
+  async function chooseSttWav() {
+    const revision = ++sttRevision.current;
+    setSttResult(null);
+    setSttStatus(null);
+    try {
+      const chosen = await open({
+        title: "Select a local Hindi recording to transcribe",
+        multiple: false, directory: false,
+        filters: [{ name: "Short mono PCM16 WAV", extensions: ["wav"] }],
+      });
+      if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      setSttWavPath(chosen);
+      setSttStatus("Local WAV selected (private path hidden).");
+    } catch {
+      if (revision === sttRevision.current) {
+        setSttStatus("Unable to select a local WAV recording.");
+      }
+    }
+  }
+
+  async function chooseSttModel() {
+    const revision = ++sttRevision.current;
+    setSttResult(null);
+    setSttStatus(null);
+    try {
+      const chosen = await open({
+        title: "Select an existing offline faster-whisper model folder",
+        multiple: false, directory: true,
+      });
+      if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      setSttModelPath(chosen);
+      setSttStatus("Offline model folder selected (private path hidden).");
+    } catch {
+      if (revision === sttRevision.current) {
+        setSttStatus("Unable to select the local STT model folder.");
+      }
+    }
+  }
+
+  async function transcribeLocalStt() {
+    if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking) return;
+    const revision = ++sttRevision.current;
+    setSttWorking(true);
+    setSttResult(null);
+    setSttStatus("Transcribing selected Hindi WAV locally. No microphone, upload or model download.");
+    try {
+      const response = await invoke<SttResult>("transcribe_local_wav", {
+        wavPath: sttWavPath, modelPath: sttModelPath,
+      });
+      if (revision !== sttRevision.current) return;
+      if (!isValidSttResult(response)) {
+        setSttStatus("Local transcription returned an invalid result. Update inference sources.");
+        return;
+      }
+      setSttResult(response);
+      setSttStatus(response.speech_detected
+        ? "Transcription complete. Review the Hindi text against the original recording."
+        : "No recognizable Hindi speech was returned. Try a clearer, short mono WAV.");
+    } catch {
+      if (revision === sttRevision.current) {
+        setSttStatus("Offline transcription failed. Check Python 3.11, the optional STT package, a complete local model folder and a mono PCM16 WAV under 60 seconds.");
+      }
+    } finally {
+      if (revision === sttRevision.current) setSttWorking(false);
+    }
+  }
+
+  function useSttTextInEditor() {
+    if (!sttResult?.speech_detected || sttResult.text.length > 3000) return;
+    if (project.text.trim() && !window.confirm(
+      "Replace the current story editor text with this transcription? Save your story first.",
+    )) return;
+    changeScript(sttResult.text);
+    setPage("studio");
+    setMessage("Hindi transcription copied into the story editor. Review wording before generating audio.");
   }
 
   async function chooseReferenceVoice() {
@@ -1034,6 +1140,57 @@ export default function App() {
                 <p className="helper">This selection affects new Python jobs only and is not saved
                   after the app closes. Use the no-model checks below to confirm installation.
                   A valid interpreter location is not proof that Hindi speech works.</p>
+              </section>
+              <section aria-label="Offline Hindi speech to text" className="diagnostic-report">
+                <h3>Speech to text (Hindi WAV → text)</h3>
+                <p className="helper">This is a separate **offline transcription** feature, not text-to-speech.
+                  Select a short mono PCM16 WAV (maximum 60 seconds / 6 MiB) and an already downloaded
+                  local multilingual CTranslate2 faster-whisper model folder containing
+                  <code> config.json</code>, <code>model.bin</code> and <code>tokenizer.json</code>.
+                  Install the optional <code>.[stt]</code> Python extra separately in your selected Python 3.11 environment.
+                  No microphone capture, cloud upload, automatic model download or fabricated transcript.
+                  Model output is not guaranteed accurate; review it before using it.</p>
+                <div className="preview-actions">
+                  <button className="secondary-button" disabled={sttWorking}
+                    onClick={() => void chooseSttWav()}>Select Hindi WAV</button>
+                  <button className="secondary-button" disabled={sttWorking}
+                    onClick={() => void chooseSttModel()}>Choose offline STT model folder</button>
+                  <button className="quiet-button" disabled={sttWorking}
+                    onClick={() => {
+                      resetSttResult();
+                      setSttWavPath(null);
+                      setSttModelPath(null);
+                      setSttConsent(false);
+                    }}>Clear STT selection</button>
+                </div>
+                <p className="helper">WAV: {sttWavPath ? "Selected privately" : "Not selected"}.
+                  Offline model: {sttModelPath ? "Selected privately" : "Not selected"}.</p>
+                <label className="field-label">
+                  <input type="checkbox" checked={sttConsent}
+                    onChange={(event) => { resetSttResult(); setSttConsent(event.target.checked); }} />
+                  I have permission to transcribe this recording and understand the local model may use CPU and memory.
+                </label>
+                <button className="secondary-button"
+                  disabled={!sttConsent || !sttWavPath || !sttModelPath || sttWorking}
+                  onClick={() => void transcribeLocalStt()}>
+                  {sttWorking ? "Recognizing Hindi locally…" : "Transcribe Hindi WAV offline"}
+                </button>
+                {sttStatus && <p role="status">{sttStatus}</p>}
+                {sttResult && (
+                  <div>
+                    <label className="field-label" htmlFor="stt-transcript">Recognized Hindi (review required)</label>
+                    <textarea id="stt-transcript" readOnly value={sttResult.text} rows={5} />
+                    <p className="helper">No audio uploaded. {sttResult.duration_seconds.toFixed(1)} seconds processed.
+                      Transcription can contain missing or incorrect words.</p>
+                    <button className="secondary-button"
+                      disabled={!sttResult.speech_detected || sttResult.text.length > 3000}
+                      onClick={useSttTextInEditor}>Use reviewed text in story editor</button>
+                    {sttResult.text.length > 3000 && (
+                      <p className="helper">The story editor's 3000-character generation limit applies.
+                        Copy and shorten the transcript manually before using it.</p>
+                    )}
+                  </div>
+                )}
               </section>
               <section aria-label="Guided speech readiness" className="diagnostic-report">
                 <h3>Guided speech readiness check</h3>
