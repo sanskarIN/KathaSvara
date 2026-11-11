@@ -1,6 +1,6 @@
 # Windows and Hindi narration acceptance protocol (manual, not yet passed)
 
-**Project:** KathaSvara — experimental desktop. **Latest verified published experimental pre-release:** [v0.5.4](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4). **Human acceptance still pending:** [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). The release remains unsigned, unbundled and not stable.
+**Project:** KathaSvara — experimental desktop. **Latest verified published experimental pre-release:** [v0.5.5](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.5). **Human acceptance still pending:** [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3). The release remains unsigned, unbundled and not stable.
 
 This checklist is deliberately **not an automated pass certificate**. Existing GitHub workflows compile/tests the source and unsigned developer EXE; they do **not** prove that the application launches on a clean Windows machine, that real Chatterbox model weights can be obtained and loaded, or that Hindi speech is natural. Do not close issue #3 or announce a stable release based only on mocked tests or these blank checklists.
 
@@ -8,15 +8,15 @@ This checklist is deliberately **not an automated pass certificate**. Existing G
 
 Use Windows 11 x64 with a supported WebView2 runtime and Python 3.11. Record the OS build, RAM and model-compatible CPU/GPU/VRAM (coarse characteristics only). Do not include local usernames, sensitive file paths, access tokens or machine identifiers in public reports.
 
-Use the developer executable only from the [verified GitHub release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4) and inspect `README.txt`. Compare SHA-256 using PowerShell:
+Use the developer executable only from the [verified GitHub release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.5) and inspect `README.txt`. Compare SHA-256 using PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\KathaSvara-v0.5.4-dev-win64.exe
+Get-FileHash -Algorithm SHA256 .\KathaSvara-v0.5.5-dev-win64.exe
 ```
 
-The expected digest is recorded in the release's `SHA256SUMS.txt`. This is an **unsigned, unbundled executable**, not an MSI/NSIS installer; do not bypass a security block or turn off Windows security measures. A clean-machine test must distinguish a refusal to run an unsigned test binary from an actual application defect.
+The expected digest is recorded in the release's `SHA256SUMS.txt` (published EXE SHA-256: `a5d05438001c4ce15b073f671c2c1447b14b363123365caa7b438a15f220cb32`). The seven-job [publication workflow #42960743457](https://github.com/sanskarIN/KathaSvara/actions/runs/42960743457) passed, but the test operator still needs to confirm the actual downloaded EXE hash. This is an **unsigned, unbundled executable**, not an MSI/NSIS installer; do not bypass a security block or turn off Windows security measures. A clean-machine test must distinguish a refusal to run an unsigned test binary from an actual application defect.
 
-The test operator is responsible for separately reviewing and accepting applicable voice-model terms. The EXE does **not** contain Python, PyTorch, Chatterbox or model weights.
+The test operator is responsible for separately reviewing and accepting applicable voice-model terms. The EXE does **not** contain Python, PyTorch, Chatterbox or model weights. The v0.5.5 Settings menu includes a **model-free synthetic WAV I/O check** and **session-only interpreter/source picker**; passing these checks must not be counted as real-model generation, audio playback or human Hindi acceptance.
 
 ## 2. Set up the supported runtime
 
