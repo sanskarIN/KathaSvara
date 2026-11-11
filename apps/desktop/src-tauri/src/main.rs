@@ -2050,7 +2050,7 @@ mod tests {
         bad["speech_detected"] = json!(false);
         assert!(validate_stt_result(&bad).is_err());
         bad = good.clone();
-        bad["text"] = json!("private\\u0000path");
+        bad["text"] = json!("private\u{0000}path");
         assert!(validate_stt_result(&bad).is_err());
     }
 
