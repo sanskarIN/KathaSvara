@@ -98,11 +98,15 @@ export async function beginMicrophoneCapture(
     timer = undefined;
     if (processor) {
       processor.onaudioprocess = null;
-      processor.disconnect();
+      try { processor.disconnect(); } catch { /* Always release tracks. */ }
     }
-    source?.disconnect();
+    if (source) {
+      try { source.disconnect(); } catch { /* Always release tracks. */ }
+    }
     closeTracks();
-    if (context) void context.close().catch(() => {});
+    if (context) {
+      try { void context.close().catch(() => {}); } catch { /* Tracks are already stopped. */ }
+    }
   };
 
   const handle: MicrophoneCapture = {
