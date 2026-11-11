@@ -105,6 +105,45 @@ describe("consented short microphone to Hindi transcript", () => {
     expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
   });
 
+  it("cancels an in-flight Windows permission prompt and discards its late session", async () => {
+    let finishPermission!: (session: { stop: () => void; discard: () => void }) => void;
+    const pending = new Promise<{ stop: () => void; discard: () => void }>(
+      resolve => { finishPermission = resolve; });
+    mocks.microphone.mockReturnValueOnce(pending);
+    const discarded = vi.fn();
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Cancel microphone permission request",
+    })).toBeTruthy());
+    const signal = mocks.microphone.mock.calls[0][2] as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel microphone permission request" }));
+    expect(signal.aborted).toBe(true);
+    finishPermission({ stop: vi.fn(), discard: discarded });
+    await waitFor(() => expect(discarded).toHaveBeenCalledOnce());
+    expect(screen.queryByText("Microphone is recording now.")).toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+  });
+
+  it("aborts a pending microphone request when leaving Settings", async () => {
+    let finishPermission!: (session: { stop: () => void; discard: () => void }) => void;
+    mocks.microphone.mockImplementationOnce(() =>
+      new Promise(resolve => { finishPermission = resolve; }));
+    const discarded = vi.fn();
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(mocks.microphone).toHaveBeenCalledOnce());
+    const signal = mocks.microphone.mock.calls[0][2] as AbortSignal;
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    await waitFor(() => expect(signal.aborted).toBe(true));
+    finishPermission({ stop: vi.fn(), discard: discarded });
+    await waitFor(() => expect(discarded).toHaveBeenCalledOnce());
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+  });
+
   it("discards a running capture immediately when consent is withdrawn", async () => {
     const discard = vi.fn();
     mocks.microphone.mockResolvedValue({ stop: vi.fn(), discard });
