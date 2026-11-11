@@ -96,7 +96,7 @@ def test_v056_publication_safe_notes_and_unsigned_windows_candidate() -> None:
     for document in (draft, published, windows, checklist):
         assert "NOT STABLE" in document
         assert "Python 3.11" in document
-        assert "issue #3" in document
+        assert "https://github.com/sanskarIN/KathaSvara/issues/3" in document
         assert "model" in document.lower()
     for document in (draft, published, windows):
         assert "Chatterbox" in document
