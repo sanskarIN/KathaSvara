@@ -62,6 +62,37 @@ export function wavToBase64(wav: Uint8Array): string {
 
 export type MicrophoneCapture = { stop: () => void; discard: () => void };
 
+const microphoneCancelled = () => new Error("Microphone request cancelled.");
+
+/** Cancel awaits immediately, even when a native permission/resume promise hangs. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    let finished = false;
+    const onAbort = () => {
+      if (finished) return;
+      finished = true;
+      signal.removeEventListener("abort", onAbort);
+      reject(microphoneCancelled());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    // Always attach handlers: a late native rejection must not escape into
+    // an unhandled promise after the caller already cancelled the request.
+    promise.then(value => {
+      if (finished) return;
+      finished = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(value);
+    }, error => {
+      if (finished) return;
+      finished = true;
+      signal.removeEventListener("abort", onAbort);
+      reject(error);
+    });
+  });
+}
+
 /**
  * Record raw Web Audio samples rather than MediaRecorder's compressed
  * WebM/Opus/MP4 blobs. WebView decoding support for MediaRecorder output is
@@ -74,16 +105,32 @@ export type MicrophoneCapture = { stop: () => void; discard: () => void };
 export async function beginMicrophoneCapture(
   completed: (wavBase64: string) => void,
   failed: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<MicrophoneCapture> {
   if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
     throw new Error("Microphone recording is unavailable. Check Windows and WebView2 permissions.");
   }
-  // This is called only after explicit consent and a Start button click.
-  const stream = await navigator.mediaDevices.getUserMedia({
+  // Cancellation does not dismiss every OS permission dialog. Resolve the
+  // UI immediately, but stop any stream the OS grants after user withdrawal.
+  if (signal?.aborted) throw microphoneCancelled();
+  const permission = navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     video: false,
+  }).then(granted => {
+    if (signal?.aborted) {
+      granted.getTracks().forEach(track => { try { track.stop(); } catch { /* No stream kept. */ } });
+      throw microphoneCancelled();
+    }
+    return granted;
   });
-  const closeTracks = () => stream.getTracks().forEach(track => track.stop());
+  const stream = await abortable(permission, signal);
+  const closeTracks = () => stream.getTracks().forEach(track => {
+    try { track.stop(); } catch { /* Keep stopping remaining microphone tracks. */ }
+  });
+  if (signal?.aborted) {
+    closeTracks();
+    throw microphoneCancelled();
+  }
   let context: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let processor: ScriptProcessorNode | null = null;
@@ -92,8 +139,11 @@ export async function beginMicrophoneCapture(
   let stopped = false;
   let received = 0;
   let samples: Float32Array | null = null;
+  let onAbort: (() => void) | null = null;
 
   const release = () => {
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+    onAbort = null;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     if (processor) {
@@ -144,6 +194,14 @@ export async function beginMicrophoneCapture(
     },
   };
 
+  if (signal) {
+    onAbort = () => handle.discard();
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      handle.discard();
+      throw microphoneCancelled();
+    }
+  }
   try {
     context = new AudioContext();
     const rate = context.sampleRate;
@@ -173,11 +231,13 @@ export async function beginMicrophoneCapture(
     };
     source.connect(processor);
     processor.connect(context.destination);
-    await context.resume();
-    if (!stopped) timer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
+    await abortable(context.resume(), signal);
+    if (signal?.aborted || stopped) throw microphoneCancelled();
+    timer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
     return handle;
   } catch {
     handle.discard();
+    if (signal?.aborted) throw microphoneCancelled();
     throw new Error("Microphone audio capture could not start. Check Windows and WebView2.");
   }
 }
