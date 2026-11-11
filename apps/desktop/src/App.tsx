@@ -21,6 +21,35 @@ import {
 } from "./lib/story";
 
 type Page = "studio" | "cast" | "projects" | "settings" | "about";
+type SttSetupReport = {
+  python_311: boolean; stt_import_ok: boolean; model_files_present: boolean;
+  ready_to_transcribe: boolean;
+  next_action_code: "select_python_311" | "install_stt_extra" |
+    "select_local_model" | "run_transcription";
+  model_loaded: false; audio_transcribed: false; network_used: false;
+};
+const STT_SETUP_ADVICE: Record<SttSetupReport["next_action_code"], string> = {
+  select_python_311: "Choose a working Python 3.11 interpreter and matching inference sources above.",
+  install_stt_extra: "Install optional STT dependencies into the selected Python 3.11 environment, then retry.",
+  select_local_model: "Choose an existing local multilingual faster-whisper model folder containing all required files.",
+  run_transcription: "Imports and local model files look ready. Select a WAV, consent, and run recognition. Real accuracy is unverified.",
+};
+function isConsistentSttSetup(result: SttSetupReport): boolean {
+  if (typeof result !== "object" || result === null) return false;
+  const ok = result.python_311 === true && result.stt_import_ok === true &&
+    result.model_files_present === true;
+  const action = result.python_311 !== true ? "select_python_311"
+    : result.stt_import_ok !== true ? "install_stt_extra"
+      : result.model_files_present !== true ? "select_local_model"
+        : "run_transcription";
+  return typeof result.python_311 === "boolean" &&
+    typeof result.stt_import_ok === "boolean" &&
+    typeof result.model_files_present === "boolean" &&
+    result.ready_to_transcribe === ok &&
+    result.next_action_code === action &&
+    result.model_loaded === false && result.audio_transcribed === false &&
+    result.network_used === false;
+}
 type SttResult = {
   text: string; language: "hi"; engine: "faster-whisper-local";
   duration_seconds: number; speech_detected: boolean;
@@ -227,6 +256,8 @@ export default function App() {
   const [sttModelPath, setSttModelPath] = useState<string | null>(null);
   const [sttConsent, setSttConsent] = useState(false);
   const [sttWorking, setSttWorking] = useState(false);
+  const [sttChecking, setSttChecking] = useState(false);
+  const [sttSetup, setSttSetup] = useState<SttSetupReport | null>(null);
   const [sttResult, setSttResult] = useState<SttResult | null>(null);
   const [sttStatus, setSttStatus] = useState<string | null>(null);
   const sttRevision = useRef(0);
@@ -580,6 +611,8 @@ export default function App() {
     setSttResult(null);
     setSttStatus(null);
     setSttWorking(false);
+    setSttChecking(false);
+    setSttSetup(null);
   }
 
   async function chooseSttWav() {
@@ -606,6 +639,7 @@ export default function App() {
     const revision = ++sttRevision.current;
     setSttResult(null);
     setSttStatus(null);
+    setSttSetup(null);
     try {
       const chosen = await open({
         title: "Select an existing offline faster-whisper model folder",
@@ -618,6 +652,32 @@ export default function App() {
       if (revision === sttRevision.current) {
         setSttStatus("Unable to select the local STT model folder.");
       }
+    }
+  }
+
+  async function checkSttSetup() {
+    if (sttChecking || sttWorking) return;
+    const revision = ++sttRevision.current;
+    setSttChecking(true);
+    setSttSetup(null);
+    setSttStatus("Checking Python, the offline STT library and local model files. No weights loaded.");
+    try {
+      const response = await invoke<SttSetupReport>("probe_stt_setup", {
+        modelPath: sttModelPath,
+      });
+      if (revision !== sttRevision.current) return;
+      if (!isConsistentSttSetup(response)) {
+        setSttStatus("Offline STT setup returned an inconsistent report. Update inference sources.");
+        return;
+      }
+      setSttSetup(response);
+      setSttStatus("Offline STT preflight completed. No model loaded or audio transcribed.");
+    } catch {
+      if (revision === sttRevision.current) {
+        setSttStatus("Unable to check STT dependencies. Verify Python 3.11 and matching inference sources.");
+      }
+    } finally {
+      if (revision === sttRevision.current) setSttChecking(false);
     }
   }
 
@@ -1143,7 +1203,7 @@ export default function App() {
               </section>
               <section aria-label="Offline Hindi speech to text" className="diagnostic-report">
                 <h3>Speech to text (Hindi WAV → text)</h3>
-                <p className="helper">This is a separate **offline transcription** feature, not text-to-speech.
+                <p className="helper">This is a separate offline transcription feature, not text-to-speech.
                   Select a short mono PCM16 WAV (maximum 60 seconds / 6 MiB) and an already downloaded
                   local multilingual CTranslate2 faster-whisper model folder containing
                   <code> config.json</code>, <code>model.bin</code> and <code>tokenizer.json</code>.
@@ -1151,11 +1211,11 @@ export default function App() {
                   No microphone capture, cloud upload, automatic model download or fabricated transcript.
                   Model output is not guaranteed accurate; review it before using it.</p>
                 <div className="preview-actions">
-                  <button className="secondary-button" disabled={sttWorking}
+                  <button className="secondary-button" disabled={sttWorking || sttChecking}
                     onClick={() => void chooseSttWav()}>Select Hindi WAV</button>
-                  <button className="secondary-button" disabled={sttWorking}
+                  <button className="secondary-button" disabled={sttWorking || sttChecking}
                     onClick={() => void chooseSttModel()}>Choose offline STT model folder</button>
-                  <button className="quiet-button" disabled={sttWorking}
+                  <button className="quiet-button" disabled={sttWorking || sttChecking}
                     onClick={() => {
                       resetSttResult();
                       setSttWavPath(null);
@@ -1165,6 +1225,20 @@ export default function App() {
                 </div>
                 <p className="helper">WAV: {sttWavPath ? "Selected privately" : "Not selected"}.
                   Offline model: {sttModelPath ? "Selected privately" : "Not selected"}.</p>
+                <button className="secondary-button" disabled={sttChecking || sttWorking}
+                  onClick={() => void checkSttSetup()}>
+                  {sttChecking ? "Checking STT setup without a model…" : "Check offline STT setup (no model load)"}
+                </button>
+                {sttSetup && (
+                  <section aria-label="Offline STT setup result" className="diagnostic-report" role="status">
+                    <h4>Offline STT setup: {sttSetup.ready_to_transcribe ? "Imports and model files found" : "Needs attention"}</h4>
+                    <p>Python 3.11: {sttSetup.python_311 ? "Yes" : "Required"}</p>
+                    <p>faster-whisper import: {sttSetup.stt_import_ok ? "Available" : "Missing or broken"}</p>
+                    <p>Local model files: {sttSetup.model_files_present ? "Found" : "Missing or incomplete"}</p>
+                    <p><strong>Next step:</strong> {STT_SETUP_ADVICE[sttSetup.next_action_code]}</p>
+                    <p className="helper">Model loaded, audio transcribed or Hindi quality verified: No.</p>
+                  </section>
+                )}
                 <label className="field-label">
                   <input type="checkbox" checked={sttConsent}
                     onChange={(event) => { resetSttResult(); setSttConsent(event.target.checked); }} />
