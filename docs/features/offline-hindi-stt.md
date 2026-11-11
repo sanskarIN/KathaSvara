@@ -6,6 +6,28 @@ has text-to-speech and WAV review, but does **not** include a speech-to-text
 engine. Do not confuse the TTS import probe, synthetic WAV doctor or the real
 Hindi TTS smoke test with speech recognition.
 
+## Desktop file-picker regression and no-model setup checks
+
+The published v0.5.6 build predates speech-to-text and cannot recognize
+spoken input. A subsequent audit also found that the Tauri v2 main-window
+capability listed `dialog:allow-save` but omitted `dialog:allow-open`,
+blocking the local file and folder pickers in a compiled desktop EXE.
+The next development change explicitly grants only `dialog:allow-open` and
+`dialog:allow-save` to the app's main window; it does not grant general
+filesystem read/write permissions or OS microphone access.
+
+After opening **Settings → Speech to text**, select an existing local model
+folder and choose **Check offline STT setup (no model load)**. This checks
+Python 3.11, whether the selected environment can import the installed
+faster-whisper package, and whether the user-chosen model folder has the
+expected local files. It does **not** load model weights, transcribe, create
+a recording, contact a model repository or verify Hindi recognition quality.
+
+Follow the first reported action: correct the Python interpreter, explicitly
+install `.[stt]` in that interpreter, or choose a complete already-installed
+local model. A green preflight means **only** imports and file checks passed.
+The actual WAV and recognition model still require a separate consented run.
+
 ## Initial local recording → Hindi text workflow
 
 1. Build the source after this feature PR has passed CI and merged. Use a

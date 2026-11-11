@@ -51,6 +51,39 @@ function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 }
 
+describe("offline speech-to-text setup diagnostics", () => {
+  const missingModel = {
+    python_311: true, stt_import_ok: true, model_files_present: false,
+    ready_to_transcribe: false, next_action_code: "select_local_model",
+    model_loaded: false, audio_transcribed: false, network_used: false,
+  };
+
+  it("explains missing local model without downloading, recording or showing paths", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "probe_stt_setup") return missingModel;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check offline STT setup (no model load)" }));
+    await waitFor(() => expect(screen.getByText(/Offline STT setup: Needs attention/)).toBeTruthy());
+    expect(screen.getByText(/Choose an existing local multilingual faster-whisper model folder/)).toBeTruthy();
+    expect(mocks.invoke).toHaveBeenCalledWith("probe_stt_setup", { modelPath: null });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+    expect(document.body.textContent).not.toContain("C:\\Users\\private");
+  });
+
+  it("rejects contradictory or non-offline setup claims from IPC", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "probe_stt_setup") return { ...missingModel, model_loaded: true };
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Check offline STT setup (no model load)" }));
+    await waitFor(() => expect(screen.getByText(/inconsistent report/)).toBeTruthy());
+    expect(screen.queryByText(/Offline STT setup: Needs attention/)).toBeNull();
+  });
+});
+
 describe("local offline Hindi speech to text", () => {
   const valid = {
     text: "नमस्ते भारत", duration_seconds: 1,

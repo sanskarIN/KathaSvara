@@ -1,11 +1,12 @@
 {
   "identifier": "default",
-  "description": "Main window commands and user-requested WAV save dialog",
+  "description": "Main window: explicitly selected local audio/source folders and user-requested WAV save dialog",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "dialog:allow-open",
     "dialog:allow-save"
   ]
 }

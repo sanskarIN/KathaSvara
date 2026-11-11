@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kathasvara.local_stt import inspect_stt_wav, transcribe_hindi_wav
+from kathasvara.local_stt import inspect_stt_setup, inspect_stt_wav, transcribe_hindi_wav
 
 
 def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1) -> Path:
@@ -105,3 +105,45 @@ def test_rejects_untrusted_model_results(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
     with pytest.raises(ValueError, match="invalid transcription"):
         transcribe_hindi_wav(str(path), str(model))
+
+
+def test_stt_setup_probe_does_not_load_model_or_use_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = model_folder(tmp_path)
+    calls: list[str] = []
+
+    class LocalWhisper:
+        def __init__(self, *_: object, **__: object) -> None:
+            raise AssertionError("A readiness check must never load model weights.")
+
+    def import_probe(name: str) -> object:
+        calls.append(name)
+        assert name == "faster_whisper"
+        return SimpleNamespace(WhisperModel=LocalWhisper)
+
+    monkeypatch.setattr("kathasvara.local_stt.importlib.import_module", import_probe)
+    report = inspect_stt_setup(str(model))
+    assert calls == ["faster_whisper"]
+    assert report["stt_import_ok"] is True
+    assert report["model_files_present"] is True
+    assert report["ready_to_transcribe"] == (sys.version_info[:2] == (3, 11))
+    assert report["model_loaded"] is False
+    assert report["audio_transcribed"] is False
+    assert report["network_used"] is False
+
+
+def test_stt_setup_reports_absent_package_or_model_without_private_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def no_package(_: str) -> object:
+        raise OSError("C:\\Users\\private\\missing_library.dll")
+
+    monkeypatch.setattr("kathasvara.local_stt.importlib.import_module", no_package)
+    report = inspect_stt_setup(str(tmp_path / "secret-model"))
+    assert report["stt_import_ok"] is False
+    assert report["model_files_present"] is False
+    assert report["ready_to_transcribe"] is False
+    assert report["network_used"] is False
+    assert "private" not in str(report) and "secret-model" not in str(report)
+    assert report["next_action_code"] in {"select_python_311", "install_stt_extra"}
