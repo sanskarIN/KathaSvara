@@ -70,7 +70,7 @@ def test_stt_rejects_invalid_and_oversized_audio(tmp_path: Path) -> None:
 def test_model_free_wav_probe_identifies_silence_dc_and_clipping(tmp_path: Path) -> None:
     path = wav_file(tmp_path)
     # Complete digital silence is a warning before model loading.
-    path.write_bytes(path.read_bytes()[:44] + b"\\x00\\x00" * 16_000)
+    path.write_bytes(path.read_bytes()[:44] + bytes(16_000 * 2))
     silence = inspect_stt_wav(path)
     assert silence["near_silence_hint"] is True
     assert silence["signal_review_required"] is True
@@ -104,7 +104,7 @@ def test_stt_refuses_silent_and_dc_audio_before_loading_model(
 def test_stt_strict_riff_validation_rejects_extra_chunks(tmp_path: Path) -> None:
     path = wav_file(tmp_path)
     altered = bytearray(path.read_bytes())
-    altered.extend(b"data" + (2).to_bytes(4, "little") + b"\\x00\\x00")
+    altered.extend(b"data" + (2).to_bytes(4, "little") + bytes(2))
     altered[4:8] = (len(altered) - 8).to_bytes(4, "little")
     path.write_bytes(altered)
     with pytest.raises(ValueError, match="not a readable PCM16 WAV"):
