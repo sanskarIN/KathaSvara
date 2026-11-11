@@ -295,6 +295,9 @@ export default function App() {
   const [micWav, setMicWav] = useState<string | null>(null);
   const [micGuidance, setMicGuidance] = useState<string | null>(null);
   const micSession = useRef<MicrophoneCapture | null>(null);
+  // An OS permission prompt or AudioContext.resume can remain pending after
+  // consent is withdrawn. Abort startup before it can retain a late stream.
+  const micStartup = useRef<AbortController | null>(null);
   const micRevision = useRef(0);
   const sttRevision = useRef(0);
   // Native dialogs and no-model Python probes can resolve out of order.
@@ -329,6 +332,8 @@ export default function App() {
     // Never keep capturing after leaving the Settings page or closing the app.
     if (page !== "settings") {
       micRevision.current += 1;
+      micStartup.current?.abort();
+      micStartup.current = null;
       micSession.current?.discard();
       micSession.current = null;
       setMicWav(null);
@@ -339,6 +344,8 @@ export default function App() {
   useEffect(() => {
     const revoke = () => {
       micRevision.current += 1;
+      micStartup.current?.abort();
+      micStartup.current = null;
       micSession.current?.discard();
       micSession.current = null;
     };
@@ -678,6 +685,8 @@ export default function App() {
 
   function discardMicrophone() {
     micRevision.current += 1;
+    micStartup.current?.abort();
+    micStartup.current = null;
     micSession.current?.discard();
     micSession.current = null;
     setMicWav(null);
@@ -688,6 +697,8 @@ export default function App() {
   async function startMicrophone() {
     if (!sttConsent || sttWorking || sttChecking || micStatus !== "idle") return;
     const revision = ++micRevision.current;
+    const controller = new AbortController();
+    micStartup.current = controller;
     setMicWav(null);
     setMicGuidance("Requesting microphone access. Windows may ask for permission.");
     setMicStatus("requesting");
@@ -695,6 +706,7 @@ export default function App() {
       const recording = await beginMicrophoneCapture(
         (wav) => {
           if (revision !== micRevision.current) return;
+          if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(wav);
           setMicStatus("ready");
@@ -702,21 +714,25 @@ export default function App() {
         },
         () => {
           if (revision !== micRevision.current) return;
+          if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(null);
           setMicStatus("idle");
           setMicGuidance("Microphone recording failed. Check OS permissions or use an existing WAV.");
         },
+        controller.signal,
       );
-      if (revision !== micRevision.current) {
+      if (revision !== micRevision.current || controller.signal.aborted) {
         recording.discard();
+        if (micStartup.current === controller) micStartup.current = null;
         return;
       }
       micSession.current = recording;
       setMicStatus("recording");
       setMicGuidance("Microphone recording is active. Stop when finished (30-second maximum).");
     } catch {
-      if (revision === micRevision.current) {
+      if (micStartup.current === controller) micStartup.current = null;
+      if (revision === micRevision.current && !controller.signal.aborted) {
         setMicStatus("idle");
         setMicGuidance("Microphone unavailable or permission denied. Check Windows microphone access and WebView2, or select a local WAV.");
       }
@@ -727,6 +743,7 @@ export default function App() {
     if (micStatus !== "recording") return;
     micSession.current?.stop();
     micSession.current = null;
+    micStartup.current = null;
     setMicStatus("processing");
     setMicGuidance("Converting the recording to short mono PCM16 WAV in memory.");
   }
@@ -1433,7 +1450,8 @@ export default function App() {
                     <button className="secondary-button" disabled={micStatus !== "recording"}
                       onClick={stopMicrophone}>Stop recording</button>
                     <button className="quiet-button" disabled={micStatus === "idle" && !micWav}
-                      onClick={discardMicrophone}>Discard microphone audio</button>
+                      onClick={discardMicrophone}>{micStatus === "requesting"
+                        ? "Cancel microphone permission request" : "Discard microphone audio"}</button>
                   </div>
                   <p role="status">{micGuidance || "Microphone is off. No audio captured."}</p>
                   {micStatus === "recording" && <p role="status"><strong>Microphone is recording now.</strong></p>}

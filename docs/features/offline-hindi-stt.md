@@ -72,6 +72,13 @@ a user's machine.
    recording** uses the webview's `getUserMedia({audio:...})` and asks the
    operating system/webview for microphone access when required. It does
    **not** bypass a denied permission or access the camera.
+   While Windows/WebView2 is requesting access, **Cancel microphone permission
+   request** withdraws the app's capture request. The OS permission dialog
+   itself may remain open because browser APIs do not guarantee cancellation
+   of the native prompt. If the OS grants access afterward, KathaSvara stops
+   that late stream before creating a recording. The same cleanup applies when
+   consent is withdrawn, Settings is left, the window is hidden or the app
+   closes. Pending Web Audio startup is also aborted to release tracks.
 3. A visible recording indicator stays on screen. Click **Stop recording**
    or let the 30-second cap stop capture. The next development source
    uses bounded Web Audio raw PCM capture, then converts the samples directly
