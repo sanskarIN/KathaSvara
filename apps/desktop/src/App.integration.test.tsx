@@ -178,7 +178,7 @@ describe("explicit real Hindi model smoke test", () => {
   it("exports the real model result using native validated WAV export, not synthetic audio", async () => {
     mocks.save.mockResolvedValue("C:\\Users\\private-story\\sample.wav");
     mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "synthesize") return { ...goodWav, preview_available: false };
+      if (command === "synthesize") return { ...goodWav, preview_available: false, data_url: "" };
       if (command === "inspect_generated_audio") return goodInspection;
       if (command === "export_wav") return undefined;
       if (command === "discard_audio") return undefined;
