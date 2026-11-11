@@ -102,6 +102,23 @@ accuracy, CPU/memory, temporary-file cleanup and transcription into the
 editor. A JS test or Windows compilation is not evidence these work on
 a real user's microphone.
 
+## Model-free WAV signal preflight (post-v0.5.6 development)
+
+With a user-selected WAV, the new **Check selected WAV signal (no model)**
+action examines the actual RIFF layout, sample frames and conservative
+level hints locally, before recognition. It flags near-silence, a DC-only
+signal, possible clipping and long internal pauses. No microphone access,
+download, model load, transcript generation or network request is performed
+by this preflight. The returned report does not expose the private file path
+or its SHA-256.
+
+If a recording is effectively silent or DC-only, actual transcription
+refuses to load a model, helping avoid hallucinated words from silent audio.
+These are simple waveform heuristics, **not speech activity detection or
+Hindi intelligibility measurement**. A readable WAV or absence of hints
+never establishes that a person spoke or that the text will be correct.
+Clipping/long pauses are advisory warnings, not automatic rejections.
+
 ## Limits and acceptance
 
 - Neither tests with mocked Whisper nor a passing build prove actual Hindi
