@@ -15,6 +15,7 @@ from .diagnostics import diagnose
 from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
+from .local_stt import transcribe_hindi_wav
 from .production import render_story
 from .production_audit import audit_production_readiness
 from .pronunciation import apply_glossary
@@ -61,6 +62,12 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "result": diagnose()}
     if request.get("action") == "probe_runtime":
         return {"ok": True, "result": probe_runtime()}
+    if request.get("action") == "transcribe_hindi_wav":
+        wav_path = request.get("wav_path")
+        model_path = request.get("model_path")
+        if not isinstance(wav_path, str) or not isinstance(model_path, str):
+            raise TypeError("Select a WAV file and local STT model folder.")
+        return {"ok": True, "result": transcribe_hindi_wav(wav_path, model_path)}
     if request.get("action") == "probe_audio_io":
         return {"ok": True, "result": probe_audio_io()}
     if request.get("action") == "inspect_generated_wav":
