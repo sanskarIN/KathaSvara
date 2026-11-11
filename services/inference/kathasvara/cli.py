@@ -15,7 +15,7 @@ from .diagnostics import diagnose
 from .dialogue import parse_dialogue, unresolved_labels
 from .engine import VoiceSettings
 from .hindi import split_for_engine, validate_story
-from .local_stt import inspect_stt_setup, transcribe_hindi_wav
+from .local_stt import inspect_stt_setup, inspect_stt_wav, transcribe_hindi_wav
 from .production import render_story
 from .production_audit import audit_production_readiness
 from .pronunciation import apply_glossary
@@ -67,6 +67,11 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         if model_path is not None and not isinstance(model_path, str):
             raise TypeError("Select an offline STT model folder.")
         return {"ok": True, "result": inspect_stt_setup(model_path)}
+    if request.get("action") == "probe_stt_wav":
+        wav_path = request.get("wav_path")
+        if not isinstance(wav_path, str):
+            raise TypeError("Select an absolute local PCM16 WAV recording.")
+        return {"ok": True, "result": inspect_stt_wav(Path(wav_path))}
     if request.get("action") == "transcribe_hindi_wav":
         wav_path = request.get("wav_path")
         model_path = request.get("model_path")
