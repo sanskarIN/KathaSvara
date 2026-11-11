@@ -11,7 +11,7 @@ speech model weights, verified GPU configuration or installer is
 bundled. A working UI or passing synthetic checks do not prove
 natural Hindi speech. Human listening, speaker playback, real WAV/SRT
 quality and clean Windows acceptance are NOT TESTED.
-Issue #3: https://github.com/sanskarIN/KathaSvara/issues/3
+Human Hindi acceptance issue #3: https://github.com/sanskarIN/KathaSvara/issues/3
 
 To configure the experimental desktop:
 1. Obtain trusted KathaSvara v0.5.6 source and compatible Python 3.11.
@@ -19,6 +19,9 @@ To configure the experimental desktop:
    before independently installing/obtaining approved dependencies.
 3. Use the repository Windows helper with -DoctorOnly for local
    no-model preflight. Automatic downloads are not part of the doctor.
+   To install optional speech dependencies, separately opt in to
+   -InstallDependencies only after reviewing package licenses and
+   expected network activity; weights still require their own approval.
 4. In Settings, choose a trusted Python executable and matching
    services/inference folder. A version/source check runs before
    activation; choices are session-only and reversible.
