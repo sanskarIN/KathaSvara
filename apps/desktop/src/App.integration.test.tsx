@@ -153,6 +153,67 @@ describe("offline speech-to-text setup diagnostics", () => {
   });
 });
 
+describe("model-free selected WAV signal preflight", () => {
+  const good = {
+    sample_rate: 16000, frames: 16000, duration_seconds: 1,
+    near_silence_hint: false, dc_only_hint: false,
+    possible_clipping_hint: false, long_internal_pause_hint: false,
+    signal_review_required: false,
+    model_loaded: false, audio_transcribed: false, network_used: false,
+  };
+
+  it("checks a selected WAV without recognizing speech or exposing its path", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\voice.wav");
+    mocks.invoke.mockImplementation(async (name: string) => {
+      if (name === "probe_stt_wav") return good;
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    const probe = screen.getByRole("button", { name: "Check selected WAV signal (no model)" }) as HTMLButtonElement;
+    expect(probe.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(probe.disabled).toBe(false));
+    fireEvent.click(probe);
+    await waitFor(() => expect(screen.getByText(/Readable PCM16 audio/)).toBeTruthy());
+    expect(mocks.invoke).toHaveBeenCalledWith("probe_stt_wav", { wavPath: "C:\\private\\voice.wav" });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+    expect(document.body.textContent).not.toContain("C:\\private");
+    expect(screen.getByText(/No model loaded/)).toBeTruthy();
+  });
+
+  it("blocks transcription of a silent WAV even with local model and consent", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\silent.wav")
+      .mockResolvedValueOnce("C:\\private\\offline-model");
+    mocks.invoke.mockResolvedValueOnce({
+      ...good, near_silence_hint: true, signal_review_required: true,
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check selected WAV signal (no model)" }));
+    await waitFor(() => expect(screen.getByText(/No usable signal detected/)).toBeTruthy());
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    expect(transcribe.disabled).toBe(true);
+    fireEvent.click(transcribe);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+    expect(document.body.textContent).not.toContain("C:\\private");
+  });
+
+  it("rejects a contradictory or privacy-unsafe native WAV report", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\voice.wav");
+    mocks.invoke.mockResolvedValueOnce({ ...good, network_used: true });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Check selected WAV signal (no model)" }));
+    await waitFor(() => expect(screen.getByText(/WAV inspection returned an invalid report/)).toBeTruthy());
+    expect(screen.queryByLabelText("Selected STT WAV signal report")).toBeNull();
+  });
+});
+
 describe("local offline Hindi speech to text", () => {
   const valid = {
     text: "नमस्ते भारत", duration_seconds: 1,
