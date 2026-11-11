@@ -17,6 +17,13 @@ def test_health() -> None:
     }
 
 
+def test_model_free_stt_wav_probe_rejects_invalid_input() -> None:
+    with pytest.raises(TypeError, match="absolute local PCM16 WAV"):
+        handle({"action": "probe_stt_wav", "wav_path": 7})
+    with pytest.raises(ValueError, match="absolute local PCM16 WAV"):
+        handle({"action": "probe_stt_wav", "wav_path": "relative.wav"})
+
+
 def test_unknown_action() -> None:
     with pytest.raises(ValueError, match="Unsupported"):
         handle({"action": "delete_everything"})

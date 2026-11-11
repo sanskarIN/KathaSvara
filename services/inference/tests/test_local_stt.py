@@ -21,7 +21,10 @@ def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1) -> Path:
         wav.setnchannels(channels)
         wav.setsampwidth(2)
         wav.setframerate(16000)
-        wav.writeframes(struct.pack("<h", 250) * frames * channels)
+        # Varying mono PCM16 signal rather than a constant DC-only buffer.
+        wav.writeframes((struct.pack("<h", 250) + struct.pack("<h", -250))
+                        * (frames * channels // 2)
+                        + (struct.pack("<h", 250) if frames * channels % 2 else b""))
     return path
 
 
@@ -37,6 +40,12 @@ def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path) -> None
     result = inspect_stt_wav(wav_file(tmp_path))
     assert result["sample_rate"] == 16000
     assert result["duration_seconds"] == 1.0
+    assert result["model_loaded"] is False
+    assert result["audio_transcribed"] is False
+    assert result["network_used"] is False
+    assert result["near_silence_hint"] is False
+    assert result["dc_only_hint"] is False
+    assert result["signal_review_required"] is False
 
 
 def test_stt_rejects_invalid_and_oversized_audio(tmp_path: Path) -> None:
@@ -55,6 +64,50 @@ def test_stt_rejects_invalid_and_oversized_audio(tmp_path: Path) -> None:
     except (NotImplementedError, OSError):
         return
     with pytest.raises(ValueError):
+        inspect_stt_wav(path)
+
+
+def test_model_free_wav_probe_identifies_silence_dc_and_clipping(tmp_path: Path) -> None:
+    path = wav_file(tmp_path)
+    # Complete digital silence is a warning before model loading.
+    path.write_bytes(path.read_bytes()[:44] + bytes(16_000 * 2))
+    silence = inspect_stt_wav(path)
+    assert silence["near_silence_hint"] is True
+    assert silence["signal_review_required"] is True
+    assert silence["network_used"] is False
+
+    # A loud constant offset can pass naïve RMS/peak tests but has no speech AC.
+    path.write_bytes(path.read_bytes()[:44] + struct.pack("<h", 8000) * 16_000)
+    dc = inspect_stt_wav(path)
+    assert dc["dc_only_hint"] is True
+    assert dc["near_silence_hint"] is False
+
+    path.write_bytes(path.read_bytes()[:44] +
+                     (struct.pack("<h", 32767) + struct.pack("<h", -32768)) * 8000)
+    clipped = inspect_stt_wav(path)
+    assert clipped["possible_clipping_hint"] is True
+    assert clipped["signal_review_required"] is True
+
+
+def test_stt_refuses_silent_and_dc_audio_before_loading_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = wav_file(tmp_path)
+    model = model_folder(tmp_path)
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    for sample in (0, 8000):
+        path.write_bytes(path.read_bytes()[:44] + struct.pack("<h", sample) * 16_000)
+        with pytest.raises(ValueError, match="no usable speech-level signal"):
+            transcribe_hindi_wav(str(path), str(model))
+
+
+def test_stt_strict_riff_validation_rejects_extra_chunks(tmp_path: Path) -> None:
+    path = wav_file(tmp_path)
+    altered = bytearray(path.read_bytes())
+    altered.extend(b"data" + (2).to_bytes(4, "little") + bytes(2))
+    altered[4:8] = (len(altered) - 8).to_bytes(4, "little")
+    path.write_bytes(altered)
+    with pytest.raises(ValueError, match="not a readable PCM16 WAV"):
         inspect_stt_wav(path)
 
 

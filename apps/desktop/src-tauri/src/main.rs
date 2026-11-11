@@ -783,6 +783,9 @@ fn python_job_timeout(action: Option<&str>, configured_seconds: Option<&str>) ->
         Some("transcribe_hindi_wav") => Duration::from_secs(600),
         // Import STT libraries without loading or downloading checkpoint weights.
         Some("probe_stt_setup") => Duration::from_secs(90),
+        // No weights are loaded, but a slow local disk may need time to
+        // stream-validate a bounded 6 MiB WAV and compute PCM level hints.
+        Some("probe_stt_wav") => Duration::from_secs(60),
         // Torch and Chatterbox imports can be slow on Windows, but never
         // download weights during this probe.
         Some("probe_runtime") => Duration::from_secs(90),
@@ -945,18 +948,25 @@ const MAX_STT_WAV_BYTES: u64 = 6 * 1024 * 1024;
 
 /// Never expose arbitrary user-selected files or Python/decoder errors in IPC.
 /// The selected WAV is never copied or uploaded by this command.
-fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
+fn verify_stt_wav_path(wav_path: &Path) -> Result<(), String> {
     if !wav_path.is_absolute()
         || !wav_path.extension().and_then(|value| value.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
-        || !model_path.is_absolute()
     {
-        return Err("Select a local WAV and an absolute offline model folder.".into());
+        return Err("Select an absolute local PCM16 WAV recording.".into());
     }
     let wav = fs::symlink_metadata(wav_path)
         .map_err(|_| "Selected STT WAV cannot be accessed.".to_string())?;
     if !wav.file_type().is_file() || !(44..=MAX_STT_WAV_BYTES).contains(&wav.len()) {
         return Err("Select a regular WAV recording under 6 MiB.".into());
+    }
+    Ok(())
+}
+
+fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
+    verify_stt_wav_path(wav_path)?;
+    if !model_path.is_absolute() {
+        return Err("Select a local WAV and an absolute offline model folder.".into());
     }
     let model = fs::symlink_metadata(model_path)
         .map_err(|_| "Select an installed local faster-whisper model folder.".to_string())?;
@@ -996,6 +1006,63 @@ fn validate_stt_result(result: &Value) -> Result<Value, String> {
         "human_review_required": true,
         "network_used": false,
     }))
+}
+
+const STT_WAV_INVALID: &str =
+    "Offline STT WAV preflight returned an invalid report. Update matching inference sources.";
+
+fn validate_stt_wav_report(report: &Value) -> Result<Value, String> {
+    let rate = report.get("sample_rate").and_then(Value::as_u64).ok_or(STT_WAV_INVALID)?;
+    let frames = report.get("frames").and_then(Value::as_u64).ok_or(STT_WAV_INVALID)?;
+    let duration = report.get("duration_seconds").and_then(Value::as_f64)
+        .ok_or(STT_WAV_INVALID)?;
+    let quiet = report.get("near_silence_hint").and_then(Value::as_bool)
+        .ok_or(STT_WAV_INVALID)?;
+    let dc = report.get("dc_only_hint").and_then(Value::as_bool)
+        .ok_or(STT_WAV_INVALID)?;
+    let clipping = report.get("possible_clipping_hint").and_then(Value::as_bool)
+        .ok_or(STT_WAV_INVALID)?;
+    let pause = report.get("long_internal_pause_hint").and_then(Value::as_bool)
+        .ok_or(STT_WAV_INVALID)?;
+    let review = report.get("signal_review_required").and_then(Value::as_bool)
+        .ok_or(STT_WAV_INVALID)?;
+    if !matches!(rate, 8_000 | 16_000 | 24_000 | 48_000)
+        || frames == 0 || frames > rate * 60
+        || !duration.is_finite() || duration <= 0.0 || duration > 60.0
+        || (duration - frames as f64 / rate as f64).abs() > 0.002
+        || review != (quiet || dc || clipping || pause)
+        || report.get("model_loaded") != Some(&Value::Bool(false))
+        || report.get("audio_transcribed") != Some(&Value::Bool(false))
+        || report.get("network_used") != Some(&Value::Bool(false))
+    {
+        return Err(STT_WAV_INVALID.into());
+    }
+    // Do not forward extra JSON such as paths, transcript fragments or hashes.
+    Ok(json!({
+        "sample_rate": rate, "frames": frames, "duration_seconds": duration,
+        "near_silence_hint": quiet, "dc_only_hint": dc,
+        "possible_clipping_hint": clipping, "long_internal_pause_hint": pause,
+        "signal_review_required": review,
+        "model_loaded": false, "audio_transcribed": false, "network_used": false
+    }))
+}
+
+/// Read a user-selected short WAV only on an explicit user action.
+/// Never imports speech recognition libraries or loads model weights.
+#[tauri::command]
+async fn probe_stt_wav(wav_path: String) -> Result<Value, String> {
+    if wav_path.len() > 4096 {
+        return Err("Local STT WAV selection exceeds the path limit.".into());
+    }
+    verify_stt_wav_path(Path::new(&wav_path))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        verify_stt_wav_path(Path::new(&wav_path))?;
+        let response = invoke_python(json!({
+            "action": "probe_stt_wav", "wav_path": wav_path,
+        }))?;
+        let result = response.get("result").ok_or(STT_WAV_INVALID)?;
+        validate_stt_wav_report(result)
+    }).await.map_err(|_| "Local STT WAV inspection worker stopped unexpectedly.".to_string())?
 }
 
 const STT_SETUP_INVALID: &str =
@@ -2186,7 +2253,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            configure_local_inference, clear_local_inference, probe_stt_setup, transcribe_local_wav, transcribe_microphone_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, probe_stt_setup, probe_stt_wav, transcribe_local_wav, transcribe_microphone_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -2236,6 +2303,34 @@ mod tests {
         drop(scratch);
         assert!(!file.exists(), "Temporary microphone WAV must not survive the guard.");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stt_wav_probe_rejects_inconsistent_or_privacy_unsafe_reports() {
+        let good = json!({
+            "sample_rate": 16_000, "frames": 16_000, "duration_seconds": 1.0,
+            "near_silence_hint": false, "dc_only_hint": false,
+            "possible_clipping_hint": true, "long_internal_pause_hint": false,
+            "signal_review_required": true,
+            "model_loaded": false, "audio_transcribed": false, "network_used": false,
+        });
+        assert_eq!(validate_stt_wav_report(&good).unwrap(), good);
+        let mut invalid = good.clone();
+        invalid["signal_review_required"] = json!(false);
+        assert!(validate_stt_wav_report(&invalid).is_err());
+        invalid = good.clone();
+        invalid["network_used"] = json!(true);
+        assert!(validate_stt_wav_report(&invalid).is_err());
+        invalid = good.clone();
+        invalid["frames"] = json!(16_000 * 61);
+        assert!(validate_stt_wav_report(&invalid).is_err());
+        invalid = good.clone();
+        invalid["duration_seconds"] = json!(2.0);
+        assert!(validate_stt_wav_report(&invalid).is_err());
+        invalid = good.clone();
+        invalid["private_path"] = json!("C:\\\\Users\\\\private\\\\voice.wav");
+        let checked = validate_stt_wav_report(&invalid).unwrap();
+        assert!(checked.get("private_path").is_none());
     }
 
     #[test]

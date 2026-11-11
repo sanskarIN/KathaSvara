@@ -18,6 +18,7 @@ _SAFE_FIXED_MESSAGES = frozenset({
     "Select a regular PCM16 WAV under 6 MiB.",
     "Use mono PCM16 WAV audio of 60 seconds or less.",
     "Selected recording is not a readable PCM16 WAV.",
+    "Recording has no usable speech-level signal. Check microphone input and try again.",
     "Choose a local faster-whisper model folder before transcribing.",
     "Local STT model is incomplete. Provide config.json, model.bin and tokenizer.json.",
     "Offline transcription is unavailable. Install the optional STT Python dependencies.",
