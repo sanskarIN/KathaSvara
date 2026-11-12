@@ -95,8 +95,15 @@ a user's machine.
    microphone tracks. If an already recording input device disconnects or
    access is revoked, the capture discards partial audio, releases tracks
    and reports a fixed error instead of presenting an incomplete WAV.
-   Captured audio is held in memory and
-   **does not automatically launch the STT model**.
+   The completed 16 kHz WAV also receives a **model-free microphone signal
+   check** before any transcription is offered. Digital or near-silent input
+   (raw RMS at or below -60 dBFS) and DC-only signal are discarded with
+   fixed Windows input-device guidance rather than loading a model that could
+   hallucinate words. These numerical hints cannot establish that speech
+   occurred, that Hindi is intelligible, or that a microphone works on real
+   Windows hardware.
+   Captured audio is held in memory only when the signal preflight passes;
+   **it does not automatically launch the STT model**.
 4. With consent still checked, click **Transcribe recorded Hindi offline**
    to send the bounded WAV to local Tauri IPC. The native bridge creates a
    random private temporary WAV, invokes the previously configured local
@@ -142,7 +149,7 @@ separate dependency. No microphone access is added to the Tauri
 
 **Human acceptance still required:** Windows microphone permission prompt,
 start/stop indicator, track release after Cancel/Discard/navigation,
-automatic timeout, device unplug/revocation, audibility, noise and silence handling, actual Hindi
+automatic timeout, device unplug/revocation, silent and DC-only rejection, audibility, noise handling, actual Hindi
 accuracy, CPU/memory, temporary-file cleanup and transcription into the
 editor. A JS test or Windows compilation is not evidence these work on
 a real user's microphone.
