@@ -134,6 +134,30 @@ describe("consented short microphone to Hindi transcript", () => {
     expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
   });
 
+  it("offers fixed native microphone-signal advice without leaking a private worker error", async () => {
+    mocks.microphone.mockImplementation(async (completed: (wav: string) => void) => ({
+      stop: () => queueMicrotask(() => completed("UklGRi4AAABXQVZF")),
+      discard: vi.fn(),
+    }));
+    mocks.open.mockResolvedValueOnce("C:\\\\private\\\\local-stt-model");
+    mocks.invoke.mockRejectedValueOnce(
+      new Error("Microphone recording has no usable audio signal. Check Windows microphone input."),
+    );
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText("Microphone is recording now.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe recorded Hindi offline" }));
+    await waitFor(() => expect(screen.getByText(/captured microphone signal is silent or DC-only/)).toBeTruthy());
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(document.body.textContent).not.toContain("C:\\\\private");
+    expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
+  });
+
   it.each([
     ["near_silence", /Microphone audio is nearly silent/],
     ["dc_only", /Microphone audio has no varying signal/],
@@ -369,6 +393,26 @@ describe("local offline Hindi speech to text", () => {
   });
 
 
+
+  it("gives precise incomplete-model guidance after native WAV transcription fails", async () => {
+    const privateWav = "C:\\\\private\\\\original-hindi.wav";
+    const privateModel = "C:\\\\private\\\\whisper-model";
+    mocks.open.mockResolvedValueOnce(privateWav).mockResolvedValueOnce(privateModel);
+    mocks.invoke.mockRejectedValueOnce(
+      "Local STT model is incomplete. Provide nonempty config.json, model.bin and tokenizer.json.",
+    );
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await waitFor(() => expect(screen.getByText(/offline STT model folder is incomplete/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(privateWav);
+    expect(document.body.textContent).not.toContain(privateModel);
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+  });
 
   it("keeps Hindi recognition disabled while an offline setup probe is active", async () => {
     let finishProbe!: (result: object) => void;
