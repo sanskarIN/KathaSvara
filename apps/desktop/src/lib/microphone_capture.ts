@@ -6,8 +6,9 @@ export const MICROPHONE_RATE = 16_000;
 // Cache bounded, phase-quantized windowed-sinc weights for this recording.
 // A 30-second WebView2 sample at 48 kHz has ~480,000 output frames;
 // recalculating sin/cos for every tap stalls the UI during Stop recording.
-// 1025 phases bound the worst-case cache to ~1 MiB, while the <=1/2048
-// input-frame phase approximation is far below 16-bit output resolution.
+// 1025 phases bound the worst-case cache to ~1 MiB. Phase rounding
+// shifts a tap by at most 1/2048 of one source frame; regression tests
+// compare the PCM output with a directly evaluated filter.
 // This still low-pass filters high frequencies before 16 kHz downsampling.
 function createDownsampler(sourceRate: number, targetRate: number) {
   const ratio = sourceRate / targetRate;
