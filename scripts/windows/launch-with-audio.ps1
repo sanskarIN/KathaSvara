@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MPL-2.0
 # Explicit development setup for the unbundled KathaSvara Windows EXE.
-# No downloads, model loading or registry changes unless -InstallDependencies
-# (packages only) or the user later explicitly presses Generate in the app.
+# No downloads, model loading or registry changes by default. Only explicit
+# -InstallDependencies (TTS) / -InstallSttDependencies (STT) opt into pip;
+# real models remain separately selected by the user.
 [CmdletBinding()]
 param(
     [string]$ExecutablePath = "",
