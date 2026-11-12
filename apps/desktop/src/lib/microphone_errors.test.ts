@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
-import { publicMicrophoneStartupError } from "./microphone_errors";
+import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./microphone_errors";
 
 describe("privacy-safe microphone startup guidance", () => {
   it.each([
@@ -41,5 +41,28 @@ describe("privacy-safe microphone startup guidance", () => {
     expect(new Set(messages).size).toBe(1);
     expect(messages[0]).toContain("Microphone startup failed");
     expect(messages.every(msg => !msg.includes(privateData))).toBe(true);
+  });
+});
+
+describe("privacy-safe microphone signal and recording failures", () => {
+  it.each([
+    ["empty", "No microphone samples"],
+    ["near_silence", "nearly silent"],
+    ["dc_only", "no varying signal"],
+    ["capture_failed", "could not be converted"],
+    ["device_disconnected", "disconnected during recording"],
+  ])("maps %s to fixed actionable input guidance", (code, hint) => {
+    const result = publicMicrophoneCaptureFailure(code);
+    expect(result).toContain(hint);
+    expect(result).not.toContain("C:\\\\Users");
+  });
+
+  it("never copies unknown or malicious callback content to Settings", () => {
+    const secret = "C:\\\\private\\\\mic.wav token=secret";
+    for (const code of [secret, "near_silence " + secret, null, 123, { message: secret }]) {
+      const result = publicMicrophoneCaptureFailure(code);
+      expect(result).toContain("Microphone recording failed");
+      expect(result).not.toContain(secret);
+    }
   });
 });
