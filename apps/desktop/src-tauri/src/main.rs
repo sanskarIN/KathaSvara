@@ -2334,6 +2334,91 @@ mod tests {
         assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
     }
 
+    fn microphone_wav_for_signal(samples: &[i16]) -> Vec<u8> {
+        let mut wav = minimal_pcm_wav();
+        wav.truncate(44);
+        wav[24..28].copy_from_slice(&16_000_u32.to_le_bytes());
+        wav[28..32].copy_from_slice(&32_000_u32.to_le_bytes());
+        let data_bytes = (samples.len() * 2) as u32;
+        wav[4..8].copy_from_slice(&(data_bytes + 36).to_le_bytes());
+        wav[40..44].copy_from_slice(&data_bytes.to_le_bytes());
+        for sample in samples {
+            wav.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav
+    }
+
+    #[test]
+    fn microphone_native_pcm_gate_rejects_silence_and_dc_without_a_model() {
+        let silence = microphone_wav_for_signal(&[0_i16; 160]);
+        assert_eq!(verify_microphone_signal(&silence).unwrap_err(), MIC_UNUSABLE_SIGNAL);
+        let quiet = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 32 } else { -32 }).collect::<Vec<i16>>()
+        );
+        assert_eq!(verify_microphone_signal(&quiet).unwrap_err(), MIC_UNUSABLE_SIGNAL);
+        let dc = microphone_wav_for_signal(&[8_000_i16; 160]);
+        assert_eq!(verify_microphone_signal(&dc).unwrap_err(), MIC_UNUSABLE_SIGNAL);
+        let speech_level = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 2_000 } else { -2_000 })
+                .collect::<Vec<i16>>()
+        );
+        assert!(verify_microphone_signal(&speech_level).is_ok());
+        // A nonzero constant offset with a genuine varying component is not
+        // falsely diagnosed as DC-only. This is not a speech-quality assertion.
+        let biased = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 8_002 } else { 7_998 })
+                .collect::<Vec<i16>>()
+        );
+        assert!(verify_microphone_signal(&biased).is_ok());
+        assert!(verify_microphone_signal(&speech_level[..44]).is_err());
+        assert!(verify_microphone_signal(&speech_level[..speech_level.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn unusable_microphone_audio_never_creates_private_scratch_file() {
+        let root = std::env::temp_dir().join(format!(
+            "kathasvara-mic-no-scratch-{}", Uuid::new_v4()
+        ));
+        let silent = microphone_wav_for_signal(&[0_i16; 160]);
+        let encoded = STANDARD.encode(silent);
+        let unavailable_model = root.join("missing-model");
+        let error = transcribe_recorded_microphone(
+            &root, &encoded, unavailable_model.to_str().unwrap()
+        ).unwrap_err();
+        assert_eq!(error, MIC_UNUSABLE_SIGNAL);
+        assert!(!root.join("stt-microphone").exists());
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn empty_offline_model_file_is_rejected_before_microphone_scratch_write() {
+        let root = std::env::temp_dir().join(format!(
+            "kathasvara-mic-model-preflight-{}", Uuid::new_v4()
+        ));
+        let model = root.join("model");
+        fs::create_dir_all(&model).unwrap();
+        for name in ["config.json", "model.bin", "tokenizer.json"] {
+            fs::write(model.join(name), b"fixture").unwrap();
+        }
+        let signal = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 1_000 } else { -1_000 })
+                .collect::<Vec<i16>>()
+        );
+        let encoded = STANDARD.encode(&signal);
+        for name in ["config.json", "model.bin", "tokenizer.json"] {
+            fs::write(model.join(name), b"").unwrap();
+            assert!(verify_stt_model_folder(&model).is_err());
+            let err = transcribe_recorded_microphone(
+                &root, &encoded, model.to_str().unwrap()
+            ).unwrap_err();
+            assert!(err.contains("missing or empty"));
+            assert!(!root.join("stt-microphone").exists());
+            fs::write(model.join(name), b"fixture").unwrap();
+        }
+        assert!(verify_stt_model_folder(&model).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn microphone_scratch_wav_is_deleted_even_without_transcription() {
         let root = std::env::temp_dir().join(format!("kathasvara-mic-test-{}", Uuid::new_v4()));
