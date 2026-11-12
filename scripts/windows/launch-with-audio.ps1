@@ -150,8 +150,28 @@ if ($SttDoctorOnly) {
         }
         $selectedModel = (Resolve-Path -LiteralPath $SttModelPath).Path
     }
-    $payload = @{ action = "probe_stt_setup"; model_path = $selectedModel } |
-        ConvertTo-Json -Compress
+    # Use one *scalar* JSON string: Windows PowerShell 5.1 pipeline
+    # conversion may enumerate dictionary entries instead of serializing
+    # one request object. A missing model is a known literal JSON null.
+    if ($null -eq $selectedModel) {
+        $payload = '{"action":"probe_stt_setup","model_path":null}'
+    } else {
+        $payload = [string](ConvertTo-Json -InputObject @{
+            action = "probe_stt_setup"
+            model_path = $selectedModel
+        } -Compress)
+    }
+    if (-not $payload -or $payload.Length -gt 16384) {
+        Fail "The offline STT setup request is invalid or too large."
+    }
+    try {
+        $checkRequest = $payload | ConvertFrom-Json
+        if ($checkRequest.action -ne "probe_stt_setup") {
+            Fail "The offline STT setup request is invalid."
+        }
+    } catch {
+        Fail "The offline STT setup request could not be serialized."
+    }
     Write-Host "Checking local STT imports and model file presence (no model load or transcription)..."
     # Windows PowerShell 5.1 can prepend a BOM or otherwise change piped
     # native-command stdin encoding, producing JSONDecodeError even for an
