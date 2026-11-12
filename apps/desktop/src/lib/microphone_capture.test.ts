@@ -53,6 +53,56 @@ describe("private microphone WAV encoding", () => {
     expect(rmsOfResampledTone(44_100, 11_025)).toBeLessThan(0.02);
   });
 
+  it("keeps cached filter output close to independently computed windowed-sinc reference", () => {
+    for (const sourceRate of [44_100, 48_000, 96_000]) {
+      const input = Float32Array.from({ length: Math.round(sourceRate / 10) },
+        (_, i) => 0.45 * Math.sin(2 * Math.PI * 1100 * i / sourceRate) +
+          0.1 * Math.sin(2 * Math.PI * 12000 * i / sourceRate));
+      const wav = encodeMonoPcm16([input], sourceRate);
+      const result = new DataView(wav.buffer);
+      const ratio = sourceRate / MICROPHONE_RATE;
+      const radius = Math.min(64, Math.ceil(12 * ratio));
+      const cutoff = 0.90 / ratio;
+      for (const sampleIndex of [0, 1, 7, 31, 80, 250, 600, 1499]) {
+        const position = sampleIndex * ratio;
+        let weighted = 0, sum = 0;
+        const first = Math.max(0, Math.ceil(position - radius));
+        const last = Math.min(input.length - 1, Math.floor(position + radius));
+        for (let frame = first; frame <= last; frame += 1) {
+          const distance = position - frame;
+          const window = 0.5 * (1 + Math.cos(Math.PI * distance / radius));
+          const sinc = Math.abs(distance) < 1e-12 ? cutoff :
+            Math.sin(Math.PI * distance * cutoff) / (Math.PI * distance);
+          const weight = sinc * window;
+          weighted += input[frame] * weight;
+          sum += weight;
+        }
+        const expected = Math.max(-1, Math.min(1, weighted / sum));
+        const actual = result.getInt16(44 + sampleIndex * 2, true) / 32768;
+        expect(Math.abs(actual - expected)).toBeLessThan(0.001);
+      }
+    }
+  });
+
+  it("reuses filter kernels instead of recalculating trigonometry for every PCM frame", () => {
+    for (const sourceRate of [44_100, 48_000]) {
+      const input = new Float32Array(sourceRate * 2).fill(0.25);
+      const sine = vi.spyOn(Math, "sin");
+      const cosine = vi.spyOn(Math, "cos");
+      try {
+        const wav = encodeMonoPcm16([input], sourceRate);
+        expect(new DataView(wav.buffer).getUint32(40, true)).toBe(MICROPHONE_RATE * 4);
+        // Original per-output-frame kernel cost was millions of calls here.
+        // The cached implementation should require at most ~1025 kernels.
+        expect(sine.mock.calls.length).toBeLessThan(70_000);
+        expect(cosine.mock.calls.length).toBeLessThan(70_000);
+      } finally {
+        sine.mockRestore();
+        cosine.mockRestore();
+      }
+    }
+  });
+
   it("rejects empty, oversized, inconsistent and invalid input", () => {
     expect(() => encodeMonoPcm16([new Float32Array(0)], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(40 * 16_000)], 16_000)).toThrow();
