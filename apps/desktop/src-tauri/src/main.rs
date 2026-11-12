@@ -963,10 +963,12 @@ fn verify_stt_wav_path(wav_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
-    verify_stt_wav_path(wav_path)?;
+/// Check local model prerequisites before persisting an in-memory microphone
+/// sample. This mirrors Python's nonempty regular-file validation without
+/// loading model weights, resolving symlinks or contacting any remote service.
+fn verify_stt_model_folder(model_path: &Path) -> Result<(), String> {
     if !model_path.is_absolute() {
-        return Err("Select a local WAV and an absolute offline model folder.".into());
+        return Err("Select an absolute offline STT model folder.".into());
     }
     let model = fs::symlink_metadata(model_path)
         .map_err(|_| "Select an installed local faster-whisper model folder.".to_string())?;
@@ -975,12 +977,17 @@ fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
     }
     for required in ["config.json", "model.bin", "tokenizer.json"] {
         let entry = fs::symlink_metadata(model_path.join(required))
-            .map_err(|_| "Offline STT model files are missing.".to_string())?;
-        if !entry.file_type().is_file() {
-            return Err("Offline STT model files are missing.".into());
+            .map_err(|_| "Offline STT model files are missing or empty.".to_string())?;
+        if !entry.file_type().is_file() || entry.len() == 0 {
+            return Err("Offline STT model files are missing or empty.".into());
         }
     }
     Ok(())
+}
+
+fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
+    verify_stt_wav_path(wav_path)?;
+    verify_stt_model_folder(model_path)
 }
 
 fn validate_stt_result(result: &Value) -> Result<Value, String> {
@@ -1153,6 +1160,39 @@ fn decode_microphone_wav(encoded: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+const MIC_UNUSABLE_SIGNAL: &str =
+    "Microphone recording has no usable audio signal. Check Windows microphone input.";
+
+/// Last native gate before a consented PCM sample is written to temporary
+/// storage. The webview and Python also check signal levels, but a native
+/// command must not trust either layer to reject an empty/muted recording.
+/// Integer moments keep the DC variance test exact for up to 31 seconds.
+fn verify_microphone_signal(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 46 || !(bytes.len() - 44).is_multiple_of(2)
+        || bytes.len() > MAX_MIC_WAV_BYTES
+    {
+        return Err(INVALID_MIC_WAV.into());
+    }
+    let frames = ((bytes.len() - 44) / 2) as i128;
+    let mut sum = 0_i128;
+    let mut squared_sum = 0_i128;
+    for chunk in bytes[44..].chunks_exact(2) {
+        let sample = i128::from(i16::from_le_bytes([chunk[0], chunk[1]]));
+        sum += sample;
+        squared_sum += sample * sample;
+    }
+    // RMS <= -60 dBFS = 32768 / 1000 PCM16 units. Cross-multiply in i128
+    // instead of rounding dBFS, making the boundary deterministic.
+    let near_silence = squared_sum * 1_000_000 <= frames * 32768_i128.pow(2);
+    // A loud constant offset is not speech. Use exact centered variance,
+    // matching the model-free Python WAV checker.
+    let dc_only = squared_sum * frames - sum * sum < frames * frames;
+    if near_silence || dc_only {
+        return Err(MIC_UNUSABLE_SIGNAL.into());
+    }
+    Ok(())
+}
+
 /// RAII cleanup: the captured recording survives only while the Python child
 /// is running. It is never persisted in a project or returned to the UI.
 struct TransientMicrophoneWav {
@@ -1189,11 +1229,11 @@ fn transcribe_recorded_microphone(
     root: &Path, wav_base64: &str, model_path: &str,
 ) -> Result<Value, String> {
     let bytes = decode_microphone_wav(wav_base64)?;
-    // The model must be already present; never download one from this command.
+    // Reject unusable PCM and incomplete models *before* creating any
+    // temporary recording, rather than relying solely on the Python worker.
+    verify_microphone_signal(&bytes)?;
     let model = Path::new(model_path);
-    if !model.is_absolute() {
-        return Err("Choose an existing absolute local STT model folder.".into());
-    }
+    verify_stt_model_folder(model)?;
     let scratch = write_transient_microphone_wav(root, &bytes)?;
     verify_stt_paths(&scratch.path, model)?;
     let response = invoke_python(json!({
