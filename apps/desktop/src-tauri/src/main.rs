@@ -1176,7 +1176,7 @@ fn verify_microphone_signal(bytes: &[u8]) -> Result<(), String> {
     let frames = ((bytes.len() - 44) / 2) as i128;
     let mut sum = 0_i128;
     let mut squared_sum = 0_i128;
-    for chunk in bytes[44..].chunks_exact(2) {
+    for chunk in bytes[44..].as_chunks::<2>().0 {
         let sample = i128::from(i16::from_le_bytes([chunk[0], chunk[1]]));
         sum += sample;
         squared_sum += sample * sample;
