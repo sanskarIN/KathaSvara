@@ -3,6 +3,34 @@
 export const MICROPHONE_MAX_SECONDS = 30;
 export const MICROPHONE_RATE = 16_000;
 
+// A windowed-sinc low-pass avoids folding ultrasonic/high-frequency noise
+// into Whisper's 0–8 kHz band when WebView2 records at 44.1/48 kHz.
+// Bound the filter to keep the 30-second, in-memory capture predictable.
+function filteredDownsample(
+  channels: readonly Float32Array[], position: number,
+  sourceRate: number, targetRate: number, length: number,
+): number {
+  const ratio = sourceRate / targetRate;
+  const radius = Math.min(64, Math.ceil(12 * ratio));
+  const cutoff = 0.90 / ratio;
+  const first = Math.max(0, Math.ceil(position - radius));
+  const last = Math.min(length - 1, Math.floor(position + radius));
+  let weighted = 0;
+  let weightSum = 0;
+  for (let frame = first; frame <= last; frame += 1) {
+    const distance = position - frame;
+    const window = 0.5 * (1 + Math.cos(Math.PI * distance / radius));
+    const sinc = Math.abs(distance) < 1e-12
+      ? cutoff : Math.sin(Math.PI * distance * cutoff) / (Math.PI * distance);
+    const weight = sinc * window;
+    let mono = 0;
+    for (const channel of channels) mono += channel[frame];
+    weighted += (mono / channels.length) * weight;
+    weightSum += weight;
+  }
+  return weighted / weightSum;
+}
+
 export function encodeMonoPcm16(
   channels: readonly Float32Array[], sourceRate: number, targetRate = MICROPHONE_RATE,
 ): Uint8Array {
@@ -31,18 +59,27 @@ export function encodeMonoPcm16(
   view.setUint32(24, targetRate, true); view.setUint32(28, targetRate * 2, true);
   view.setUint16(32, 2, true); view.setUint16(34, 16, true);
   ascii(36, "data"); view.setUint32(40, samples * 2, true);
-  // Linear interpolation (and stereo downmix when needed). No audio data
-  // is retained beyond this Uint8Array, which the caller explicitly handles.
+  // Preserve exact 16 kHz values, interpolate for upsampling, and
+  // low-pass filter before any downsampling. Nothing leaves this buffer.
   for (let i = 0; i < samples; i += 1) {
     const position = i * sourceRate / targetRate;
-    const left = Math.min(length - 1, Math.floor(position));
-    const right = Math.min(length - 1, left + 1);
-    const fraction = position - left;
-    let sample = 0;
-    for (const channel of channels) {
-      sample += channel[left] * (1 - fraction) + channel[right] * fraction;
+    let sample: number;
+    if (sourceRate > targetRate) {
+      sample = filteredDownsample(channels, position, sourceRate, targetRate, length);
+    } else {
+      const left = Math.min(length - 1, Math.floor(position));
+      const right = Math.min(length - 1, left + 1);
+      const fraction = position - left;
+      let mono = 0;
+      for (const channel of channels) {
+        mono += channel[left] * (1 - fraction) + channel[right] * fraction;
+      }
+      sample = mono / channels.length;
     }
-    sample = Math.max(-1, Math.min(1, sample / channels.length));
+    if (!Number.isFinite(sample)) {
+      throw new Error("Microphone samples contain invalid values.");
+    }
+    sample = Math.max(-1, Math.min(1, sample));
     view.setInt16(44 + i * 2, sample < 0 ?
       Math.round(sample * 32768) : Math.round(sample * 32767), true);
   }
@@ -140,10 +177,15 @@ export async function beginMicrophoneCapture(
   let received = 0;
   let samples: Float32Array | null = null;
   let onAbort: (() => void) | null = null;
+  let onTrackEnded: (() => void) | null = null;
 
   const release = () => {
     if (onAbort) signal?.removeEventListener("abort", onAbort);
     onAbort = null;
+    if (onTrackEnded) {
+      for (const track of stream.getTracks()) track.removeEventListener("ended", onTrackEnded);
+      onTrackEnded = null;
+    }
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     if (processor) {
@@ -233,6 +275,22 @@ export async function beginMicrophoneCapture(
     processor.connect(context.destination);
     await abortable(context.resume(), signal);
     if (signal?.aborted || stopped) throw microphoneCancelled();
+    const tracks = stream.getTracks();
+    // A device can vanish or Windows can revoke capture while the UI still
+    // shows "recording". Never hand a stale/partial WAV to transcription.
+    if (tracks.some(track => track.readyState === "ended")) {
+      throw new Error("Microphone device ended during startup.");
+    }
+    onTrackEnded = () => {
+      if (stopped) return;
+      handle.discard();
+      failed("Microphone input disconnected. Check Windows sound input and retry.");
+    };
+    for (const track of tracks) track.addEventListener("ended", onTrackEnded);
+    // Catch a track that ended in the short gap before listeners attached.
+    if (tracks.some(track => track.readyState === "ended")) {
+      throw new Error("Microphone device ended during startup.");
+    }
     timer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
     return handle;
   } catch {

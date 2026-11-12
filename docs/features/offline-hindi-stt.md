@@ -58,7 +58,7 @@ trusted local tooling. Paths remain session-local and are never displayed in
 UI status. Input audio is never uploaded by KathaSvara, and no transcript is
 silently written to the story editor or persistent project.
 
-## Experimental microphone capture (new source branch only)
+## Experimental microphone capture (post-v0.5.6 development source)
 
 A separate, opt-in **microphone → short Hindi transcript** path is now
 implemented in the development source. It is **NOT present in the already
@@ -83,8 +83,14 @@ a user's machine.
    or let the 30-second cap stop capture. The next development source
    uses bounded Web Audio raw PCM capture, then converts the samples directly
    to 16 kHz mono PCM16 WAV, avoiding MediaRecorder's compressed-container
-   decoding step. An unsupported Web Audio capture graph fails safely and
-   releases microphone tracks. Captured audio is held in memory and
+   decoding step. When input is 44.1/48 kHz, a bounded windowed-sinc
+   low-pass filter reduces out-of-band aliasing before downsampling; this
+   improves signal handling but does not prove recognition accuracy.
+   An unsupported Web Audio capture graph fails safely and releases
+   microphone tracks. If an already recording input device disconnects or
+   access is revoked, the capture discards partial audio, releases tracks
+   and reports a fixed error instead of presenting an incomplete WAV.
+   Captured audio is held in memory and
    **does not automatically launch the STT model**.
 4. With consent still checked, click **Transcribe recorded Hindi offline**
    to send the bounded WAV to local Tauri IPC. The native bridge creates a
@@ -131,7 +137,7 @@ separate dependency. No microphone access is added to the Tauri
 
 **Human acceptance still required:** Windows microphone permission prompt,
 start/stop indicator, track release after Cancel/Discard/navigation,
-automatic timeout, audibility, noise and silence handling, actual Hindi
+automatic timeout, device unplug/revocation, audibility, noise and silence handling, actual Hindi
 accuracy, CPU/memory, temporary-file cleanup and transcription into the
 editor. A JS test or Windows compilation is not evidence these work on
 a real user's microphone.
