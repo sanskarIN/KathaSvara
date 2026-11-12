@@ -32,6 +32,27 @@ describe("private microphone WAV encoding", () => {
     expect(wavToBase64(wav)).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
   });
 
+  it("filters above-Nyquist microphone noise instead of aliasing it into Hindi speech", () => {
+    function rmsOfResampledTone(sourceRate: number, frequency: number): number {
+      const input = Float32Array.from({ length: sourceRate / 10 }, (_, frame) =>
+        0.75 * Math.sin(2 * Math.PI * frequency * frame / sourceRate));
+      const wav = encodeMonoPcm16([input], sourceRate);
+      const pcm = new DataView(wav.buffer);
+      let sum = 0;
+      let count = 0;
+      // Ignore filter transients at the start and end of the short tone.
+      for (let frame = 80; frame < (wav.length - 44) / 2 - 80; frame += 1) {
+        const value = pcm.getInt16(44 + frame * 2, true) / 32768;
+        sum += value * value;
+        count += 1;
+      }
+      return Math.sqrt(sum / count);
+    }
+    expect(rmsOfResampledTone(48_000, 1_000)).toBeGreaterThan(0.45);
+    expect(rmsOfResampledTone(48_000, 12_000)).toBeLessThan(0.02);
+    expect(rmsOfResampledTone(44_100, 11_025)).toBeLessThan(0.02);
+  });
+
   it("rejects empty, oversized, inconsistent and invalid input", () => {
     expect(() => encodeMonoPcm16([new Float32Array(0)], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(40 * 16_000)], 16_000)).toThrow();
@@ -40,6 +61,10 @@ describe("private microphone WAV encoding", () => {
     ], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(100)], 100)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(100)], 16_000, 44_100)).toThrow();
+    expect(() => encodeMonoPcm16([new Float32Array([0, Number.NaN])], 16_000))
+      .toThrow("invalid values");
+    expect(() => encodeMonoPcm16([new Float32Array([0, Number.POSITIVE_INFINITY])], 16_000))
+      .toThrow("invalid values");
     expect(() => wavToBase64(new Uint8Array(44))).toThrow();
   });
 });
@@ -50,7 +75,21 @@ afterEach(() => {
 });
 
 function mockWebAudioCapture() {
-  const track = { stop: vi.fn() };
+  const endedListeners = new Set<() => void>();
+  const track = {
+    stop: vi.fn(),
+    readyState: "live" as "live" | "ended",
+    addEventListener: vi.fn((event: string, listener: () => void) => {
+      if (event === "ended") endedListeners.add(listener);
+    }),
+    removeEventListener: vi.fn((event: string, listener: () => void) => {
+      if (event === "ended") endedListeners.delete(listener);
+    }),
+  };
+  const disconnect = () => {
+    track.readyState = "ended";
+    for (const listener of [...endedListeners]) listener();
+  };
   const getUserMedia = vi.fn().mockResolvedValue({
     getTracks: () => [track],
   });
@@ -82,7 +121,7 @@ function mockWebAudioCapture() {
     } as unknown as AudioProcessingEvent);
     return output;
   }
-  return { track, getUserMedia, source, processor, resume, close, sendSamples };
+  return { track, disconnect, getUserMedia, source, processor, resume, close, sendSamples };
 }
 
 describe("microphone Web Audio recording lifecycle", () => {
@@ -213,6 +252,38 @@ describe("microphone Web Audio recording lifecycle", () => {
     session.stop();
     await Promise.resolve();
     expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("discards recorded samples and reports a disconnected microphone without sending partial speech", async () => {
+    const audio = mockWebAudioCapture();
+    const completed = vi.fn(), failed = vi.fn();
+    const session = await beginMicrophoneCapture(completed, failed);
+    audio.sendSamples(new Float32Array(480).fill(0.3));
+    audio.disconnect();
+    session.stop();
+    await Promise.resolve();
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).toHaveBeenCalledOnce();
+    expect(failed.mock.calls[0][0]).toContain("Microphone input disconnected");
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.track.removeEventListener).toHaveBeenCalledWith("ended", expect.any(Function));
+    expect(audio.source.disconnect).toHaveBeenCalledOnce();
+    expect(audio.processor.disconnect).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
+    audio.disconnect();
+    expect(failed).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to record from a track that ended while the audio graph was starting", async () => {
+    const audio = mockWebAudioCapture();
+    audio.track.readyState = "ended";
+    const completed = vi.fn(), failed = vi.fn();
+    await expect(beginMicrophoneCapture(completed, failed))
+      .rejects.toThrow("Microphone audio capture could not start");
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
     expect(completed).not.toHaveBeenCalled();
     expect(failed).not.toHaveBeenCalled();
   });
