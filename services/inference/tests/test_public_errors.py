@@ -15,8 +15,8 @@ import pytest
 
 from kathasvara import cli
 from kathasvara.inference_errors import describe_model_failure
-from kathasvara.public_errors import public_error_message
 from kathasvara.local_stt import verify_local_model_folder
+from kathasvara.public_errors import public_error_message
 
 
 @pytest.mark.parametrize("exception", [
