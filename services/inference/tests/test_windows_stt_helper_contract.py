@@ -57,7 +57,11 @@ def test_stt_wizard_has_no_implicit_model_download_or_tts_activation() -> None:
     assert 'Use -SttModelPath only with -SttDoctorOnly' in script
     assert 'Choose only one of -SttDoctorOnly, -DoctorOnly, or -VerifyHindiSpeech.' in script
     assert 'The offline STT setup probe returned an inconsistent report.' in script
-    assert 'The local offline STT setup probe could not run.' in script
+    assert 'The local offline STT setup probe could not run (' in script
+    assert '[System.IO.StreamWriter]::new(' in script
+    assert 'RedirectStandardError = $true' in script
+    assert 'WaitForExit(90000)' in script
+    assert 'GetAwaiter().GetResult()' in script
     assert 'select_python_311' in script
     assert 'install_stt_extra' in script
     assert 'select_local_model' in script
