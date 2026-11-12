@@ -106,11 +106,15 @@ a user's machine.
    Captured audio is held in memory only when the signal preflight passes;
    **it does not automatically launch the STT model**.
 4. With consent still checked, click **Transcribe recorded Hindi offline**
-   to send the bounded WAV to local Tauri IPC. The native bridge creates a
-   random private temporary WAV, invokes the previously configured local
-   offline recognizer, then deletes the temporary WAV on completion or
-   failure. It does not save audio into a project, upload data, or
-   download recognition model weights.
+   to send the bounded WAV to local Tauri IPC. The Rust bridge independently
+   checks the canonical WAV, then rejects a silent/near-silent or DC-only
+   recording **before any temporary file is created**. It also checks that
+   the separately selected offline model folder contains the expected
+   nonempty regular files; this does not load or verify model weights.
+   For otherwise eligible input, the native bridge creates a random private
+   temporary WAV, invokes the previously configured local offline recognizer,
+   then deletes the temporary WAV on completion or failure. It does not save
+   audio into a project, upload data, or download recognition model weights.
 5. **Discard microphone audio** removes the in-memory recording. Navigating
    away from Settings, hiding or closing the window and withdrawing
    consent also stop active microphone tracks; invalid/oversized recordings

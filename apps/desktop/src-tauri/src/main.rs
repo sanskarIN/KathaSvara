@@ -963,10 +963,12 @@ fn verify_stt_wav_path(wav_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
-    verify_stt_wav_path(wav_path)?;
+/// Check local model prerequisites before persisting an in-memory microphone
+/// sample. This mirrors Python's nonempty regular-file validation without
+/// loading model weights, resolving symlinks or contacting any remote service.
+fn verify_stt_model_folder(model_path: &Path) -> Result<(), String> {
     if !model_path.is_absolute() {
-        return Err("Select a local WAV and an absolute offline model folder.".into());
+        return Err("Select an absolute offline STT model folder.".into());
     }
     let model = fs::symlink_metadata(model_path)
         .map_err(|_| "Select an installed local faster-whisper model folder.".to_string())?;
@@ -975,12 +977,17 @@ fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
     }
     for required in ["config.json", "model.bin", "tokenizer.json"] {
         let entry = fs::symlink_metadata(model_path.join(required))
-            .map_err(|_| "Offline STT model files are missing.".to_string())?;
-        if !entry.file_type().is_file() {
-            return Err("Offline STT model files are missing.".into());
+            .map_err(|_| "Offline STT model files are missing or empty.".to_string())?;
+        if !entry.file_type().is_file() || entry.len() == 0 {
+            return Err("Offline STT model files are missing or empty.".into());
         }
     }
     Ok(())
+}
+
+fn verify_stt_paths(wav_path: &Path, model_path: &Path) -> Result<(), String> {
+    verify_stt_wav_path(wav_path)?;
+    verify_stt_model_folder(model_path)
 }
 
 fn validate_stt_result(result: &Value) -> Result<Value, String> {
@@ -1153,6 +1160,39 @@ fn decode_microphone_wav(encoded: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+const MIC_UNUSABLE_SIGNAL: &str =
+    "Microphone recording has no usable audio signal. Check Windows microphone input.";
+
+/// Last native gate before a consented PCM sample is written to temporary
+/// storage. The webview and Python also check signal levels, but a native
+/// command must not trust either layer to reject an empty/muted recording.
+/// Integer moments keep the DC variance test exact for up to 31 seconds.
+fn verify_microphone_signal(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 46 || !(bytes.len() - 44).is_multiple_of(2)
+        || bytes.len() > MAX_MIC_WAV_BYTES
+    {
+        return Err(INVALID_MIC_WAV.into());
+    }
+    let frames = ((bytes.len() - 44) / 2) as i128;
+    let mut sum = 0_i128;
+    let mut squared_sum = 0_i128;
+    for chunk in bytes[44..].as_chunks::<2>().0 {
+        let sample = i128::from(i16::from_le_bytes([chunk[0], chunk[1]]));
+        sum += sample;
+        squared_sum += sample * sample;
+    }
+    // RMS <= -60 dBFS = 32768 / 1000 PCM16 units. Cross-multiply in i128
+    // instead of rounding dBFS, making the boundary deterministic.
+    let near_silence = squared_sum * 1_000_000 <= frames * 32768_i128.pow(2);
+    // A loud constant offset is not speech. Use exact centered variance,
+    // matching the model-free Python WAV checker.
+    let dc_only = squared_sum * frames - sum * sum < frames * frames;
+    if near_silence || dc_only {
+        return Err(MIC_UNUSABLE_SIGNAL.into());
+    }
+    Ok(())
+}
+
 /// RAII cleanup: the captured recording survives only while the Python child
 /// is running. It is never persisted in a project or returned to the UI.
 struct TransientMicrophoneWav {
@@ -1189,11 +1229,11 @@ fn transcribe_recorded_microphone(
     root: &Path, wav_base64: &str, model_path: &str,
 ) -> Result<Value, String> {
     let bytes = decode_microphone_wav(wav_base64)?;
-    // The model must be already present; never download one from this command.
+    // Reject unusable PCM and incomplete models *before* creating any
+    // temporary recording, rather than relying solely on the Python worker.
+    verify_microphone_signal(&bytes)?;
     let model = Path::new(model_path);
-    if !model.is_absolute() {
-        return Err("Choose an existing absolute local STT model folder.".into());
-    }
+    verify_stt_model_folder(model)?;
     let scratch = write_transient_microphone_wav(root, &bytes)?;
     verify_stt_paths(&scratch.path, model)?;
     let response = invoke_python(json!({
@@ -2292,6 +2332,91 @@ mod tests {
         let mut invalid = pcm.clone();
         invalid[20..22].copy_from_slice(&3u16.to_le_bytes());
         assert!(decode_microphone_wav(&STANDARD.encode(invalid)).is_err());
+    }
+
+    fn microphone_wav_for_signal(samples: &[i16]) -> Vec<u8> {
+        let mut wav = minimal_pcm_wav();
+        wav.truncate(44);
+        wav[24..28].copy_from_slice(&16_000_u32.to_le_bytes());
+        wav[28..32].copy_from_slice(&32_000_u32.to_le_bytes());
+        let data_bytes = (samples.len() * 2) as u32;
+        wav[4..8].copy_from_slice(&(data_bytes + 36).to_le_bytes());
+        wav[40..44].copy_from_slice(&data_bytes.to_le_bytes());
+        for sample in samples {
+            wav.extend_from_slice(&sample.to_le_bytes());
+        }
+        wav
+    }
+
+    #[test]
+    fn microphone_native_pcm_gate_rejects_silence_and_dc_without_a_model() {
+        let silence = microphone_wav_for_signal(&[0_i16; 160]);
+        assert_eq!(verify_microphone_signal(&silence).unwrap_err(), MIC_UNUSABLE_SIGNAL);
+        let quiet = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 32 } else { -32 }).collect::<Vec<i16>>()
+        );
+        assert_eq!(verify_microphone_signal(&quiet).unwrap_err(), MIC_UNUSABLE_SIGNAL);
+        let dc = microphone_wav_for_signal(&[8_000_i16; 160]);
+        assert_eq!(verify_microphone_signal(&dc).unwrap_err(), MIC_UNUSABLE_SIGNAL);
+        let speech_level = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 2_000 } else { -2_000 })
+                .collect::<Vec<i16>>()
+        );
+        assert!(verify_microphone_signal(&speech_level).is_ok());
+        // A nonzero constant offset with a genuine varying component is not
+        // falsely diagnosed as DC-only. This is not a speech-quality assertion.
+        let biased = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 8_002 } else { 7_998 })
+                .collect::<Vec<i16>>()
+        );
+        assert!(verify_microphone_signal(&biased).is_ok());
+        assert!(verify_microphone_signal(&speech_level[..44]).is_err());
+        assert!(verify_microphone_signal(&speech_level[..speech_level.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn unusable_microphone_audio_never_creates_private_scratch_file() {
+        let root = std::env::temp_dir().join(format!(
+            "kathasvara-mic-no-scratch-{}", Uuid::new_v4()
+        ));
+        let silent = microphone_wav_for_signal(&[0_i16; 160]);
+        let encoded = STANDARD.encode(silent);
+        let unavailable_model = root.join("missing-model");
+        let error = transcribe_recorded_microphone(
+            &root, &encoded, unavailable_model.to_str().unwrap()
+        ).unwrap_err();
+        assert_eq!(error, MIC_UNUSABLE_SIGNAL);
+        assert!(!root.join("stt-microphone").exists());
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn empty_offline_model_file_is_rejected_before_microphone_scratch_write() {
+        let root = std::env::temp_dir().join(format!(
+            "kathasvara-mic-model-preflight-{}", Uuid::new_v4()
+        ));
+        let model = root.join("model");
+        fs::create_dir_all(&model).unwrap();
+        for name in ["config.json", "model.bin", "tokenizer.json"] {
+            fs::write(model.join(name), b"fixture").unwrap();
+        }
+        let signal = microphone_wav_for_signal(
+            &(0..160).map(|n| if n % 2 == 0 { 1_000 } else { -1_000 })
+                .collect::<Vec<i16>>()
+        );
+        let encoded = STANDARD.encode(&signal);
+        for name in ["config.json", "model.bin", "tokenizer.json"] {
+            fs::write(model.join(name), b"").unwrap();
+            assert!(verify_stt_model_folder(&model).is_err());
+            let err = transcribe_recorded_microphone(
+                &root, &encoded, model.to_str().unwrap()
+            ).unwrap_err();
+            assert!(err.contains("missing or empty"));
+            assert!(!root.join("stt-microphone").exists());
+            fs::write(model.join(name), b"fixture").unwrap();
+        }
+        assert!(verify_stt_model_folder(&model).is_ok());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
