@@ -17,6 +17,12 @@ MAX_STT_WAV_BYTES = 6 * 1024 * 1024
 MAX_STT_SECONDS = 60
 MAX_TRANSCRIPT_CHARS = 8_000
 MODEL_FILES = ("config.json", "model.bin", "tokenizer.json")
+# Fixed user-facing message, shared with the privacy-safe CLI allowlist.
+# Keep it KathaSvara-owned: never include model paths or import exceptions.
+STT_INCOMPLETE_MODEL_MESSAGE = (
+    "Local STT model is incomplete. Provide nonempty config.json, "
+    "model.bin and tokenizer.json."
+)
 
 
 def inspect_stt_wav(path: Path) -> dict[str, object]:
@@ -85,7 +91,7 @@ def verify_local_model_folder(model_folder: Path) -> None:
             valid = False
         if not valid:
             raise ValueError(
-                "Local STT model is incomplete. Provide nonempty config.json, model.bin and tokenizer.json."
+                STT_INCOMPLETE_MODEL_MESSAGE
             )
 
 

@@ -23,6 +23,12 @@ Python 3.11, whether the selected environment can import the installed
 faster-whisper package, and whether the user-chosen model folder contains
 the three expected **nonempty regular model files** (not symlinks).
 File presence and nonzero size cannot prove model integrity or language support.
+If a required model file is absent or zero bytes, the local Python worker and
+desktop can now select **fixed, actionable incomplete-model guidance** rather
+than a generic inference error. Only exact KathaSvara-owned error messages
+are mapped; unknown native errors, private filesystem paths, credentials,
+and malformed worker text are not echoed into Settings. The error explains
+setup, not actual model integrity, compatibility or Hindi accuracy.
 The check does **not** load model weights, transcribe, create
 a recording, contact a model repository or verify Hindi recognition quality.
 

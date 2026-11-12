@@ -8,6 +8,7 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 from .inference_errors import describe_model_failure
+from .local_stt import STT_INCOMPLETE_MODEL_MESSAGE
 from .voice_reference import REFERENCE_CHANGED_ERROR, REFERENCE_ERROR
 
 # These strings are complete KathaSvara-owned messages, not prefixes. Unknown
@@ -20,7 +21,7 @@ _SAFE_FIXED_MESSAGES = frozenset({
     "Selected recording is not a readable PCM16 WAV.",
     "Recording has no usable speech-level signal. Check microphone input and try again.",
     "Choose a local faster-whisper model folder before transcribing.",
-    "Local STT model is incomplete. Provide config.json, model.bin and tokenizer.json.",
+    STT_INCOMPLETE_MODEL_MESSAGE,
     "Offline transcription is unavailable. Install the optional STT Python dependencies.",
     "Transcription exceeds the 200-segment review limit.",
     "Transcription exceeds the 8000-character review limit.",
