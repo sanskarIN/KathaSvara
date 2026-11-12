@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod wav_file;
 mod production_manifest;
+mod stt_scratch;
 use production_manifest::write_production_manifest;
 use wav_file::{inspect_wav_details, inspect_wav_file, wav_source_metadata_unchanged, WavHeader};
 
@@ -2292,6 +2293,18 @@ fn export_production_manifest(destination: String, content: String) -> Result<()
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // A force-quit cannot run TransientMicrophoneWav::drop. On the
+            // next launch, delete only old UUID-owned scratch recordings;
+            // never inspect or modify user-selected audio, model weights,
+            // projects or other app data. Failure never prevents startup.
+            if let Ok(root) = app.path().app_data_dir() {
+                let _ = stt_scratch::prune_old_microphone_wavs(
+                    &root, std::time::SystemTime::now(),
+                );
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             configure_local_inference, clear_local_inference, probe_stt_setup, probe_stt_wav, transcribe_local_wav, transcribe_microphone_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
