@@ -162,6 +162,7 @@ Designed for creators including **[कहानी वाली शाम](https
 
 ### Support development (entirely voluntary)
 
+- [GitHub Sponsors](https://github.com/sponsors/sanskarIN) (monthly or one-time)
 - [Buy Me a Coffee](https://buymeacoffee.com/sanskarIN)
 - [Razorpay](https://razorpay.me/@SanskarCodes)
 - [PayPal.me](https://paypal.me/SanskarCodes)
