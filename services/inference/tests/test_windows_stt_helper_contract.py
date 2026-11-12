@@ -36,7 +36,9 @@ def test_windows_stt_doctor_is_standalone_and_model_free() -> None:
     assert doctor
     assert 'action = "probe_stt_setup"' in doctor
     assert 'model_path = $selectedModel' in doctor
-    assert 'ConvertTo-Json -Compress' in doctor
+    assert 'ConvertTo-Json -InputObject' in doctor
+    assert "model_path = $selectedModel" in doctor
+    assert '$payload = \'{"action":"probe_stt_setup","model_path":null}\'' in doctor
     assert '[System.Text.UTF8Encoding]::new($false)' in doctor
     assert 'network_used -ne $false' in doctor
     assert 'model_loaded -ne $false' in doctor
