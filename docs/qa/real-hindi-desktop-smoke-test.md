@@ -1,6 +1,6 @@
 # Explicit real Hindi desktop audio smoke test — manual acceptance
 
-> **Development-only; not yet in a published KathaSvara release.** This feature is stacked on [guided speech readiness PR #132](https://github.com/sanskarIN/KathaSvara/pull/132). The latest published GitHub developer preview is still [v0.5.4](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.4), until a newer release is independently verified. This document is not evidence of a usable model or accepted Hindi speech.
+> **Published in the experimental v0.5.6 developer preview; real Hindi listening is still unverified.** [v0.5.6](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6) includes merged [guided readiness #132](https://github.com/sanskarIN/KathaSvara/pull/132), [runtime validation #133](https://github.com/sanskarIN/KathaSvara/pull/133) and [real-model Hindi test #134](https://github.com/sanskarIN/KathaSvara/pull/134). The unsigned Windows EXE does **not** bundle Python, Chatterbox/PyTorch or model weights. A successful release workflow does **not** certify an intelligible recording, a working audio device or clean-Windows setup. Keep [human acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3) open.
 
 ## Purpose and difference from the no-model checks
 
@@ -22,4 +22,4 @@
 
 This flow does **not** download or install dependencies automatically, circumvent model licensing, record from a microphone, upload source audio to a service, permanently store a private reference path, prove distinct character voice identities, validate long stories, or mark manual acceptance as passed. Passing automated tests with a mock audio result is **not real speech evidence**. Clean Windows setup and end-to-end scene/WAV/SRT export remain independently open under [issue #129](https://github.com/sanskarIN/KathaSvara/issues/129).
 
-It is also **not part of the frozen unpublished v0.5.5 source release SHA** `7347dc3133434a5657d7d5f20222bbe92aa78047`. Keep this work on a next-development branch until publication or an explicit change of release plan.
+**Release boundary:** The real Hindi model test first shipped in the published experimental v0.5.6 preview, **not** historical v0.5.5 (source SHA `7347dc3133434a5657d7d5f20222bbe92aa78047`). Later offline Hindi speech-to-text and short microphone-capture work is **post-v0.5.6 source development**, not a capability of the published v0.5.6 EXE. Neither feature has recorded passing real-device Hindi recognition or listening acceptance.
