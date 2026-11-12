@@ -274,7 +274,8 @@ describe("microphone Web Audio recording lifecycle", () => {
     audio.sendSamples(input());
     session.stop();
     await Promise.resolve();
-    expect(failed).toHaveBeenCalledExactlyOnceWith(expectedCode);
+    expect(failed).toHaveBeenCalledOnce();
+    expect(failed).toHaveBeenCalledWith(expectedCode);
     expect(completed).not.toHaveBeenCalled();
     expect(audio.track.stop).toHaveBeenCalledOnce();
     expect(audio.close).toHaveBeenCalledOnce();
