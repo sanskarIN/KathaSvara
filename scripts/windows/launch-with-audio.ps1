@@ -200,16 +200,16 @@ if ($SttDoctorOnly) {
         # Never display raw stderr: it could contain private local paths.
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        $writer = [System.IO.StreamWriter]::new(
-            $process.StandardInput.BaseStream,
-            [System.Text.UTF8Encoding]::new($false)
-        )
+        # Bypass native-pipeline and text-writer transcoding entirely.
+        # Exactly these UTF-8 bytes, with no BOM or newline, become stdin.
+        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes([string]$payload)
+        $stdin = $process.StandardInput.BaseStream
         try {
-            $writer.Write($payload)
-            $writer.Flush()
+            $stdin.Write($bytes, 0, $bytes.Length)
+            $stdin.Flush()
         } finally {
             # EOF releases sys.stdin.read() in kathasvara.cli.
-            $writer.Dispose()
+            $stdin.Close()
         }
         if (-not $process.WaitForExit(90000)) {
             try { $process.Kill() } catch { }
