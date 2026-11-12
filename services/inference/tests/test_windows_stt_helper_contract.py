@@ -34,11 +34,11 @@ def test_windows_stt_doctor_is_standalone_and_model_free() -> None:
         'Write-Host "Checking the configured Python bridge without loading a speech model..."'
     )[0]
     assert doctor
-    assert 'action = "probe_stt_setup"' in doctor
-    assert 'model_path = $selectedModel' in doctor
-    assert 'ConvertTo-Json -InputObject' in doctor
-    assert "model_path = $selectedModel" in doctor
-    assert '$payload = \'{"action":"probe_stt_setup","model_path":null}\'' in doctor
+    assert 'Arguments = "-m kathasvara.stt_doctor"' in doctor
+    assert 'EnvironmentVariables["KATHASVARA_STT_DOCTOR_MODEL_PATH"]' in doctor
+    assert 'EnvironmentVariables.Remove("KATHASVARA_STT_DOCTOR_MODEL_PATH")' in doctor
+    assert "RedirectStandardInput" not in doctor
+    assert "ConvertTo-Json" not in doctor
     assert '[System.Text.UTF8Encoding]::new($false)' in doctor
     assert 'network_used -ne $false' in doctor
     assert 'model_loaded -ne $false' in doctor
@@ -59,10 +59,9 @@ def test_stt_wizard_has_no_implicit_model_download_or_tts_activation() -> None:
     assert 'Use -SttModelPath only with -SttDoctorOnly' in script
     assert 'Choose only one of -SttDoctorOnly, -DoctorOnly, or -VerifyHindiSpeech.' in script
     assert 'The offline STT setup probe returned an inconsistent report.' in script
-    assert 'The local offline STT setup probe could not run (' in script
-    assert 'StandardInput.BaseStream' in script
-    assert 'GetBytes([string]$payload)' in script
-    assert '$stdin.Write($bytes, 0, $bytes.Length)' in script
+    assert 'The local offline STT setup probe could not run.' in script
+    assert '-m kathasvara.stt_doctor' in script
+    assert 'RedirectStandardInput' not in script
     assert 'RedirectStandardError = $true' in script
     assert 'WaitForExit(90000)' in script
     assert 'GetAwaiter().GetResult()' in script
