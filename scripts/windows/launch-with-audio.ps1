@@ -160,7 +160,23 @@ if ($SttDoctorOnly) {
         $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
         $rawStt = $payload | & $python -m kathasvara.cli
         if ($LASTEXITCODE -ne 0 -or -not $rawStt) {
-            Fail "The local offline STT setup probe could not run. Verify Python 3.11 and matching inference sources."
+            # The worker returns a bounded path-free error type when JSON
+            # parsing fails. Report only a fixed stage, not raw Python output.
+            $reason = "bridge_startup"
+            if ($rawStt) {
+                try {
+                    $failure = ($rawStt | Select-Object -Last 1) | ConvertFrom-Json
+                    if ($failure.ok -eq $false -and $failure.error -eq "JSONDecodeError") {
+                        $reason = "json_input_encoding"
+                    } elseif ($failure.ok -eq $false -and $failure.error -eq "UnicodeDecodeError") {
+                        $reason = "stdin_encoding"
+                    } elseif ($failure.ok -eq $false) {
+                        $reason = "request_rejected"
+                    }
+                } catch { $reason = "invalid_worker_response" }
+            }
+            Fail ("The local offline STT setup probe could not run (" + $reason +
+                "). Verify Python 3.11 and matching inference sources.")
         }
         try { $stt = ($rawStt | Select-Object -Last 1) | ConvertFrom-Json }
         catch { Fail "The offline STT setup probe did not return valid JSON." }
