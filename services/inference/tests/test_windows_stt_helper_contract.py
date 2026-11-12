@@ -68,5 +68,5 @@ def test_stt_wizard_has_no_implicit_model_download_or_tts_activation() -> None:
     )
     for flag in ("-SttDoctorOnly", "-InstallSttDependencies", "-SttModelPath"):
         assert flag in guide
-    assert "published v0.5.6 EXE does not contain" in guide
+    assert "v0.5.6 EXE does not contain" in guide
     assert "no" in guide.lower() and "real model" in guide.lower()
