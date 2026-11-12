@@ -12,9 +12,10 @@ The published v0.5.6 build predates speech-to-text and cannot recognize
 spoken input. A subsequent audit also found that the Tauri v2 main-window
 capability listed `dialog:allow-save` but omitted `dialog:allow-open`,
 blocking the local file and folder pickers in a compiled desktop EXE.
-The next development change explicitly grants only `dialog:allow-open` and
-`dialog:allow-save` to the app's main window; it does not grant general
-filesystem read/write permissions or OS microphone access.
+The merged post-v0.5.6 development source now grants only `dialog:allow-open`
+and `dialog:allow-save` to the app's main window. This is a source change,
+**not** a retroactive update to the published v0.5.6 EXE; it does not grant
+general filesystem read/write permissions or OS microphone access.
 
 After opening **Settings → Speech to text**, select an existing local model
 folder and choose **Check offline STT setup (no model load)**. This checks
@@ -32,8 +33,8 @@ The actual WAV and recognition model still require a separate consented run.
 
 ## Initial local recording → Hindi text workflow
 
-1. Build the source after this feature PR has passed CI and merged. Use a
-   trusted Python **3.11** interpreter and the matching inference sources.
+1. Build a trusted **post-v0.5.6 development source commit** that contains
+   STT. Use a trusted Python **3.11** interpreter and matching inference sources.
 2. Review the independent license and hardware requirements for an installed
    CTranslate2-converted **multilingual faster-whisper** model. Obtain it
    separately under its applicable terms. The feature does **not** download,
@@ -51,8 +52,8 @@ The actual WAV and recognition model still require a separate consented run.
    Review every word against your recording. The editor can accept a reviewed
    transcript of at most 3000 characters after overwrite confirmation.
 
-The original v0.5.6 STT source supported an **existing file** only.
-The new development branch adds a short microphone capture path with
+The first post-v0.5.6 STT development change supported an **existing file** only.
+Later development added a short microphone capture path with
 explicit permission and a separate transcription action. It requires **mono, 16-bit PCM WAV**, sample rate 8, 16, 24 or
 48 kHz, duration **1 frame to 60 seconds**, and size **44 bytes to 6 MiB**.
 Larger/multichannel/compressed recordings must be converted externally with
@@ -180,3 +181,11 @@ Clipping/long pauses are advisory warnings, not automatic rejections.
 
 See [Windows full-feature activation #129](https://github.com/sanskarIN/KathaSvara/issues/129)
 and [human Hindi acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3).
+
+## Reproducible human acceptance on Windows 11
+
+Use the [offline Hindi STT Windows acceptance matrix](../qa/windows-offline-hindi-stt-acceptance.md)
+for exact real-device checks, expected observations, and a privacy-safe evidence
+template. It is an **unexecuted procedure**, not acceptance evidence. Record
+results under the existing [Windows activation issue #129](https://github.com/sanskarIN/KathaSvara/issues/129)
+and keep real-Hindi playback acceptance separately in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
