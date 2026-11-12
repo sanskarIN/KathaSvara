@@ -36,6 +36,7 @@ Mark each item **PASS / FAIL / BLOCKED / NOT TESTED**, and describe the observed
 | STT-16 | Recheck offline behavior with network disconnected after dependencies and weights are installed | Local transcription still works, or the exact offline dependency blocker is recorded; no automatic online model selection |
 | STT-17 | Repeat with a noisy room, different speech volume and Windows input device | Record intelligibility, clipping, silence and microphone UX honestly; no automated audio-health result claims linguistic correctness |
 | STT-18 | Repeat TTS separately with the existing real-Hindi smoke-test guide | Do not confuse STT recognition with Chatterbox TTS generation; verify actual speech playback and export independently |
+| STT-19 | In an isolated disposable Windows test profile, force-exit during a consented microphone transcription, then after the two-hour minimum age restart a development build with crash recovery; also check a recent test scratch WAV and unrelated files | Old app-generated UUID-v4 scratch WAV is gone after restart; recent/nonmatching/user WAV files remain; no directory traversal, printed private paths or model/network activity from recovery. Record **BLOCKED** unless tested safely on real Windows; deletion is not secure erasure |
 
 **Important:** A valid WAV signal does not prove that a person spoke Hindi. Near-silence and DC-only checks are heuristics, not speech activity detection, and a model can still produce wrong words for noisy or unusual audio. Do not call a machine transcript “accurate” without a human comparison.
 
@@ -54,6 +55,7 @@ Test IDs with PASS / FAIL / BLOCKED / NOT TESTED:
 Short Hindi transcript accuracy observations (no private recording attached):
 Silent/muted/disconnected microphone results:
 Temporary WAV cleanup and consent-withdrawal results:
+Crash-leftover recovery STT-19 status (isolated Windows fixture, not secure erasure):
 Known failures / next reproduction steps:
 Human tester reviewed real Devanagari output? YES / NO
 ```
