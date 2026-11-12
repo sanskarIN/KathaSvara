@@ -186,6 +186,29 @@ def test_stt_setup_probe_does_not_load_model_or_use_network(
     assert report["network_used"] is False
 
 
+@pytest.mark.parametrize("empty_name", ["config.json", "model.bin", "tokenizer.json"])
+def test_stt_setup_rejects_zero_byte_model_placeholders_before_loading_weights(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, empty_name: str,
+) -> None:
+    model = model_folder(tmp_path)
+    (model / empty_name).write_bytes(b"")
+    wav = wav_file(tmp_path)
+
+    class MustNotLoad:
+        def __init__(self, *_: object, **__: object) -> None:
+            raise AssertionError("An incomplete model must fail before loading weights.")
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=MustNotLoad))
+    report = inspect_stt_setup(str(model))
+    assert report["model_files_present"] is False
+    assert report["ready_to_transcribe"] is False
+    assert report["model_loaded"] is False
+    assert report["network_used"] is False
+
+    with pytest.raises(ValueError, match="nonempty config.json"):
+        transcribe_hindi_wav(str(wav), str(model))
+
+
 def test_stt_setup_reports_absent_package_or_model_without_private_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

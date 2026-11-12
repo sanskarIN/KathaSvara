@@ -75,9 +75,17 @@ def verify_local_model_folder(model_folder: Path) -> None:
         raise ValueError("Choose a local faster-whisper model folder before transcribing.")
     for name in MODEL_FILES:
         file = model_folder / name
-        if not file.is_file() or file.is_symlink():
+        # Names alone are insufficient: an interrupted local model copy can
+        # leave zero-byte placeholders that incorrectly passed STT preflight.
+        # Do not load weights or read model data here; even a nonempty file
+        # is still only a setup hint, never evidence of a working model.
+        try:
+            valid = file.is_file() and not file.is_symlink() and file.stat().st_size > 0
+        except OSError:
+            valid = False
+        if not valid:
             raise ValueError(
-                "Local STT model is incomplete. Provide config.json, model.bin and tokenizer.json."
+                "Local STT model is incomplete. Provide nonempty config.json, model.bin and tokenizer.json."
             )
 
 

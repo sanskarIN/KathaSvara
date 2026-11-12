@@ -19,8 +19,10 @@ filesystem read/write permissions or OS microphone access.
 After opening **Settings → Speech to text**, select an existing local model
 folder and choose **Check offline STT setup (no model load)**. This checks
 Python 3.11, whether the selected environment can import the installed
-faster-whisper package, and whether the user-chosen model folder has the
-expected local files. It does **not** load model weights, transcribe, create
+faster-whisper package, and whether the user-chosen model folder contains
+the three expected **nonempty regular model files** (not symlinks).
+File presence and nonzero size cannot prove model integrity or language support.
+The check does **not** load model weights, transcribe, create
 a recording, contact a model repository or verify Hindi recognition quality.
 
 Follow the first reported action: correct the Python interpreter, explicitly
