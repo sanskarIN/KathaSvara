@@ -62,6 +62,51 @@ Before running that executable, the app verifies the selected inference director
 
 These checks verify an interpreter version and source metadata **only**. They do not prove that NumPy, SoundFile, PyTorch, Chatterbox, authorized model weights, actual Hindi narration or audio playback is working; continue through the model-free diagnostics, then separately generate and listen to real Hindi audio under issue #3.
 
+## Experimental offline Hindi STT setup (post-v0.5.6 source only)
+
+The already published **v0.5.6 EXE does not contain microphone or Hindi
+speech-to-text features**. To test a development build that includes STT,
+select the corresponding source checkout and a trusted Python 3.11
+interpreter. STT is a separate optional component from Chatterbox TTS:
+installing `.[tts]` does not install `faster-whisper`.
+
+The Windows development helper now supports an **STT-only, model-free doctor**
+that never requests microphone access, transcribes speech, loads recognition
+weights, downloads a model or launches the EXE. From the source root, first
+inspect your existing Python environment:
+
+```powershell
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -SttDoctorOnly
+```
+
+If the offline STT package is absent, **explicitly opt in** to its third-party
+package installation (pip may access the internet; model weights are not
+installed by this switch):
+
+```powershell
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -InstallSttDependencies -SttDoctorOnly
+```
+
+After separately obtaining and reviewing the license for a local
+**multilingual CTranslate2 faster-whisper model**, you may check an existing
+local model folder without loading it:
+
+```powershell
+powershell -NoProfile -File .\scripts\windows\launch-with-audio.ps1 -SttDoctorOnly -SttModelPath "C:\YOUR\LOCAL\STT-MODEL"
+```
+
+The helper selects its own trusted `services/inference/.venv` when present
+or accepts `-PythonPath` for a separately configured Python 3.11 interpreter.
+Only `-InstallSttDependencies` installs the STT extra, independently of
+`-InstallDependencies` for TTS. The STT doctor reports a fixed first step
+for missing Python, import, model files, or a ready-for-explicit-transcription
+preflight; it **never certifies actual Hindi recognition**. A green check
+does not verify model integrity, language support, microphone permissions,
+audio intelligibility, inference CPU/RAM or that the published v0.5.6 EXE
+contains STT. The real model and user-consented transcript remain a separate
+action in the **post-v0.5.6 development application**, followed by manual
+review using [Windows STT acceptance](../qa/windows-offline-hindi-stt-acceptance.md).
+
 ## Windows 11 — configure, diagnose, and start
 
 Prerequisites: obtain KathaSvara's source tree from the official GitHub repository, install **Python 3.11**, and use a developer EXE downloaded from a verified KathaSvara GitHub release with its checksum validated. No administrator privileges or persistent environment-variable changes are required by this helper.
