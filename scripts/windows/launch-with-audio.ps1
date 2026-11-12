@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: MPL-2.0
 # Explicit development setup for the unbundled KathaSvara Windows EXE.
-# No downloads, model loading or registry changes unless -InstallDependencies
-# (packages only) or the user later explicitly presses Generate in the app.
+# No downloads, model loading or registry changes by default. Only explicit
+# -InstallDependencies (TTS) / -InstallSttDependencies (STT) opt into pip;
+# real models remain separately selected by the user.
 [CmdletBinding()]
 param(
     [string]$ExecutablePath = "",
     [string]$PythonPath = "",
     [switch]$InstallDependencies,
+    [switch]$InstallSttDependencies,
     [switch]$DoctorOnly,
+    [switch]$SttDoctorOnly,
+    [string]$SttModelPath = "",
     [switch]$VerifyHindiSpeech,
     [switch]$CpuOnly,
     [switch]$ModelV3,
@@ -19,6 +23,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 if ($DoctorOnly -and $VerifyHindiSpeech) {
     Write-Error "Choose either -DoctorOnly (no model) or -VerifyHindiSpeech (real model)."
+    exit 1
+}
+if ($SttDoctorOnly -and ($DoctorOnly -or $VerifyHindiSpeech)) {
+    Write-Error "Choose only one of -SttDoctorOnly, -DoctorOnly, or -VerifyHindiSpeech."
+    exit 1
+}
+if ($SttModelPath -and -not $SttDoctorOnly) {
+    Write-Error "Use -SttModelPath only with -SttDoctorOnly. A model is never loaded by the doctor."
+    exit 1
+}
+if ($SttDoctorOnly -and $RenderTimeoutMinutes -ne 0) {
+    Write-Error "RenderTimeoutMinutes applies only to desktop TTS jobs, not STT setup."
     exit 1
 }
 if ($RenderTimeoutMinutes -ne 0 -and
@@ -49,7 +65,7 @@ if ($PythonPath) {
     $python = (Resolve-Path -LiteralPath $PythonPath).Path
 } elseif (Test-Path -LiteralPath $venvPython -PathType Leaf) {
     $python = $venvPython
-} elseif ($InstallDependencies) {
+} elseif ($InstallDependencies -or $InstallSttDependencies) {
     if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
         Fail "Python 3.11 launcher 'py' is unavailable. Install Python 3.11 first."
     }
@@ -74,6 +90,18 @@ if ($InstallDependencies) {
     try {
         & $python -m pip install -e ".[tts]"
         if ($LASTEXITCODE -ne 0) { Fail "The Python speech dependency installation failed; review pip's output above." }
+    } finally {
+        Pop-Location
+    }
+}
+if ($InstallSttDependencies) {
+    # STT is a separately selected optional extra: never silently mix it into
+    # the existing TTS dependency install or fetch recognition weights.
+    Write-Warning "You explicitly opted into the offline STT Python package installation. pip may download packages. No recognition model weights are installed or fetched by this script."
+    Push-Location $inference
+    try {
+        & $python -m pip install -e ".[stt]"
+        if ($LASTEXITCODE -ne 0) { Fail "Offline STT Python dependency installation failed. Review pip output and retry." }
     } finally {
         Pop-Location
     }
@@ -109,6 +137,100 @@ if ($ReferenceWavPath) {
     }
     $env:KATHASVARA_TTS_REFERENCE_WAV = (Resolve-Path -LiteralPath $ReferenceWavPath).Path
     Write-Host "Local voice reference selected. Use only a recording you own or have permission to use; no audio has been uploaded."
+}
+
+# This is a standalone, opt-in STT setup path. It does not run the TTS
+# runtime doctor, load recognition weights, request microphone access or
+# transcribe any recording. All reported advice comes from fixed strings.
+if ($SttDoctorOnly) {
+    $selectedModel = $null
+    if ($SttModelPath) {
+        if (-not [System.IO.Path]::IsPathRooted($SttModelPath) -or
+            -not (Test-Path -LiteralPath $SttModelPath -PathType Container)) {
+            Fail "SttModelPath must be an existing absolute local model folder."
+        }
+        $selectedModel = (Resolve-Path -LiteralPath $SttModelPath).Path
+    }
+    # Windows PowerShell 5.1's native stdin redirection is not reliable
+    # for JSON requests. The dedicated model-free STT doctor takes the
+    # optional local folder in its own child environment and reads no stdin.
+    # This process-scoped value is never written to disk, shown in output or
+    # copied into the user's persistent environment.
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $python
+    $startInfo.Arguments = "-m kathasvara.stt_doctor"
+    $startInfo.WorkingDirectory = $inference
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    if ($selectedModel) {
+        $startInfo.EnvironmentVariables["KATHASVARA_STT_DOCTOR_MODEL_PATH"] = $selectedModel
+    } else {
+        $startInfo.EnvironmentVariables.Remove("KATHASVARA_STT_DOCTOR_MODEL_PATH")
+    }
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    Write-Host "Checking local STT imports and model file presence (no model load or transcription)..."
+    try {
+        try {
+            if (-not $process.Start()) {
+                Fail "The local offline STT setup process could not start."
+            }
+        } catch {
+            Fail "The local offline STT setup process could not start."
+        }
+        # Drain both streams before waiting. Suppress raw stderr, which could
+        # contain private filesystem paths from a broken interpreter.
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(90000)) {
+            try { $process.Kill() } catch { }
+            Fail "Offline STT source preflight timed out. Check the Python interpreter."
+        }
+        $rawStt = $stdoutTask.GetAwaiter().GetResult()
+        $null = $stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0 -or -not $rawStt) {
+            Fail "The local offline STT setup probe could not run. Check the selected interpreter and inference sources."
+        }
+        try { $stt = $rawStt | ConvertFrom-Json }
+        catch { Fail "The offline STT setup probe did not return valid JSON." }
+    } finally {
+        $process.Dispose()
+    }
+    if (-not $stt.ok -or -not $stt.result -or
+        $stt.result.model_loaded -ne $false -or
+        $stt.result.audio_transcribed -ne $false -or
+        $stt.result.network_used -ne $false) {
+        Fail "The offline STT probe returned an invalid or non-offline status."
+    }
+    $firstStep = [string]$stt.result.next_action_code
+    $hints = @{
+        select_python_311 = "Select the Python 3.11 interpreter, then retry the STT doctor."
+        install_stt_extra = 'Explicitly install the optional Python packages using -InstallSttDependencies -SttDoctorOnly.'
+        select_local_model = "Select a separately installed, licensed multilingual CTranslate2 faster-whisper model with -SttModelPath."
+        run_transcription = "STT imports and local files passed. Open the development desktop app and explicitly transcribe a short Hindi WAV; human review remains required."
+    }
+    foreach ($key in @("python_311", "stt_import_ok", "model_files_present", "ready_to_transcribe")) {
+        if ($stt.result.PSObject.Properties[$key] -eq $null -or
+            $stt.result.PSObject.Properties[$key].Value -isnot [bool]) {
+            Fail "The offline STT setup probe returned an inconsistent report."
+        }
+    }
+    $expectedReady = ($stt.result.python_311 -and $stt.result.stt_import_ok -and $stt.result.model_files_present)
+    if (-not $hints.ContainsKey($firstStep) -or
+        $stt.result.ready_to_transcribe -ne $expectedReady -or
+        $stt.result.ready_to_transcribe -ne ($firstStep -eq "run_transcription")) {
+        Fail "The offline STT setup probe returned an inconsistent report."
+    }
+    if ([bool]$stt.result.ready_to_transcribe) {
+        Write-Host "STT source preflight passed. No model loaded, WAV inspected or Hindi speech recognized."
+    } else {
+        Write-Host "STT setup still needs attention. No model loaded or audio transcribed."
+    }
+    Write-Host ("Recommended next step: " + $hints[$firstStep])
+    exit 0
 }
 
 Write-Host "Checking the configured Python bridge without loading a speech model..."

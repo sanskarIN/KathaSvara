@@ -65,6 +65,30 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: Validate model-free STT JSON bridge on Windows without installing packages
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'services/inference')
+          try {
+            $raw = '{"action":"probe_stt_setup","model_path":null}' | & $python -m kathasvara.cli
+            if ($LASTEXITCODE -ne 0 -or -not $raw) {
+              throw "Model-free Python CLI probe failed without PowerShell 5.1."
+            }
+            $result = ($raw | Select-Object -Last 1) | ConvertFrom-Json
+            if (-not $result.ok -or $result.result.model_loaded -ne $false -or
+                $result.result.audio_transcribed -ne $false -or
+                $result.result.network_used -ne $false) {
+              throw "Model-free STT CLI returned inconsistent offline flags."
+            }
+          } finally { Pop-Location }
+      - name: Exercise model-free Windows STT doctor in PowerShell 5.1
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'scripts/windows/launch-with-audio.ps1'
+          & powershell.exe -NoProfile -File $launcher -PythonPath $python -SttDoctorOnly
+          if ($LASTEXITCODE -ne 0) { throw "Offline STT doctor failed without a model." }
       - name: Install minimal test runner
         run: python -m pip install pytest
       - name: Verify exclusive journals and safe progress publication on NTFS
