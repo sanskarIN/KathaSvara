@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { beginMicrophoneCapture, encodeMonoPcm16, MICROPHONE_RATE, wavToBase64 } from "./microphone_capture";
+import { beginMicrophoneCapture, classifyMicrophoneSignal, encodeMonoPcm16, MICROPHONE_RATE, wavToBase64 } from "./microphone_capture";
 
 describe("private microphone WAV encoding", () => {
   it("encodes 16 kHz mono PCM16 with canonical RIFF size and samples", () => {
@@ -101,6 +101,34 @@ describe("private microphone WAV encoding", () => {
         cosine.mockRestore();
       }
     }
+  });
+
+  it("detects silence and DC-only PCM before expensive local recognition", () => {
+    const silent = encodeMonoPcm16([new Float32Array(16000)], 16000);
+    expect(classifyMicrophoneSignal(silent)).toBe("near_silence");
+
+    const nearSilent = encodeMonoPcm16([
+      Float32Array.from({ length: 16000 }, (_, i) => i % 2 ? 0.00025 : -0.00025),
+    ], 16000);
+    expect(classifyMicrophoneSignal(nearSilent)).toBe("near_silence");
+
+    const offsetOnly = encodeMonoPcm16([new Float32Array(16000).fill(0.4)], 16000);
+    expect(classifyMicrophoneSignal(offsetOnly)).toBe("dc_only");
+
+    const alternating = encodeMonoPcm16([
+      Float32Array.from({ length: 16000 }, (_, i) => i % 2 ? -0.15 : 0.15),
+    ], 16000);
+    expect(classifyMicrophoneSignal(alternating)).toBe("ok");
+    const shifted = alternating.subarray(0);
+    expect(classifyMicrophoneSignal(shifted)).toBe("ok");
+  });
+
+  it("does not accept malformed PCM headers as a healthy recording", () => {
+    const wav = encodeMonoPcm16([new Float32Array([0, 0.2, -0.2])], 16000);
+    const bad = wav.slice();
+    new DataView(bad.buffer).setUint32(40, 10_000, true);
+    expect(() => classifyMicrophoneSignal(bad)).toThrow("Invalid recorded WAV header");
+    expect(() => classifyMicrophoneSignal(new Uint8Array(44))).toThrow();
   });
 
   it("rejects empty, oversized, inconsistent and invalid input", () => {
@@ -232,8 +260,24 @@ describe("microphone Web Audio recording lifecycle", () => {
     session.stop();
     await Promise.resolve();
     expect(completed).not.toHaveBeenCalled();
-    expect(failed).toHaveBeenCalledWith(expect.stringContaining("No usable microphone samples"));
+    expect(failed).toHaveBeenCalledWith("empty");
     expect(audio.track.stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["near_silence", () => new Float32Array(480)],
+    ["dc_only", () => new Float32Array(480).fill(0.25)],
+  ] as const)("rejects %s captured microphone audio before it can reach a model", async (expectedCode, input) => {
+    const audio = mockWebAudioCapture();
+    const completed = vi.fn(), failed = vi.fn();
+    const session = await beginMicrophoneCapture(completed, failed);
+    audio.sendSamples(input());
+    session.stop();
+    await Promise.resolve();
+    expect(failed).toHaveBeenCalledExactlyOnceWith(expectedCode);
+    expect(completed).not.toHaveBeenCalled();
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
   });
 
   it("automatically ends capture after 30 seconds and releases microphone tracks", async () => {
@@ -316,7 +360,7 @@ describe("microphone Web Audio recording lifecycle", () => {
     await Promise.resolve();
     expect(completed).not.toHaveBeenCalled();
     expect(failed).toHaveBeenCalledOnce();
-    expect(failed.mock.calls[0][0]).toContain("Microphone input disconnected");
+    expect(failed).toHaveBeenCalledWith("device_disconnected");
     expect(audio.track.stop).toHaveBeenCalledOnce();
     expect(audio.track.removeEventListener).toHaveBeenCalledWith("ended", expect.any(Function));
     expect(audio.source.disconnect).toHaveBeenCalledOnce();
