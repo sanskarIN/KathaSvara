@@ -113,8 +113,16 @@ a user's machine.
    nonempty regular files; this does not load or verify model weights.
    For otherwise eligible input, the native bridge creates a random private
    temporary WAV, invokes the previously configured local offline recognizer,
-   then deletes the temporary WAV on completion or failure. It does not save
-   audio into a project, upload data, or download recognition model weights.
+   then deletes the temporary WAV on completion or failure. If Windows
+   forcibly terminates the app or machine before normal cleanup, a private
+   scratch file may remain. On a subsequent app launch, a bounded local scan
+   best-effort removes only its own regular UUID-v4 WAV files aged at least
+   two hours from the dedicated `stt-microphone` scratch directory. It will
+   not traverse symlinks, enter subfolders or touch user-selected recordings,
+   and cleanup never starts a model or contacts the network. Deletion is not
+   secure file erasure, and this mitigation still needs real Windows crash
+   acceptance testing. It does not save audio into a project, upload data,
+   or download recognition model weights.
 5. **Discard microphone audio** removes the in-memory recording. Navigating
    away from Settings, hiding or closing the window and withdrawing
    consent also stop active microphone tracks; invalid/oversized recordings
