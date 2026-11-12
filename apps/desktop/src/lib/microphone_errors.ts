@@ -42,3 +42,22 @@ export function publicMicrophoneStartupError(error: unknown): string {
   }
   return GENERIC_MIC_FAILURE;
 }
+
+/**
+ * Capture callbacks cross a WebView event boundary. Never display callback
+ * strings directly: only fixed codes may select public, path-free guidance.
+ */
+const CAPTURE_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
+  empty: "No microphone samples were captured. Check Windows Settings → System → Sound → Input and try again.",
+  near_silence: "Microphone audio is nearly silent. Check the input device, microphone level and Windows microphone permission, then record again.",
+  dc_only: "Microphone audio has no varying signal. Check the selected Windows input device and record again.",
+  capture_failed: "Microphone recording could not be converted to WAV. Check Windows sound input or use an existing local WAV.",
+  device_disconnected: "Microphone input disconnected during recording. Reconnect or select an input device in Windows sound settings and retry.",
+});
+
+export function publicMicrophoneCaptureFailure(code: unknown): string {
+  if (typeof code === "string" && Object.prototype.hasOwnProperty.call(CAPTURE_GUIDANCE, code)) {
+    return CAPTURE_GUIDANCE[code];
+  }
+  return "Microphone recording failed. Check Windows sound input or select an existing local WAV.";
+}
