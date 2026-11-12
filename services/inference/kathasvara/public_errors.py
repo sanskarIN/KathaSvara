@@ -20,7 +20,7 @@ _SAFE_FIXED_MESSAGES = frozenset({
     "Selected recording is not a readable PCM16 WAV.",
     "Recording has no usable speech-level signal. Check microphone input and try again.",
     "Choose a local faster-whisper model folder before transcribing.",
-    "Local STT model is incomplete. Provide config.json, model.bin and tokenizer.json.",
+    "Local STT model is incomplete. Provide nonempty config.json, model.bin and tokenizer.json.",
     "Offline transcription is unavailable. Install the optional STT Python dependencies.",
     "Transcription exceeds the 200-segment review limit.",
     "Transcription exceeds the 8000-character review limit.",
