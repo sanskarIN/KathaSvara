@@ -150,44 +150,28 @@ if ($SttDoctorOnly) {
         }
         $selectedModel = (Resolve-Path -LiteralPath $SttModelPath).Path
     }
-    # Use one *scalar* JSON string: Windows PowerShell 5.1 pipeline
-    # conversion may enumerate dictionary entries instead of serializing
-    # one request object. A missing model is a known literal JSON null.
-    if ($null -eq $selectedModel) {
-        $payload = '{"action":"probe_stt_setup","model_path":null}'
-    } else {
-        $payload = [string](ConvertTo-Json -InputObject @{
-            action = "probe_stt_setup"
-            model_path = $selectedModel
-        } -Compress)
-    }
-    if (-not $payload -or $payload.Length -gt 16384) {
-        Fail "The offline STT setup request is invalid or too large."
-    }
-    try {
-        $checkRequest = $payload | ConvertFrom-Json
-        if ($checkRequest.action -ne "probe_stt_setup") {
-            Fail "The offline STT setup request is invalid."
-        }
-    } catch {
-        Fail "The offline STT setup request could not be serialized."
-    }
-    Write-Host "Checking local STT imports and model file presence (no model load or transcription)..."
-    # Windows PowerShell 5.1 can prepend a BOM or otherwise change piped
-    # native-command stdin encoding, producing JSONDecodeError even for an
-    # ASCII payload. Use a process-owned, BOM-free UTF-8 stream instead.
+    # Windows PowerShell 5.1's native stdin redirection is not reliable
+    # for JSON requests. The dedicated model-free STT doctor takes the
+    # optional local folder in its own child environment and reads no stdin.
+    # This process-scoped value is never written to disk, shown in output or
+    # copied into the user's persistent environment.
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $python
-    $startInfo.Arguments = "-m kathasvara.cli"
+    $startInfo.Arguments = "-m kathasvara.stt_doctor"
     $startInfo.WorkingDirectory = $inference
     $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardInput = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $startInfo.CreateNoWindow = $true
     $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    if ($selectedModel) {
+        $startInfo.EnvironmentVariables["KATHASVARA_STT_DOCTOR_MODEL_PATH"] = $selectedModel
+    } else {
+        $startInfo.EnvironmentVariables.Remove("KATHASVARA_STT_DOCTOR_MODEL_PATH")
+    }
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
+    Write-Host "Checking local STT imports and model file presence (no model load or transcription)..."
     try {
         try {
             if (-not $process.Start()) {
@@ -196,46 +180,18 @@ if ($SttDoctorOnly) {
         } catch {
             Fail "The local offline STT setup process could not start."
         }
-        # Start reading both pipes before writing stdin to avoid deadlocks.
-        # Never display raw stderr: it could contain private local paths.
+        # Drain both streams before waiting. Suppress raw stderr, which could
+        # contain private filesystem paths from a broken interpreter.
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        # Bypass native-pipeline and text-writer transcoding entirely.
-        # Exactly these UTF-8 bytes, with no BOM or newline, become stdin.
-        $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes([string]$payload)
-        $stdin = $process.StandardInput.BaseStream
-        try {
-            $stdin.Write($bytes, 0, $bytes.Length)
-            $stdin.Flush()
-        } finally {
-            # EOF releases sys.stdin.read() in kathasvara.cli.
-            $stdin.Close()
-        }
         if (-not $process.WaitForExit(90000)) {
             try { $process.Kill() } catch { }
             Fail "Offline STT source preflight timed out. Check the Python interpreter."
         }
         $rawStt = $stdoutTask.GetAwaiter().GetResult()
         $null = $stderrTask.GetAwaiter().GetResult()
-        $exitCode = $process.ExitCode
-        if ($exitCode -ne 0 -or -not $rawStt) {
-            # Only fixed categories from KathaSvara's JSON error envelope
-            # are reported, never the raw response or native exception.
-            $reason = "bridge_startup"
-            if ($rawStt) {
-                try {
-                    $failure = ($rawStt | ConvertFrom-Json)
-                    if ($failure.ok -eq $false -and $failure.error -eq "JSONDecodeError") {
-                        $reason = "json_input_encoding"
-                    } elseif ($failure.ok -eq $false -and $failure.error -eq "UnicodeDecodeError") {
-                        $reason = "stdin_encoding"
-                    } elseif ($failure.ok -eq $false) {
-                        $reason = "request_rejected"
-                    }
-                } catch { $reason = "invalid_worker_response" }
-            }
-            Fail ("The local offline STT setup probe could not run (" + $reason +
-                "). Verify Python 3.11 and matching inference sources.")
+        if ($process.ExitCode -ne 0 -or -not $rawStt) {
+            Fail "The local offline STT setup probe could not run. Check the selected interpreter and inference sources."
         }
         try { $stt = $rawStt | ConvertFrom-Json }
         catch { Fail "The offline STT setup probe did not return valid JSON." }
