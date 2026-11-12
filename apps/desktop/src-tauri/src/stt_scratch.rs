@@ -83,7 +83,7 @@ pub fn prune_old_microphone_wavs(root: &Path, now: SystemTime) -> Result<usize, 
         };
         if !info.file_type().is_file() { continue }
         let Ok(modified) = info.modified() else { continue };
-        if now.duration_since(modified).is_err_or(|age| age < STALE_AFTER) {
+        if !now.duration_since(modified).is_ok_and(|age| age >= STALE_AFTER) {
             continue;
         }
         // Keep only bounded metadata, never microphone audio bytes.
@@ -98,7 +98,7 @@ pub fn prune_old_microphone_wavs(root: &Path, now: SystemTime) -> Result<usize, 
         let Ok(info) = fs::symlink_metadata(&file) else { continue };
         if !info.file_type().is_file() || info.len() != size
             || info.modified().ok() != Some(modified)
-            || now.duration_since(modified).is_err_or(|age| age < STALE_AFTER)
+            || !now.duration_since(modified).is_ok_and(|age| age >= STALE_AFTER)
         {
             continue;
         }
