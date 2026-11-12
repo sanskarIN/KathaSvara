@@ -153,19 +153,58 @@ if ($SttDoctorOnly) {
     $payload = @{ action = "probe_stt_setup"; model_path = $selectedModel } |
         ConvertTo-Json -Compress
     Write-Host "Checking local STT imports and model file presence (no model load or transcription)..."
-    Push-Location $inference
+    # Windows PowerShell 5.1 can prepend a BOM or otherwise change piped
+    # native-command stdin encoding, producing JSONDecodeError even for an
+    # ASCII payload. Use a process-owned, BOM-free UTF-8 stream instead.
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $python
+    $startInfo.Arguments = "-m kathasvara.cli"
+    $startInfo.WorkingDirectory = $inference
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
     try {
-        # Windows PowerShell 5.1 otherwise defaults to ASCII when piping
-        # JSON containing a Unicode model directory into Python stdin.
-        $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-        $rawStt = $payload | & $python -m kathasvara.cli
-        if ($LASTEXITCODE -ne 0 -or -not $rawStt) {
-            # The worker returns a bounded path-free error type when JSON
-            # parsing fails. Report only a fixed stage, not raw Python output.
+        try {
+            if (-not $process.Start()) {
+                Fail "The local offline STT setup process could not start."
+            }
+        } catch {
+            Fail "The local offline STT setup process could not start."
+        }
+        # Start reading both pipes before writing stdin to avoid deadlocks.
+        # Never display raw stderr: it could contain private local paths.
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $writer = [System.IO.StreamWriter]::new(
+            $process.StandardInput.BaseStream,
+            [System.Text.UTF8Encoding]::new($false)
+        )
+        try {
+            $writer.Write($payload)
+            $writer.Flush()
+        } finally {
+            # EOF releases sys.stdin.read() in kathasvara.cli.
+            $writer.Dispose()
+        }
+        if (-not $process.WaitForExit(90000)) {
+            try { $process.Kill() } catch { }
+            Fail "Offline STT source preflight timed out. Check the Python interpreter."
+        }
+        $rawStt = $stdoutTask.GetAwaiter().GetResult()
+        $null = $stderrTask.GetAwaiter().GetResult()
+        $exitCode = $process.ExitCode
+        if ($exitCode -ne 0 -or -not $rawStt) {
+            # Only fixed categories from KathaSvara's JSON error envelope
+            # are reported, never the raw response or native exception.
             $reason = "bridge_startup"
             if ($rawStt) {
                 try {
-                    $failure = ($rawStt | Select-Object -Last 1) | ConvertFrom-Json
+                    $failure = ($rawStt | ConvertFrom-Json)
                     if ($failure.ok -eq $false -and $failure.error -eq "JSONDecodeError") {
                         $reason = "json_input_encoding"
                     } elseif ($failure.ok -eq $false -and $failure.error -eq "UnicodeDecodeError") {
@@ -178,10 +217,10 @@ if ($SttDoctorOnly) {
             Fail ("The local offline STT setup probe could not run (" + $reason +
                 "). Verify Python 3.11 and matching inference sources.")
         }
-        try { $stt = ($rawStt | Select-Object -Last 1) | ConvertFrom-Json }
+        try { $stt = $rawStt | ConvertFrom-Json }
         catch { Fail "The offline STT setup probe did not return valid JSON." }
     } finally {
-        Pop-Location
+        $process.Dispose()
     }
     if (-not $stt.ok -or -not $stt.result -or
         $stt.result.model_loaded -ne $false -or
