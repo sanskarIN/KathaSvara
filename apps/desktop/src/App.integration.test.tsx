@@ -134,6 +134,47 @@ describe("consented short microphone to Hindi transcript", () => {
     expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
   });
 
+  it.each([
+    ["near_silence", /Microphone audio is nearly silent/],
+    ["dc_only", /Microphone audio has no varying signal/],
+    ["device_disconnected", /Microphone input disconnected during recording/],
+  ])("shows safe %s diagnostics instead of offering a transcript", async (code, guidance) => {
+    mocks.microphone.mockImplementation(async (
+      _completed: (wav: string) => void,
+      failed: (error: string) => void,
+    ) => ({
+      stop: () => queueMicrotask(() => failed(code)),
+      discard: vi.fn(),
+    }));
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText("Microphone is recording now.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await waitFor(() => expect(screen.getByText(guidance)).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+    expect((screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("does not leak arbitrary microphone callback strings through Settings", async () => {
+    const secret = "C:\\\\private\\\\microphone.wav token=secret";
+    mocks.microphone.mockImplementation(async (
+      _completed: (wav: string) => void,
+      failed: (error: string) => void,
+    ) => ({
+      stop: () => queueMicrotask(() => failed(secret)),
+      discard: vi.fn(),
+    }));
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await waitFor(() => expect(screen.getByText("Microphone is recording now.")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await waitFor(() => expect(screen.getByText(/Microphone recording failed/)).toBeTruthy());
+    expect(document.body.textContent).not.toContain(secret);
+  });
+
   it("cancels an in-flight Windows permission prompt and discards its late session", async () => {
     let finishPermission!: (session: { stop: () => void; discard: () => void }) => void;
     const pending = new Promise<{ stop: () => void; discard: () => void }>(

@@ -119,6 +119,44 @@ export function wavToBase64(wav: Uint8Array): string {
   return btoa(pieces.join(""));
 }
 
+export type MicrophoneCaptureFailure =
+  "empty" | "near_silence" | "dc_only" | "capture_failed" | "device_disconnected";
+export type MicrophoneSignal = "ok" | "near_silence" | "dc_only";
+
+/**
+ * Model-free signal preflight on the already encoded, bounded PCM16 WAV.
+ * Thresholds intentionally match the native WAV inspector: raw RMS <= -60 dBFS,
+ * or centered variance < 1 PCM16 unit squared after excluding quiet recordings.
+ * No model, speech recognition, recording access or transcript is involved.
+ * These heuristics only reject obviously unusable input; "ok" is not speech proof.
+ */
+export function classifyMicrophoneSignal(wav: Uint8Array): MicrophoneSignal {
+  if (wav.byteLength < 46 || (wav.byteLength - 44) % 2 !== 0) {
+    throw new Error("Invalid recorded WAV signal.");
+  }
+  const frames = (wav.byteLength - 44) / 2;
+  if (frames > MICROPHONE_RATE * (MICROPHONE_MAX_SECONDS + 1)) {
+    throw new Error("Recorded WAV exceeds the microphone limit.");
+  }
+  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
+  if (view.getUint32(40, true) !== frames * 2 ||
+      view.getUint32(24, true) !== MICROPHONE_RATE ||
+      view.getUint16(22, true) !== 1 || view.getUint16(34, true) !== 16) {
+    throw new Error("Invalid recorded WAV header.");
+  }
+  let sampleSum = 0;
+  let squaredSum = 0;
+  for (let i = 0; i < frames; i += 1) {
+    const pcm = view.getInt16(44 + 2 * i, true);
+    sampleSum += pcm;
+    squaredSum += pcm * pcm;
+  }
+  const meanSquare = squaredSum / frames;
+  if (Math.sqrt(meanSquare) <= 32768 / 1000) return "near_silence";
+  const mean = sampleSum / frames;
+  return Math.max(0, meanSquare - mean * mean) < 1 ? "dc_only" : "ok";
+}
+
 export type MicrophoneCapture = { stop: () => void; discard: () => void };
 
 const microphoneCancelled = () => new Error("Microphone request cancelled.");
@@ -163,7 +201,7 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
  */
 export async function beginMicrophoneCapture(
   completed: (wavBase64: string) => void,
-  failed: (message: string) => void,
+  failed: (code: MicrophoneCaptureFailure) => void,
   signal?: AbortSignal,
 ): Promise<MicrophoneCapture> {
   if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
@@ -230,9 +268,15 @@ export async function beginMicrophoneCapture(
       release();
       try {
         if (!samples || !context || received === 0) {
-          throw new Error("Empty microphone recording.");
+          queueMicrotask(() => { if (!cancelled) failed("empty"); });
+          return;
         }
         const wav = encodeMonoPcm16([samples.subarray(0, received)], context.sampleRate);
+        const quality = classifyMicrophoneSignal(wav);
+        if (quality !== "ok") {
+          queueMicrotask(() => { if (!cancelled) failed(quality); });
+          return;
+        }
         const encoded = wavToBase64(wav);
         // The UI marks stop as "processing" immediately after this call.
         // Deliver results in the next microtask so "ready" wins, and allow
@@ -240,7 +284,7 @@ export async function beginMicrophoneCapture(
         queueMicrotask(() => { if (!cancelled) completed(encoded); });
       } catch {
         queueMicrotask(() => {
-          if (!cancelled) failed("No usable microphone samples were captured. Check Windows microphone access.");
+          if (!cancelled) failed("capture_failed");
         });
       } finally {
         samples?.fill(0);
@@ -290,7 +334,7 @@ export async function beginMicrophoneCapture(
         if (received >= maxFrames) handle.stop();
       } catch {
         handle.discard();
-        failed("Microphone audio capture failed. Check Windows input permissions.");
+        failed("capture_failed");
       }
     };
     source.connect(processor);
@@ -306,7 +350,7 @@ export async function beginMicrophoneCapture(
     onTrackEnded = () => {
       if (stopped) return;
       handle.discard();
-      failed("Microphone input disconnected. Check Windows sound input and retry.");
+      failed("device_disconnected");
     };
     for (const track of tracks) track.addEventListener("ended", onTrackEnded);
     // Catch a track that ended in the short gap before listeners attached.

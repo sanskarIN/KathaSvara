@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
-import { publicMicrophoneStartupError } from "./lib/microphone_errors";
+import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./lib/microphone_errors";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -713,13 +713,15 @@ export default function App() {
           setMicStatus("ready");
           setMicGuidance("Microphone capture stopped. Review consent and transcribe only when ready.");
         },
-        () => {
+        (code) => {
           if (revision !== micRevision.current) return;
           if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(null);
           setMicStatus("idle");
-          setMicGuidance("Microphone recording failed. Check OS permissions or use an existing WAV.");
+          // The capture layer passes fixed, bounded codes; never render a
+          // native error, device identifier or arbitrary callback string.
+          setMicGuidance(publicMicrophoneCaptureFailure(code));
         },
         controller.signal,
       );
