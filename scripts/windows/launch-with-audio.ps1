@@ -180,10 +180,17 @@ if ($SttDoctorOnly) {
         select_local_model = "Select a separately installed, licensed multilingual CTranslate2 faster-whisper model with -SttModelPath."
         run_transcription = "STT imports and local files passed. Open the development desktop app and explicitly transcribe a short Hindi WAV; human review remains required."
     }
+    foreach ($key in @("python_311", "stt_import_ok", "model_files_present", "ready_to_transcribe")) {
+        if ($stt.result.PSObject.Properties[$key] -eq $null -or
+            $stt.result.PSObject.Properties[$key].Value -isnot [bool]) {
+            Fail "The offline STT setup probe returned an inconsistent report."
+        }
+    }
+    $expectedReady = $stt.result.python_311 -and $stt.result.stt_import_ok -and
+        $stt.result.model_files_present
     if (-not $hints.ContainsKey($firstStep) -or
-        [bool]$stt.result.ready_to_transcribe -ne
-            ([bool]$stt.result.python_311 -and [bool]$stt.result.stt_import_ok -and [bool]$stt.result.model_files_present) -or
-        ([bool]$stt.result.ready_to_transcribe -ne ($firstStep -eq "run_transcription"))) {
+        $stt.result.ready_to_transcribe -ne $expectedReady -or
+        $stt.result.ready_to_transcribe -ne ($firstStep -eq "run_transcription")) {
         Fail "The offline STT setup probe returned an inconsistent report."
     }
     if ([bool]$stt.result.ready_to_transcribe) {
