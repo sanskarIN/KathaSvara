@@ -60,7 +60,9 @@ def test_stt_wizard_has_no_implicit_model_download_or_tts_activation() -> None:
     assert 'Choose only one of -SttDoctorOnly, -DoctorOnly, or -VerifyHindiSpeech.' in script
     assert 'The offline STT setup probe returned an inconsistent report.' in script
     assert 'The local offline STT setup probe could not run (' in script
-    assert '[System.IO.StreamWriter]::new(' in script
+    assert 'StandardInput.BaseStream' in script
+    assert 'GetBytes([string]$payload)' in script
+    assert '$stdin.Write($bytes, 0, $bytes.Length)' in script
     assert 'RedirectStandardError = $true' in script
     assert 'WaitForExit(90000)' in script
     assert 'GetAwaiter().GetResult()' in script
