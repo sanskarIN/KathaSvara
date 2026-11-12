@@ -3,32 +3,52 @@
 export const MICROPHONE_MAX_SECONDS = 30;
 export const MICROPHONE_RATE = 16_000;
 
-// A windowed-sinc low-pass avoids folding ultrasonic/high-frequency noise
-// into Whisper's 0–8 kHz band when WebView2 records at 44.1/48 kHz.
-// Bound the filter to keep the 30-second, in-memory capture predictable.
-function filteredDownsample(
-  channels: readonly Float32Array[], position: number,
-  sourceRate: number, targetRate: number, length: number,
-): number {
+// Cache bounded, phase-quantized windowed-sinc weights for this recording.
+// A 30-second WebView2 sample at 48 kHz has ~480,000 output frames;
+// recalculating sin/cos for every tap stalls the UI during Stop recording.
+// 1025 phases bound the worst-case cache to ~1 MiB. Phase rounding
+// shifts a tap by at most 1/2048 of one source frame; regression tests
+// compare the PCM output with a directly evaluated filter.
+// This still low-pass filters high frequencies before 16 kHz downsampling.
+function createDownsampler(sourceRate: number, targetRate: number) {
   const ratio = sourceRate / targetRate;
   const radius = Math.min(64, Math.ceil(12 * ratio));
   const cutoff = 0.90 / ratio;
-  const first = Math.max(0, Math.ceil(position - radius));
-  const last = Math.min(length - 1, Math.floor(position + radius));
-  let weighted = 0;
-  let weightSum = 0;
-  for (let frame = first; frame <= last; frame += 1) {
-    const distance = position - frame;
-    const window = 0.5 * (1 + Math.cos(Math.PI * distance / radius));
-    const sinc = Math.abs(distance) < 1e-12
-      ? cutoff : Math.sin(Math.PI * distance * cutoff) / (Math.PI * distance);
-    const weight = sinc * window;
-    let mono = 0;
-    for (const channel of channels) mono += channel[frame];
-    weighted += (mono / channels.length) * weight;
-    weightSum += weight;
-  }
-  return weighted / weightSum;
+  const phaseCount = 1024;
+  const kernels = new Map<number, Float64Array>();
+
+  return (channels: readonly Float32Array[], position: number, length: number): number => {
+    const center = Math.floor(position);
+    const key = Math.round((position - center) * phaseCount);
+    let weights = kernels.get(key);
+    if (!weights) {
+      const phase = key / phaseCount;
+      weights = new Float64Array(2 * radius + 1);
+      for (let tap = -radius; tap <= radius; tap += 1) {
+        const distance = phase - tap;
+        if (Math.abs(distance) > radius) continue;
+        const window = 0.5 * (1 + Math.cos(Math.PI * distance / radius));
+        const sinc = Math.abs(distance) < 1e-12
+          ? cutoff : Math.sin(Math.PI * distance * cutoff) / (Math.PI * distance);
+        weights[tap + radius] = sinc * window;
+      }
+      kernels.set(key, weights);
+    }
+
+    let weighted = 0;
+    let weightSum = 0;
+    const first = Math.max(-radius, -center);
+    const last = Math.min(radius, length - 1 - center);
+    for (let tap = first; tap <= last; tap += 1) {
+      const weight = weights[tap + radius];
+      if (weight === 0) continue;
+      let mono = 0;
+      for (const channel of channels) mono += channel[center + tap];
+      weighted += mono / channels.length * weight;
+      weightSum += weight;
+    }
+    return weighted / weightSum;
+  };
 }
 
 export function encodeMonoPcm16(
@@ -59,13 +79,15 @@ export function encodeMonoPcm16(
   view.setUint32(24, targetRate, true); view.setUint32(28, targetRate * 2, true);
   view.setUint16(32, 2, true); view.setUint16(34, 16, true);
   ascii(36, "data"); view.setUint32(40, samples * 2, true);
-  // Preserve exact 16 kHz values, interpolate for upsampling, and
-  // low-pass filter before any downsampling. Nothing leaves this buffer.
+  // Reuse one bounded filter per recording, rather than recomputing
+  // trigonometric kernel weights hundreds of thousands of times.
+  const downsample = sourceRate > targetRate ? createDownsampler(sourceRate, targetRate) : null;
+  // Preserve exact 16 kHz values and interpolate for upsampling.
   for (let i = 0; i < samples; i += 1) {
     const position = i * sourceRate / targetRate;
     let sample: number;
-    if (sourceRate > targetRate) {
-      sample = filteredDownsample(channels, position, sourceRate, targetRate, length);
+    if (downsample) {
+      sample = downsample(channels, position, length);
     } else {
       const left = Math.min(length - 1, Math.floor(position));
       const right = Math.min(length - 1, left + 1);

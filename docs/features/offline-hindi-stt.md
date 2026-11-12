@@ -84,8 +84,11 @@ a user's machine.
    uses bounded Web Audio raw PCM capture, then converts the samples directly
    to 16 kHz mono PCM16 WAV, avoiding MediaRecorder's compressed-container
    decoding step. When input is 44.1/48 kHz, a bounded windowed-sinc
-   low-pass filter reduces out-of-band aliasing before downsampling; this
-   improves signal handling but does not prove recognition accuracy.
+   low-pass filter reduces out-of-band aliasing before downsampling.
+   Filter coefficients are cached per recording to avoid repeating costly
+   trigonometric calculations for every output frame; phase rounding is
+   bounded and tested against a direct numerical reference. This improves
+   capture responsiveness but does not prove Hindi recognition accuracy.
    An unsupported Web Audio capture graph fails safely and releases
    microphone tracks. If an already recording input device disconnects or
    access is revoked, the capture discards partial audio, releases tracks
