@@ -186,8 +186,7 @@ if ($SttDoctorOnly) {
             Fail "The offline STT setup probe returned an inconsistent report."
         }
     }
-    $expectedReady = $stt.result.python_311 -and $stt.result.stt_import_ok -and
-        $stt.result.model_files_present
+    $expectedReady = ($stt.result.python_311 -and $stt.result.stt_import_ok -and $stt.result.model_files_present)
     if (-not $hints.ContainsKey($firstStep) -or
         $stt.result.ready_to_transcribe -ne $expectedReady -or
         $stt.result.ready_to_transcribe -ne ($firstStep -eq "run_transcription")) {
