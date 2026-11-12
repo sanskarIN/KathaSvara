@@ -69,7 +69,8 @@ jobs:
         shell: pwsh
         run: |
           $python = (Get-Command python).Source
-          & powershell.exe -NoProfile -File .\\scripts\\windows\\launch-with-audio.ps1 -PythonPath $python -SttDoctorOnly
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'scripts/windows/launch-with-audio.ps1'
+          & powershell.exe -NoProfile -File $launcher -PythonPath $python -SttDoctorOnly
           if ($LASTEXITCODE -ne 0) { throw "Offline STT doctor failed without a model." }
       - name: Install minimal test runner
         run: python -m pip install pytest
