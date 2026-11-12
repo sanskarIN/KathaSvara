@@ -4,6 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
 import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./lib/microphone_errors";
+import { publicSttTranscriptionError } from "./lib/stt_errors";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -772,9 +773,9 @@ export default function App() {
       setSttStatus(result.speech_detected ?
         "Hindi recognition completed. Review the words against your recording." :
         "No recognizable Hindi speech was returned. Try a clearer recording.");
-    } catch {
+    } catch (error) {
       if (revision === sttRevision.current) {
-        setSttStatus("Local microphone transcription failed. Check the STT setup, model files and recording.");
+        setSttStatus(publicSttTranscriptionError(error, "microphone"));
       }
     } finally {
       // Only one native STT worker can be in flight: even a consent change
@@ -914,9 +915,9 @@ export default function App() {
       setSttStatus(response.speech_detected
         ? "Transcription complete. Review the Hindi text against the original recording."
         : "No recognizable Hindi speech was returned. Try a clearer, short mono WAV.");
-    } catch {
+    } catch (error) {
       if (revision === sttRevision.current) {
-        setSttStatus("Offline transcription failed. Check Python 3.11, the optional STT package, a complete local model and the WAV. Use the model-free WAV signal check to diagnose silence.");
+        setSttStatus(publicSttTranscriptionError(error, "wav"));
       }
     } finally {
       // Native recognition is still running after consent changes; only the
