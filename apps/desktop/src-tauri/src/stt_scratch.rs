@@ -141,7 +141,7 @@ mod tests {
         let fresh = sample(&folder, &format!("{}.wav", Uuid::new_v4()), recent);
         let unrelated = sample(&folder, "recording.wav", old);
         let wrong_version = sample(&folder, "00000000-0000-1000-8000-000000000000.wav", old);
-        let upper = sample(&folder, &format!("{}.wav", Uuid::new_v4()).to_uppercase(), old);
+        let upper = sample(&folder, "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA.wav", old);
         let nested = folder.join("nested");
         fs::create_dir(&nested).unwrap();
         let nested_wav = sample(&nested, &format!("{}.wav", Uuid::new_v4()), old);
