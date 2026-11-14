@@ -138,6 +138,17 @@ def test_incomplete_stt_model_cli_retains_safe_specific_error(
     assert str(recording) not in str(response) and str(model) not in str(response)
 
 
+def test_changed_stt_wav_error_is_fixed_and_private() -> None:
+    from kathasvara.local_stt import STT_CHANGED_RECORDING_MESSAGE
+
+    visible = public_error_message(ValueError(STT_CHANGED_RECORDING_MESSAGE))
+    assert visible == STT_CHANGED_RECORDING_MESSAGE
+    assert "private" not in visible
+    poisoned = ValueError(STT_CHANGED_RECORDING_MESSAGE + r" C:\\Users\\private\\recording.wav")
+    assert public_error_message(poisoned) != str(poisoned)
+    assert "private" not in public_error_message(poisoned)
+
+
 def test_arbitrary_stt_error_suffix_remains_private() -> None:
     private = "C:\\\\Users\\\\private\\\\model.bin"
     visible = public_error_message(ValueError(
