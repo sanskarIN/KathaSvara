@@ -14,6 +14,8 @@ const FIXED_STT_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
     "Select an existing absolute local folder containing the offline STT model.",
   "Offline transcription is unavailable. Install the optional STT Python dependencies.":
     "The optional faster-whisper STT dependencies are missing or unavailable. Use the explicit Windows STT setup helper, then run its model-free doctor.",
+  "Recording changed during offline transcription. Select the WAV again and retry.":
+    "The selected recording changed while offline recognition was running. Select the WAV again and retry; do not use the earlier transcript.",
   "Recording has no usable speech-level signal. Check microphone input and try again.":
     "The recording is silent or has no varying speech-level signal. Check the Windows input device and try a clearer short recording.",
   "Microphone recording has no usable audio signal. Check Windows microphone input.":
