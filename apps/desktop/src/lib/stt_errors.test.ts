@@ -7,6 +7,7 @@ describe("fixed privacy-safe offline STT error guidance", () => {
     ["Local STT model is incomplete. Provide nonempty config.json, model.bin and tokenizer.json.", "nonempty"],
     ["Offline STT model files are missing or empty.", "model is missing"],
     ["Offline transcription is unavailable. Install the optional STT Python dependencies.", "optional faster-whisper"],
+    ["Recording changed during offline transcription. Select the WAV again and retry.", "recording changed"],
     ["Recording has no usable speech-level signal. Check microphone input and try again.", "silent"],
     ["Microphone recording has no usable audio signal. Check Windows microphone input.", "DC-only"],
     ["Local STT inference failed. Check the model files and available memory.", "model compatibility"],
