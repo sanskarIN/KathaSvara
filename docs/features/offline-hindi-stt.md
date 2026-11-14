@@ -58,6 +58,14 @@ The actual WAV and recognition model still require a separate consented run.
    Review every word against your recording. The editor can accept a reviewed
    transcript of at most 3000 characters after overwrite confirmation.
 
+On development builds containing the recording-integrity guard, the worker
+checks that the WAV's SHA-256 content still matches the original inspected
+recording after the model loads and again after transcription. If the file
+changed while recognition was running, it discards the transcript and asks
+you to reselect the WAV. This protects against ordinary concurrent edits; it
+does not lock the file against malicious replacement or prove Hindi accuracy.
+The fingerprint remains internal and is not added to public setup results.
+
 The first post-v0.5.6 STT development change supported an **existing file** only.
 Later development added a short microphone capture path with
 explicit permission and a separate transcription action. It requires **mono, 16-bit PCM WAV**, sample rate 8, 16, 24 or
