@@ -4,8 +4,8 @@
 
 > **v0.5.7 DEVELOPMENT SOURCE — NOT PUBLISHED / NOT STABLE.** The
 > next experimental source version is under preparation with post-v0.5.6
-> offline Hindi STT. Editable transcript review depends on its separate
-> pending PR. The published [v0.5.6](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6)
+> offline Hindi STT. Editable transcript review was merged through
+> PR #166 on protected main. The published [v0.5.6](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6)
 > developer executable does not include STT; new source does not bundle
 > Python 3.11, model weights or a complete installer. Real Hindi/Windows
 > acceptance remains unverified. [v0.5.7 draft](docs/releases/v0.5.7-notes.md)

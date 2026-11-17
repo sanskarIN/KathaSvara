@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = "0.5.5"
 PREVIOUS = "0.5.4"
-CURRENT_SOURCE_VERSION = "0.5.6"
+CURRENT_SOURCE_VERSION = "0.5.7"
 
 
 def test_current_source_versions_remain_synchronized_after_v055_publication() -> None:
