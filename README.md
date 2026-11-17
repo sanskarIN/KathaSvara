@@ -2,6 +2,15 @@
 
 **Give Every Story a Voice.** An open-source, offline-first Hindi storytelling and speech-production desktop project.
 
+> **v0.5.7 DEVELOPMENT SOURCE — NOT PUBLISHED / NOT STABLE.** The
+> next experimental source version is under preparation with post-v0.5.6
+> offline Hindi STT. Editable transcript review depends on its separate
+> pending PR. The published [v0.5.6](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6)
+> developer executable does not include STT; new source does not bundle
+> Python 3.11, model weights or a complete installer. Real Hindi/Windows
+> acceptance remains unverified. [v0.5.7 draft](docs/releases/v0.5.7-notes.md)
+> · [Manual release checklist](docs/releases/v0.5.7-publication-checklist.md).
+
 > **Audio does NOT work out of the box in the published Windows EXE.** The experimental developer binary does not bundle the Python 3.11 speech runtime, Chatterbox dependencies or model weights, and needs the inference source directory configured. A launchable UI and passing no-model tests are not successful TTS. For Windows setup, a no-download runtime check, an explicitly requested **real Hindi WAV smoke test**, and a launcher that configures the EXE without modifying system settings, see the [audio troubleshooting and launch guide](docs/installation/audio-troubleshooting.md). Real Hindi audio and clean-Windows acceptance remain unverified.
 
 > **v0.5.6 experimental developer pre-release — [published on GitHub](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6).** The explicitly dispatched [seven-job workflow #42971289274](https://github.com/sanskarIN/KathaSvara/actions/runs/42971289274) succeeded on 11 November 2026 at exact source SHA `5bdd1688295995b49e71a431d938c491c4069d9e`. It built the unsigned Windows developer EXE and verified the uploaded release and GitHub-downloaded SHA-256 checksum. v0.5.6 adds **model-free guided speech readiness**, **verified Python 3.11/matching source setup**, and an **explicitly user-consented real Hindi model smoke-test interface with local WAV preview/export/cleanup**. The developer EXE is **UNSIGNED and UNBUNDLED**, and no actual Hindi intelligibility or clean-Windows launch has been accepted. See [published release notes](docs/releases/v0.5.6-published-notes.md), [manual acceptance #3](https://github.com/sanskarIN/KathaSvara/issues/3) and [full Windows activation #129](https://github.com/sanskarIN/KathaSvara/issues/129).
