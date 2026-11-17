@@ -11,6 +11,8 @@ param(
     [switch]$InstallSttDependencies,
     [switch]$DoctorOnly,
     [switch]$SttDoctorOnly,
+    [switch]$VerifyHindiSttWav,
+    [string]$SttWavPath = "",
     [string]$SttModelPath = "",
     [switch]$VerifyHindiSpeech,
     [switch]$CpuOnly,
@@ -29,11 +31,23 @@ if ($SttDoctorOnly -and ($DoctorOnly -or $VerifyHindiSpeech)) {
     Write-Error "Choose only one of -SttDoctorOnly, -DoctorOnly, or -VerifyHindiSpeech."
     exit 1
 }
-if ($SttModelPath -and -not $SttDoctorOnly) {
-    Write-Error "Use -SttModelPath only with -SttDoctorOnly. A model is never loaded by the doctor."
+if ($VerifyHindiSttWav -and ($DoctorOnly -or $SttDoctorOnly -or $VerifyHindiSpeech)) {
+    Write-Error "Choose only one real or model-free diagnostic mode."
     exit 1
 }
-if ($SttDoctorOnly -and $RenderTimeoutMinutes -ne 0) {
+if ($SttWavPath -and -not $VerifyHindiSttWav) {
+    Write-Error "Use -SttWavPath only with -VerifyHindiSttWav."
+    exit 1
+}
+if ($SttModelPath -and -not ($SttDoctorOnly -or $VerifyHindiSttWav)) {
+    Write-Error "Use -SttModelPath only with -SttDoctorOnly or -VerifyHindiSttWav."
+    exit 1
+}
+if ($VerifyHindiSttWav -and ($InstallDependencies -or $CpuOnly -or $ModelV3 -or $ReferenceWavPath)) {
+    Write-Error "The offline STT smoke test cannot be combined with TTS installation or voice settings."
+    exit 1
+}
+if (($SttDoctorOnly -or $VerifyHindiSttWav) -and $RenderTimeoutMinutes -ne 0) {
     Write-Error "RenderTimeoutMinutes applies only to desktop TTS jobs, not STT setup."
     exit 1
 }
@@ -230,6 +244,89 @@ if ($SttDoctorOnly) {
         Write-Host "STT setup still needs attention. No model loaded or audio transcribed."
     }
     Write-Host ("Recommended next step: " + $hints[$firstStep])
+    exit 0
+}
+
+# An explicit, REAL offline recognition test for Windows machines where
+# WebView2 or the Settings UI cannot be used. A separate Python module reads
+# only child-scoped paths, loads an existing multilingual model locally and
+# returns fixed status metadata, never the private transcript or file paths.
+# This intentionally does NOT perform the TTS model-free doctor or launch UI.
+if ($VerifyHindiSttWav) {
+    if (-not $SttWavPath -or -not $SttModelPath -or
+        -not [System.IO.Path]::IsPathRooted($SttWavPath) -or
+        -not [System.IO.Path]::IsPathRooted($SttModelPath) -or
+        [System.IO.Path]::GetExtension($SttWavPath).ToLowerInvariant() -ne ".wav" -or
+        -not (Test-Path -LiteralPath $SttWavPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $SttModelPath -PathType Container)) {
+        Fail "Select an existing absolute short PCM16 WAV and a local multilingual STT model folder."
+    }
+    $file = Get-Item -LiteralPath $SttWavPath
+    if ($file.Length -lt 44 -or $file.Length -gt 6MB) {
+        Fail "The STT recording must be a regular WAV no larger than 6 MiB."
+    }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $python
+    $startInfo.Arguments = "-m kathasvara.stt_smoke"
+    $startInfo.WorkingDirectory = $inference
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.EnvironmentVariables["KATHASVARA_STT_SMOKE_WAV_PATH"] =
+        (Resolve-Path -LiteralPath $SttWavPath).Path
+    $startInfo.EnvironmentVariables["KATHASVARA_STT_SMOKE_MODEL_PATH"] =
+        (Resolve-Path -LiteralPath $SttModelPath).Path
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    Write-Warning "REAL offline Hindi recognition selected. An existing local model will load; this may use significant CPU and memory. No weights are downloaded by KathaSvara."
+    try {
+        try {
+            if (-not $process.Start()) {
+                Fail "The local offline STT smoke process could not start."
+            }
+        } catch {
+            Fail "The local offline STT smoke process could not start."
+        }
+        # Drain both streams while the child runs. Never echo raw stderr,
+        # which can contain sensitive interpreter or model filesystem paths.
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(600000)) {
+            try { $process.Kill() } catch { }
+            Fail "Real offline STT smoke test exceeded ten minutes. Check the local model and CPU."
+        }
+        $rawSmoke = $stdoutTask.GetAwaiter().GetResult()
+        $null = $stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0 -or -not $rawSmoke) {
+            Fail "Real offline STT smoke test failed. Check WAV, local model, Python STT packages and memory."
+        }
+        try { $smoke = $rawSmoke | ConvertFrom-Json }
+        catch { Fail "Real offline STT smoke test did not return readable JSON." }
+    } finally {
+        $process.Dispose()
+    }
+    if (-not $smoke.ok -or -not $smoke.result -or
+        $smoke.result.engine -ne "faster-whisper-local" -or
+        $smoke.result.language -ne "hi" -or
+        $smoke.result.real_inference_attempted -ne $true -or
+        $smoke.result.network_used -ne $false -or
+        $smoke.result.human_review_required -ne $true -or
+        $smoke.result.hindi_accuracy_verified -ne $false -or
+        $smoke.result.speech_detected -isnot [bool] -or
+        $smoke.result.duration_seconds -le 0 -or
+        $smoke.result.duration_seconds -gt 60 -or
+        $smoke.result.transcript_characters -lt 0 -or
+        $smoke.result.transcript_characters -gt 8000 -or
+        ($smoke.result.speech_detected -ne ($smoke.result.transcript_characters -gt 0))) {
+        Fail "Real offline STT smoke test returned an inconsistent or unsafe report."
+    }
+    Write-Host ("Local STT model invocation completed. WAV duration: " +
+        $smoke.result.duration_seconds + " seconds.")
+    Write-Host ("Recognized nonempty text: " + $smoke.result.speech_detected +
+        "; character count: " + $smoke.result.transcript_characters + ".")
+    Write-Warning "No transcript was printed or saved. These checks do NOT verify Hindi accuracy, microphone permission, or desktop UI. Human comparison with the recording remains required."
     exit 0
 }
 

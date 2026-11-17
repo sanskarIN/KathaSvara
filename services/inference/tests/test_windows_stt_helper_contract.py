@@ -16,6 +16,8 @@ def test_windows_stt_extra_is_separate_from_tts_and_requires_opt_in() -> None:
     script = HELPER.read_text(encoding="utf-8")
     assert "[switch]$InstallSttDependencies" in script
     assert '[switch]$SttDoctorOnly' in script
+    assert '[switch]$VerifyHindiSttWav' in script
+    assert '[string]$SttWavPath = ""' in script
     assert '[string]$SttModelPath = ""' in script
     tts_install = script.index('if ($InstallDependencies) {')
     stt_install = script.index('if ($InstallSttDependencies) {')
@@ -52,6 +54,35 @@ def test_windows_stt_doctor_is_standalone_and_model_free() -> None:
     assert 'VerifyHindiSpeech' not in doctor
     assert '& $python -m pip install' not in doctor
     assert 'Start-Process' not in doctor
+
+
+def test_real_offline_stt_smoke_is_separate_opt_in_and_never_prints_transcript() -> None:
+    script = HELPER.read_text(encoding="utf-8")
+    smoke = script.partition('if ($VerifyHindiSttWav) {')[2].partition(
+        'Write-Host "Checking the configured Python bridge without loading a speech model..."'
+    )[0]
+    assert smoke
+    assert 'Arguments = "-m kathasvara.stt_smoke"' in smoke
+    assert 'EnvironmentVariables["KATHASVARA_STT_SMOKE_WAV_PATH"]' in smoke
+    assert 'EnvironmentVariables["KATHASVARA_STT_SMOKE_MODEL_PATH"]' in smoke
+    assert 'WaitForExit(600000)' in smoke
+    assert 'RedirectStandardError = $true' in smoke
+    assert 'real_inference_attempted -ne $true' in smoke
+    assert 'hindi_accuracy_verified -ne $false' in smoke
+    assert "No transcript was printed or saved." in smoke
+    assert 'exit 0' in smoke
+    assert "Start-Process" not in smoke
+    assert "synthesize" not in smoke
+    assert "ConvertTo-Json" not in smoke
+    assert 'pip install' not in smoke
+    assert script.isascii()
+
+    guide = (ROOT / "docs/installation/audio-troubleshooting.md").read_text(
+        encoding="utf-8"
+    )
+    assert "-VerifyHindiSttWav" in guide
+    assert "It never prints" in guide
+    assert "ten-minute" in guide
 
 
 def test_stt_wizard_has_no_implicit_model_download_or_tts_activation() -> None:
