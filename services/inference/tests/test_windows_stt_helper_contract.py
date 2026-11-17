@@ -83,6 +83,13 @@ def test_real_offline_stt_smoke_is_separate_opt_in_and_never_prints_transcript()
     assert "-VerifyHindiSttWav" in guide
     assert "It never prints" in guide
     assert "ten-minute" in guide
+    ci = (ROOT / ".github/workflows/windows-portable-candidate.yml").read_text(
+        encoding="utf-8"
+    )
+    assert '"scripts/windows/launch-with-audio.ps1"' in ci
+    assert "shell: powershell" in ci
+    assert "Language.Parser]::ParseFile" in ci
+
 
 
 def test_stt_wizard_has_no_implicit_model_download_or_tts_activation() -> None:
