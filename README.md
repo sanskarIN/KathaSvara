@@ -10,6 +10,17 @@
 
 > **Earlier experimental developer pre-release: [KathaSvara v0.5.0](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0).** The [guarded v0.5.0 workflow](.github/workflows/release-v0.5.0.yml) checks the exact main-branch commit, runs Python, React, Windows Rust, Windows Python cache-lock and Windows EXE build tests, then uploads the unsigned developer EXE, setup README and verified SHA-256 file. **This is not a standalone installer, signed binary, verified distinct-character TTS, or human-accepted natural Hindi narration.** Separately install compatible Python 3.11, approved Chatterbox model dependencies and weights. See [release notes](docs/releases/v0.5.0-notes.md), [Windows setup](docs/installation/portable-windows-candidate.md), [human acceptance issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) and [npm dependency tracking #33](https://github.com/sanskarIN/KathaSvara/issues/33).
 
+## Unreleased Windows development candidates
+
+Pull-request CI can produce an **unsigned, unbundled Windows source snapshot**.
+Its EXE is not the published v0.5.6 binary, even when the source still reports
+a 0.5.6 package version. Check the candidate artifact's README for its exact
+checkout SHA, PR head SHA, workflow run and matching SHA256SUMS.txt. The
+snapshot does not include Python, TTS/STT model weights or a complete installer,
+and CI does not verify real Hindi speech or microphone permission behavior.
+See the [Windows development candidate guide](docs/installation/windows-development-candidate.md).
+Publication of a new version remains a separate manual release decision.
+
 ## v0.5.6 published — guided speech readiness and opt-in Hindi audio test
 
 The [published experimental v0.5.6 developer preview](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6) adds a guided, no-model speech readiness check, verifies the selected Python 3.11 interpreter and matching inference sources, and offers a **separate explicitly consented real Hindi model-generated WAV smoke test** with inspection, playback/export and deletion. An authorized first model load may download large third-party weights and needs independently installed dependencies, compatible hardware, licenses and user approval. No CI test or GitHub EXE build proves the generated Hindi is understandable, character voices are distinct, subtitles align, or the unsigned Windows EXE is a self-contained installer. Those outcomes remain unverified under [manual #3](https://github.com/sanskarIN/KathaSvara/issues/3) and [activation #129](https://github.com/sanskarIN/KathaSvara/issues/129).

@@ -120,8 +120,9 @@ def test_v055_remains_historical_after_latest_v056_publication() -> None:
     ).read_text(encoding="utf-8")
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "KathaSvara-v0.5.6-dev-win64.exe" in candidate
-    assert "portable-windows-v0.5.6.md" in candidate
+    assert "KathaSvara-unreleased-dev-win64.exe" in candidate
+    assert "KathaSvara-v0.5.6-dev-win64.exe" not in candidate
+    assert "portable-windows-v0.5.6.md" not in candidate
     assert "KathaSvara-v0.5.4-dev-win64.exe" not in candidate
     for page in (site, readme):
         assert "releases/tag/v0.5.5" in page
