@@ -26,6 +26,10 @@ STT_INCOMPLETE_MODEL_MESSAGE = (
 STT_CHANGED_RECORDING_MESSAGE = (
     "Recording changed during offline transcription. Select the WAV again and retry."
 )
+STT_HINDI_MODEL_REQUIRED_MESSAGE = (
+    "Hindi support could not be verified for this offline STT model. "
+    "Choose a multilingual faster-whisper model."
+)
 
 
 def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
@@ -183,6 +187,12 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
     try:
         model = WhisperModel(str(model_folder), device="cpu", compute_type="int8",
                              local_files_only=True)
+        # Some faster-whisper versions silently switch language="hi" to English
+        # when given an English-only checkpoint. The underlying CTranslate2
+        # model exposes the actual multilingual capability after loading.
+        # Fail closed if an incompatible/unknown model cannot confirm Hindi.
+        if getattr(getattr(model, "model", None), "is_multilingual", None) is not True:
+            raise ValueError(STT_HINDI_MODEL_REQUIRED_MESSAGE)
         _require_unchanged_recording(recording, recording_sha256)
         segments, _ = model.transcribe(str(recording), language="hi", task="transcribe",
                                         beam_size=3, vad_filter=False)

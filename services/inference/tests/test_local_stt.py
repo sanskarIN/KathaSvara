@@ -121,6 +121,7 @@ def test_offline_asr_uses_local_model_and_real_segment_text(
     class FakeModel:
         def __init__(self, path: str, **kwargs: object) -> None:
             used.append((path, kwargs))
+            self.model = SimpleNamespace(is_multilingual=True)
 
         def transcribe(self, path: str, **kwargs: object) -> tuple[list[object], object]:
             assert path == str(audio)
@@ -157,6 +158,7 @@ def test_stt_rejects_recording_replaced_during_inference(
     class FakeModel:
         def __init__(self, *_: object, **__: object) -> None:
             called.append("load")
+            self.model = SimpleNamespace(is_multilingual=True)
             if when == "model_load":
                 change_audio()
 
@@ -172,6 +174,30 @@ def test_stt_rejects_recording_replaced_during_inference(
     assert called == (["load"] if when == "model_load" else ["load", "transcribe"])
 
 
+@pytest.mark.parametrize("multilingual", [False, None])
+def test_stt_refuses_english_only_or_unverifiable_hindi_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, multilingual: bool | None,
+) -> None:
+    """Never let faster-whisper silently reinterpret a Hindi request as English."""
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    calls: list[str] = []
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=multilingual)
+            calls.append("load")
+
+        def transcribe(self, *_: object, **__: object) -> None:
+            calls.append("transcribe")
+            raise AssertionError("An incompatible model must not transcribe")
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    with pytest.raises(ValueError, match="Hindi support could not be verified"):
+        transcribe_hindi_wav(str(audio), str(folder))
+    assert calls == ["load"]
+
+
 def test_missing_model_fails_before_inference(tmp_path: Path) -> None:
     path = wav_file(tmp_path)
     with pytest.raises(ValueError, match="model folder"):
@@ -184,7 +210,7 @@ def test_rejects_untrusted_model_results(tmp_path: Path, monkeypatch: pytest.Mon
 
     class FakeModel:
         def __init__(self, *_: object, **__: object) -> None:
-            pass
+            self.model = SimpleNamespace(is_multilingual=True)
 
         def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
             return [SimpleNamespace(text="secret\x00path")], None

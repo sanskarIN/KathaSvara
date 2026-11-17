@@ -37,6 +37,17 @@ install `.[stt]` in that interpreter, or choose a complete already-installed
 local model. A green preflight means **only** imports and file checks passed.
 The actual WAV and recognition model still require a separate consented run.
 
+**Hindi model compatibility (development source):** An installed CTranslate2
+checkpoint must genuinely support multilingual recognition. Certain
+faster-whisper versions silently interpret `language="hi"` as English when
+given an English-only model. The offline transcription worker now checks the
+loaded model's CTranslate2 multilingual capability **before** attempting
+recognition. If the model is English-only or cannot confirm its capability, the
+user receives fixed, private-path-free guidance to select a multilingual
+model instead. The no-model folder/import readiness probe cannot know this;
+the runtime check does **not** assert actual Hindi transcription accuracy,
+download a replacement model, or bypass the need for human review.
+
 ## Initial local recording → Hindi text workflow
 
 1. Build a trusted **post-v0.5.6 development source commit** that contains
