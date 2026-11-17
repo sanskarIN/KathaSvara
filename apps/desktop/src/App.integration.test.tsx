@@ -458,7 +458,7 @@ describe("local offline Hindi speech to text", () => {
     expect(copy.disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Discard transcript" }));
     expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
-    expect((screen.getByLabelText("NARRATION TEXT") as HTMLTextAreaElement | null)).toBeNull();
+    expect(screen.queryByLabelText("NARRATION TEXT")).toBeNull();
   });
 
   it("discards a reviewed draft when transcription permission is withdrawn", async () => {
