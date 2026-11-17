@@ -93,9 +93,22 @@ def test_v056_publication_safe_notes_and_unsigned_windows_candidate() -> None:
     assert "DRAFT — NOT PUBLISHED" in workflow
     assert "--notes-file docs/releases/v0.5.6-published-notes.md" in workflow
     assert "--notes-file docs/releases/v0.5.6-notes.md" not in workflow
-    assert "KathaSvara-v0.5.6-dev-win64.exe" in candidate
-    assert "portable-windows-v0.5.6.md" in candidate
+    # The historical v0.5.6 release retains its versioned artifacts, but
+    # a future PR-built candidate must not masquerade as that published binary.
+    assert "KathaSvara-v0.5.6-dev-win64.exe" in workflow
+    assert "KathaSvara-unreleased-dev-win64.exe" in candidate
+    assert "KathaSvara-v0.5.6-dev-win64.exe" not in candidate
+    assert "portable-windows-v0.5.6.md" not in candidate
     assert "KathaSvara-v0.5.5-dev-win64.exe" not in candidate
+    for marker in (
+        "Checked-out source SHA: $env:GITHUB_SHA",
+        "Pull request head SHA: $prHead",
+        "GitHub Actions run ID: $env:GITHUB_RUN_ID",
+        "kathasvara-unreleased-windows-dev-",
+        "SHA256SUMS.txt",
+        "NOT v0.5.6. NOT STABLE.",
+    ):
+        assert marker in candidate
     for document in (draft, published, windows, checklist):
         assert "NOT STABLE" in document
         assert "Python 3.11" in document
