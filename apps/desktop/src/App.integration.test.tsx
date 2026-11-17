@@ -394,6 +394,93 @@ describe("local offline Hindi speech to text", () => {
 
 
 
+  it("allows corrections only after explicit review and overwrite confirmation", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockImplementation(async (name: string) => {
+      if (name === "transcribe_local_wav") return valid;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    const draft = await screen.findByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement;
+    const copy = screen.getByRole("button", { name: "Use reviewed text in story editor" }) as HTMLButtonElement;
+    expect(draft.value).toBe(valid.text);
+    expect(draft.readOnly).toBe(false);
+    expect(copy.disabled).toBe(true);
+    fireEvent.change(draft, { target: { value: "नमस्ते, प्यारे मित्रों" } });
+    const reviewed = screen.getByRole("checkbox", { name: /I compared this transcript with the recording/ });
+    fireEvent.click(reviewed);
+    expect(copy.disabled).toBe(false);
+    const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(copy);
+    expect(ask).toHaveBeenCalledOnce();
+    ask.mockRestore();
+    expect((screen.getByLabelText("NARRATION TEXT") as HTMLTextAreaElement).value)
+      .toBe("नमस्ते, प्यारे मित्रों");
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires fresh review after edits and rejects empty or overlong drafts", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockResolvedValueOnce(valid);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    const draft = await screen.findByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement;
+    const copy = screen.getByRole("button", { name: "Use reviewed text in story editor" }) as HTMLButtonElement;
+    const reviewed = screen.getByRole("checkbox", { name: /I compared this transcript with the recording/ }) as HTMLInputElement;
+    fireEvent.click(reviewed);
+    expect(copy.disabled).toBe(false);
+    fireEvent.change(draft, { target: { value: "शुद्ध पाठ" } });
+    expect(reviewed.checked).toBe(false);
+    expect(copy.disabled).toBe(true);
+    fireEvent.change(draft, { target: { value: " " } });
+    expect(reviewed.disabled).toBe(true);
+    expect(copy.disabled).toBe(true);
+    fireEvent.change(draft, { target: { value: "क".repeat(3001) } });
+    expect(copy.disabled).toBe(true);
+    expect(reviewed.disabled).toBe(true);
+    fireEvent.change(draft, { target: { value: "सही हिन्दी" } });
+    expect(reviewed.disabled).toBe(false);
+    fireEvent.click(reviewed);
+    expect(copy.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Discard transcript" }));
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect((screen.getByLabelText("NARRATION TEXT") as HTMLTextAreaElement | null)).toBeNull();
+  });
+
+  it("discards a reviewed draft when transcription permission is withdrawn", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockResolvedValueOnce(valid);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ });
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await screen.findByLabelText("Recognized Hindi (review required)");
+    fireEvent.click(screen.getByRole("checkbox", { name: /I compared this transcript with the recording/ }));
+    fireEvent.click(consent);
+    expect(screen.queryByRole("button", { name: "Use reviewed text in story editor" })).toBeNull();
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(window.localStorage.getItem("sttReviewDraft")).toBeNull();
+  });
+
   it("gives precise incomplete-model guidance after native WAV transcription fails", async () => {
     const privateWav = "C:\\\\private\\\\original-hindi.wav";
     const privateModel = "C:\\\\private\\\\whisper-model";

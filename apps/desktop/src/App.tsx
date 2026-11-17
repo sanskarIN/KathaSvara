@@ -292,6 +292,10 @@ export default function App() {
   const [sttWavChecking, setSttWavChecking] = useState(false);
   const sttWavProbeRevision = useRef(0);
   const [sttResult, setSttResult] = useState<SttResult | null>(null);
+  // The recognized text is untrusted model output; editable review is a
+  // separate, session-only draft, never silently copied to the story editor.
+  const [sttReviewDraft, setSttReviewDraft] = useState("");
+  const [sttReviewConfirmed, setSttReviewConfirmed] = useState(false);
   const [sttStatus, setSttStatus] = useState<string | null>(null);
   const [micStatus, setMicStatus] = useState<"idle" | "requesting" | "recording" | "processing" | "ready">("idle");
   const [micWav, setMicWav] = useState<string | null>(null);
@@ -758,7 +762,7 @@ export default function App() {
     if (!sttConsent || !micWav || !sttModelPath || sttWorking || sttChecking) return;
     const revision = ++sttRevision.current;
     setSttWorking(true);
-    setSttResult(null);
+    retireSttDraft();
     setSttStatus("Transcribing this locally recorded WAV only after your request.");
     try {
       const result = await invoke<SttResult>("transcribe_microphone_wav", {
@@ -769,7 +773,7 @@ export default function App() {
         setSttStatus("Recorded-audio transcription returned an invalid result.");
         return;
       }
-      setSttResult(result);
+      acceptSttResult(result);
       setSttStatus(result.speech_detected ?
         "Hindi recognition completed. Review the words against your recording." :
         "No recognizable Hindi speech was returned. Try a clearer recording.");
@@ -786,10 +790,22 @@ export default function App() {
     }
   }
 
+  function retireSttDraft() {
+    setSttResult(null);
+    setSttReviewDraft("");
+    setSttReviewConfirmed(false);
+  }
+
+  function acceptSttResult(result: SttResult) {
+    setSttResult(result);
+    setSttReviewDraft(result.text);
+    setSttReviewConfirmed(false);
+  }
+
   function resetSttResult() {
     discardMicrophone();
     sttRevision.current += 1;
-    setSttResult(null);
+    retireSttDraft();
     setSttStatus(null);
     // Revoking consent invalidates results, not the already-running native
     // inference worker or no-model probe. Keep busy controls locked until
@@ -800,7 +816,7 @@ export default function App() {
   async function chooseSttWav() {
     if (sttWavChecking || sttChecking || sttWorking) return;
     const revision = ++sttRevision.current;
-    setSttResult(null);
+    retireSttDraft();
     setSttStatus(null);
     try {
       const chosen = await open({
@@ -822,7 +838,7 @@ export default function App() {
 
   async function chooseSttModel() {
     const revision = ++sttRevision.current;
-    setSttResult(null);
+    retireSttDraft();
     setSttStatus(null);
     setSttSetup(null);
     try {
@@ -900,7 +916,7 @@ export default function App() {
         sttWavChecking || sttWavReport?.near_silence_hint || sttWavReport?.dc_only_hint) return;
     const revision = ++sttRevision.current;
     setSttWorking(true);
-    setSttResult(null);
+    retireSttDraft();
     setSttStatus("Transcribing selected Hindi WAV locally. No microphone, upload or model download.");
     try {
       const response = await invoke<SttResult>("transcribe_local_wav", {
@@ -911,7 +927,7 @@ export default function App() {
         setSttStatus("Local transcription returned an invalid result. Update inference sources.");
         return;
       }
-      setSttResult(response);
+      acceptSttResult(response);
       setSttStatus(response.speech_detected
         ? "Transcription complete. Review the Hindi text against the original recording."
         : "No recognizable Hindi speech was returned. Try a clearer, short mono WAV.");
@@ -927,13 +943,19 @@ export default function App() {
   }
 
   function useSttTextInEditor() {
-    if (!sttResult?.speech_detected || sttResult.text.length > 3000) return;
+    // Revalidate at click time, not only from a disabled button. A reviewed
+    // transcription is not speech verification and must never overwrite a
+    // story without explicit review and the existing overwrite prompt.
+    const text = sttReviewDraft.trim();
+    if (!sttConsent || !sttResult?.speech_detected || !sttReviewConfirmed ||
+        sttWorking || validateText(text) !== null) return;
     if (project.text.trim() && !window.confirm(
-      "Replace the current story editor text with this transcription? Save your story first.",
+      "Replace the current story editor text with your reviewed transcription? Save your story first.",
     )) return;
-    changeScript(sttResult.text);
+    changeScript(text);
+    retireSttDraft();
     setPage("studio");
-    setMessage("Hindi transcription copied into the story editor. Review wording before generating audio.");
+    setMessage("Your reviewed Hindi transcript was copied into the story editor. Confirm wording again before generating audio.");
   }
 
   async function chooseReferenceVoice() {
@@ -1519,15 +1541,31 @@ export default function App() {
                 {sttResult && (
                   <div>
                     <label className="field-label" htmlFor="stt-transcript">Recognized Hindi (review required)</label>
-                    <textarea id="stt-transcript" readOnly value={sttResult.text} rows={5} />
-                    <p className="helper">No audio uploaded. {sttResult.duration_seconds.toFixed(1)} seconds processed.
-                      Transcription can contain missing or incorrect words.</p>
-                    <button className="secondary-button"
-                      disabled={!sttResult.speech_detected || sttResult.text.length > 3000}
-                      onClick={useSttTextInEditor}>Use reviewed text in story editor</button>
-                    {sttResult.text.length > 3000 && (
-                      <p className="helper">The story editor's 3000-character generation limit applies.
-                        Copy and shorten the transcript manually before using it.</p>
+                    <textarea id="stt-transcript" value={sttReviewDraft} rows={5} maxLength={8000}
+                      lang="hi" spellCheck aria-describedby="stt-review-help"
+                      onChange={event => {
+                        setSttReviewDraft(event.target.value);
+                        setSttReviewConfirmed(false);
+                      }} />
+                    <p className="helper" id="stt-review-help">No audio uploaded. {sttResult.duration_seconds.toFixed(1)} seconds processed.
+                      Compare the text with your own recording and edit any wrong words here.
+                      These edits stay in this session until you explicitly send the reviewed text into the story editor.</p>
+                    <label className="field-label">
+                      <input type="checkbox" checked={sttReviewConfirmed}
+                        disabled={!sttConsent || !sttResult.speech_detected || validateText(sttReviewDraft) !== null}
+                        onChange={event => setSttReviewConfirmed(event.target.checked)} />
+                      I compared this transcript with the recording and corrected its text.
+                    </label>
+                    <div className="preview-actions">
+                      <button className="secondary-button"
+                        disabled={!sttConsent || !sttResult.speech_detected || !sttReviewConfirmed ||
+                          sttWorking || validateText(sttReviewDraft) !== null}
+                        onClick={useSttTextInEditor}>Use reviewed text in story editor</button>
+                      <button className="quiet-button" onClick={resetSttResult}>Discard transcript</button>
+                    </div>
+                    {validateText(sttReviewDraft) !== null && (
+                      <p className="helper">The reviewed text must not be empty or exceed 3000 characters.
+                        Shorten or correct it here before accepting.</p>
                     )}
                   </div>
                 )}
