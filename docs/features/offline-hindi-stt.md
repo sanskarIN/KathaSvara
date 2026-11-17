@@ -6,6 +6,17 @@ has text-to-speech and WAV review, but does **not** include a speech-to-text
 engine. Do not confuse the TTS import probe, synthetic WAV doctor or the real
 Hindi TTS smoke test with speech recognition.
 
+## Switching the local Python runtime
+
+When you successfully select or clear the Python interpreter and matching
+inference folder in Settings, any old STT transcript draft, previous setup/WAV
+preflight and microphone recording are discarded, and STT consent is reset.
+Running transcription finishes with its existing single-flight lock, but a
+late reply from the previous runtime cannot restore private words in the UI.
+Recheck the new runtime and grant fresh consent before transcribing again.
+Canceling a file picker or rejecting an invalid interpreter does not change
+the active runtime or automatically discard a previously reviewed draft.
+
 ## Desktop file-picker regression and no-model setup checks
 
 The published v0.5.6 build predates speech-to-text and cannot recognize

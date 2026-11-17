@@ -1195,6 +1195,81 @@ describe("local session inference configuration", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("probe_tts_runtime", expect.anything());
   });
 
+  it("retires reviewed Hindi text and withdraws STT consent after switching runtime", async () => {
+    const result = {
+      text: "नमस्ते भारत", language: "hi", engine: "faster-whisper-local",
+      duration_seconds: 1.5, speech_detected: true,
+      human_review_required: true, network_used: false,
+    };
+    const wav = "C:\\private\\old-words.wav";
+    const model = "C:\\private\\multilingual-model";
+    mocks.open.mockResolvedValueOnce(wav).mockResolvedValueOnce(model)
+      .mockResolvedValueOnce(python).mockResolvedValueOnce(source);
+    mocks.invoke.mockImplementation(async (name: string) => {
+      if (name === "transcribe_local_wav") return result;
+      if (name === "configure_local_inference") return undefined;
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement;
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await screen.findByLabelText("Recognized Hindi (review required)");
+    fireEvent.click(screen.getByRole("checkbox", { name: /I compared this transcript/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "configure_local_inference", { pythonPath: python, inferenceDir: source },
+    ));
+    await waitFor(() => expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull());
+    expect(consent.checked).toBe(false);
+    expect(screen.getByText(/Speech runtime changed\. Recheck offline STT setup/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("नमस्ते भारत");
+    expect(document.body.textContent).not.toContain(wav);
+    expect(document.body.textContent).not.toContain(model);
+  });
+
+  it("cannot restore a late old-runtime transcript after clearing the session", async () => {
+    const result = {
+      text: "पुराना पाठ", language: "hi", engine: "faster-whisper-local",
+      duration_seconds: 1.5, speech_detected: true,
+      human_review_required: true, network_used: false,
+    };
+    let complete!: (value: typeof result) => void;
+    const pending = new Promise<typeof result>(resolve => { complete = resolve; });
+    mocks.open.mockResolvedValueOnce(python).mockResolvedValueOnce(source)
+      .mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\model");
+    mocks.invoke.mockImplementation((name: string) => {
+      if (name === "transcribe_local_wav") return pending;
+      if (name === "configure_local_inference" || name === "clear_local_inference") return Promise.resolve();
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Python and inference folder" }));
+    await screen.findByRole("button", { name: "Clear session runtime selection" });
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement;
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "transcribe_local_wav", expect.anything(),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Clear session runtime selection" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("clear_local_inference"));
+    await act(async () => { complete(result); });
+    expect(consent.checked).toBe(false);
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(document.body.textContent).not.toContain("पुराना पाठ");
+    expect(screen.getByText(/Launcher-provided Python and source discovery/)).toBeTruthy();
+  });
+
   it("does not change runtime configuration when the folder dialog is cancelled", async () => {
     mocks.open.mockResolvedValueOnce(python).mockResolvedValueOnce(null);
     openSettings();
