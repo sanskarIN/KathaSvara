@@ -2,9 +2,10 @@
 
 **This is not the published v0.5.6 executable and is not a stable installer.**
 Pull-request CI may create an unsigned, unbundled `KathaSvara-unreleased-dev-win64.exe`
-file for developer testing. The source may still have the `0.5.6` package
-version because no next release version has been approved; the filename
-intentionally avoids confusing the snapshot with an official release asset.
+file for developer testing. The source may now carry the `0.5.7`
+development package version, but the latest published GitHub prerelease is
+still `v0.5.6`. The candidate filename intentionally avoids confusing an
+unreleased source snapshot with a published, tagged release asset.
 
 ## Verify exactly what was built
 
