@@ -149,6 +149,17 @@ def test_changed_stt_wav_error_is_fixed_and_private() -> None:
     assert "private" not in public_error_message(poisoned)
 
 
+def test_incompatible_hindi_model_error_is_fixed_and_private() -> None:
+    from kathasvara.local_stt import STT_HINDI_MODEL_REQUIRED_MESSAGE
+
+    assert public_error_message(ValueError(STT_HINDI_MODEL_REQUIRED_MESSAGE)) == (
+        STT_HINDI_MODEL_REQUIRED_MESSAGE
+    )
+    poisoned = ValueError(STT_HINDI_MODEL_REQUIRED_MESSAGE + r" C:\Users\private\model.bin")
+    assert "private" not in public_error_message(poisoned)
+    assert public_error_message(poisoned) != str(poisoned)
+
+
 def test_arbitrary_stt_error_suffix_remains_private() -> None:
     private = "C:\\\\Users\\\\private\\\\model.bin"
     visible = public_error_message(ValueError(

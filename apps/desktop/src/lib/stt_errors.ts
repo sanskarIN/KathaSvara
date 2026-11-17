@@ -16,6 +16,8 @@ const FIXED_STT_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
     "The optional faster-whisper STT dependencies are missing or unavailable. Use the explicit Windows STT setup helper, then run its model-free doctor.",
   "Recording changed during offline transcription. Select the WAV again and retry.":
     "The selected recording changed while offline recognition was running. Select the WAV again and retry; do not use the earlier transcript.",
+  "Hindi support could not be verified for this offline STT model. Choose a multilingual faster-whisper model.":
+    "The selected offline model is English-only or cannot confirm multilingual support. Choose an installed multilingual faster-whisper model for Hindi, then retry.",
   "Recording has no usable speech-level signal. Check microphone input and try again.":
     "The recording is silent or has no varying speech-level signal. Check the Windows input device and try a clearer short recording.",
   "Microphone recording has no usable audio signal. Check Windows microphone input.":
