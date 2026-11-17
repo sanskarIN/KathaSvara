@@ -2,9 +2,10 @@
 
 **This is not the published v0.5.6 executable and is not a stable installer.**
 Pull-request CI may create an unsigned, unbundled `KathaSvara-unreleased-dev-win64.exe`
-file for developer testing. The source may still have the `0.5.6` package
-version because no next release version has been approved; the filename
-intentionally avoids confusing the snapshot with an official release asset.
+file for developer testing. The source may now carry the `0.5.7`
+development package version, but the latest published GitHub prerelease is
+still `v0.5.6`. The candidate filename intentionally avoids confusing an
+unreleased source snapshot with a published, tagged release asset.
 
 ## Verify exactly what was built
 
@@ -27,6 +28,35 @@ The official v0.5.6 developer pre-release remains separately available at
 https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6.
 Never substitute an unreleased candidate for that tagged release when
 reporting installed versions or reproducible acceptance results.
+
+## Check your Windows 11 PC without launching the app
+
+A developer build may have a valid EXE but still show a blank window if its
+required Windows WebView2 Runtime is absent or broken. Microsoft's official
+[WebView2 Runtime distribution guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)
+documents the registry registration locations. To check the developer
+candidate **without running it or loading Python/audio models**, use the
+source-only script from the same trusted repository checkout in PowerShell:
+
+```powershell
+.\scripts\windows\inspect-desktop-candidate.ps1 `
+  -ExecutablePath "C:\trusted-build\KathaSvara-unreleased-dev-win64.exe"
+```
+
+Keep the original `SHA256SUMS.txt` beside the EXE. The script rejects a
+missing/mismatched manifest or malformed/non-x64 executable and reports
+whether Microsoft's WebView2 registration is detected. It never downloads,
+installs, launches, edits the registry or accesses the microphone. The
+script only inspects the file you select and reports a fixed explanation
+without printing private paths.
+
+**WebView2 detection is a setup hint, not a successful launch test.** A
+registered runtime could still be broken, a working runtime could be
+unobservable through these checks, and a signed/hashed EXE could still
+contain unsafe code. If WebView2 is not found, consult the official Microsoft
+distribution guidance rather than changing the registry or disabling Windows
+security settings. Neither passing diagnostics nor passing CI certifies a
+functioning GUI or correct Hindi audio.
 
 ## Honest runtime limits
 

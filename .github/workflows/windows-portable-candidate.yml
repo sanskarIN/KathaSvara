@@ -7,6 +7,7 @@ on:
       - "apps/desktop/**"
       - "services/inference/**"
       - ".github/workflows/windows-portable-candidate.yml"
+      - "scripts/windows/inspect-desktop-candidate.ps1"
   workflow_dispatch:
 
 permissions:
@@ -75,6 +76,7 @@ jobs:
             "optional TTS/STT dependencies, any model weights, or a managed installer."
             "No CI job proves real Hindi speech, microphone permission or recognition."
             "Use the SHA256SUMS.txt from THIS SAME workflow artifact to verify the EXE."
+            "Read-only Windows/PE/WebView2 preflight source: scripts/windows/inspect-desktop-candidate.ps1"
             "Do not confuse this file with the published v0.5.6 GitHub Release:"
             "https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6"
             ""
@@ -86,6 +88,13 @@ jobs:
           Get-FileHash "$folder/$filename" -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  $filename" } |
             Set-Content "$folder/SHA256SUMS.txt"
+      - name: Read-only Windows x64, SHA256 and WebView2 preflight
+        shell: pwsh
+        run: |
+          & ./scripts/windows/inspect-desktop-candidate.ps1 `
+            -ExecutablePath "$((Resolve-Path -LiteralPath 'portable-candidate/KathaSvara-unreleased-dev-win64.exe').Path)"
+          # PowerShell functions report failures by throwing; a successful
+          # script with no native commands does not define LASTEXITCODE.
       - uses: actions/upload-artifact@v7
         with:
           name: kathasvara-unreleased-windows-dev-${{ github.run_id }}-${{ github.run_attempt }}
