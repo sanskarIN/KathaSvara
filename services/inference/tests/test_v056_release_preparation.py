@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = "0.5.6"
+SOURCE_VERSION = "0.5.7"
 PREVIOUS = "0.5.5"
 
 
@@ -23,7 +24,7 @@ def test_v056_version_consistency_and_published_current_preview() -> None:
     assert {
         package["version"], lock["version"], lock["packages"][""]["version"],
         tauri["version"], cargo["package"]["version"], python["project"]["version"],
-    } == {VERSION}
+    } == {SOURCE_VERSION}
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "v0.5.5 · Historical experimental pre-release" in site

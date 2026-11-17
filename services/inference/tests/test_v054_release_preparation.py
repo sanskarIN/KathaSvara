@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 VERSION = "0.5.4"
 PREVIOUS = "0.5.3"
-CURRENT_VERSION = "0.5.6"
+CURRENT_SOURCE_VERSION = "0.5.7"
 
 
 def test_v054_workflow_is_exact_sha_manual_only_and_predecessor_gated() -> None:
@@ -95,7 +95,7 @@ def test_v055_components_match_while_site_retains_historical_v054() -> None:
         cargo["package"]["version"],
         python["project"]["version"],
     ):
-        assert actual == CURRENT_VERSION
+        assert actual == CURRENT_SOURCE_VERSION
     site = (ROOT / "website/index.html").read_text(encoding="utf-8")
     assert 'releases/tag/v0.5.4' in site  # Historical predecessor remains.
     assert "v0.5.4 · Historical experimental pre-release" in site

@@ -1,3 +1,11 @@
+## v0.5.7 — development source only (NOT PUBLISHED)
+
+- Prepare manual exact-main-SHA experimental prerelease with unchanged published v0.5.6 assets.
+- Include post-v0.5.6 offline short Hindi WAV/microphone STT, no-model checks, recording integrity and error/privacy safeguards.
+- Reject English-only recognition models and retain external licensed model dependencies.
+- Do not claim Hindi transcription accuracy or Windows microphone permission acceptance from passing CI.
+- Keep the Windows developer build unsigned, unbundled and not a complete installer.
+
 # Changelog
 
 ## v0.5.6 published experimental developer pre-release (11 November 2026)
