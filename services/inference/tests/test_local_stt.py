@@ -138,6 +138,40 @@ def test_offline_asr_uses_local_model_and_real_segment_text(
                                    "local_files_only": True})]
 
 
+@pytest.mark.parametrize("when", ["model_load", "transcription"])
+def test_stt_rejects_recording_replaced_during_inference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, when: str,
+) -> None:
+    """A recognized transcript must belong to the WAV the user inspected."""
+    audio = wav_file(tmp_path)
+    model = model_folder(tmp_path)
+    called: list[str] = []
+
+    def change_audio() -> None:
+        # Change a single PCM sample without altering valid RIFF structure,
+        # file length, rate or duration. Metadata-only comparisons miss this.
+        content = bytearray(audio.read_bytes())
+        content[44:46] = struct.pack("<h", 1200)
+        audio.write_bytes(content)
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            called.append("load")
+            if when == "model_load":
+                change_audio()
+
+        def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
+            called.append("transcribe")
+            if when == "transcription":
+                change_audio()
+            return [SimpleNamespace(text="नमस्ते")], None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    with pytest.raises(ValueError, match="Recording changed during offline transcription"):
+        transcribe_hindi_wav(str(audio), str(model))
+    assert called == (["load"] if when == "model_load" else ["load", "transcribe"])
+
+
 def test_missing_model_fails_before_inference(tmp_path: Path) -> None:
     path = wav_file(tmp_path)
     with pytest.raises(ValueError, match="model folder"):

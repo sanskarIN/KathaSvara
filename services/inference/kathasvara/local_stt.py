@@ -23,9 +23,12 @@ STT_INCOMPLETE_MODEL_MESSAGE = (
     "Local STT model is incomplete. Provide nonempty config.json, "
     "model.bin and tokenizer.json."
 )
+STT_CHANGED_RECORDING_MESSAGE = (
+    "Recording changed during offline transcription. Select the WAV again and retry."
+)
 
 
-def inspect_stt_wav(path: Path) -> dict[str, object]:
+def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
     """Inspect only bounded local PCM16 audio; do not load recognition weights.
 
     Reuse the structural and streamed signal inspector from WAV acceptance:
@@ -60,7 +63,7 @@ def inspect_stt_wav(path: Path) -> dict[str, object]:
     dc_only = bool(hints["dc_only_hint"])
     clipping = bool(hints["possible_clipping_hint"])
     long_pause = bool(hints["long_internal_pause_hint"])
-    return {
+    public_report: dict[str, object] = {
         "sample_rate": sample_rate,
         "frames": frames,
         "duration_seconds": report["duration_seconds"],
@@ -73,6 +76,28 @@ def inspect_stt_wav(path: Path) -> dict[str, object]:
         "audio_transcribed": False,
         "network_used": False,
     }
+    return public_report, str(report["sha256"])
+
+
+def inspect_stt_wav(path: Path) -> dict[str, object]:
+    """Return only fixed public signal hints, never a recording fingerprint."""
+    report, _ = _inspect_stt_wav_with_digest(path)
+    return report
+
+
+def _require_unchanged_recording(path: Path, expected_sha256: str) -> None:
+    """Reject a WAV rewritten during expensive model loading or recognition.
+
+    Reuse the existing descriptor-based structural and SHA-256 inspector.
+    Never expose the private recording path or checksum through IPC. This
+    catches ordinary edits/replacements; it is not an atomic filesystem lock.
+    """
+    try:
+        report = inspect_wav_candidate(path)
+    except (OSError, ValueError) as exc:
+        raise ValueError(STT_CHANGED_RECORDING_MESSAGE) from exc
+    if report["sha256"] != expected_sha256:
+        raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
 
 
 def verify_local_model_folder(model_folder: Path) -> None:
@@ -141,7 +166,7 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
         raise TypeError("Select a WAV file and local STT model folder.")
     recording = Path(wav_path)
     model_folder = Path(model_path)
-    info = inspect_stt_wav(recording)
+    info, recording_sha256 = _inspect_stt_wav_with_digest(recording)
     # Refuse effectively silent and DC-only recordings before constructing a
     # resource-heavy model; on silence Whisper can invent plausible words.
     if info["near_silence_hint"] or info["dc_only_hint"]:
@@ -158,6 +183,7 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
     try:
         model = WhisperModel(str(model_folder), device="cpu", compute_type="int8",
                              local_files_only=True)
+        _require_unchanged_recording(recording, recording_sha256)
         segments, _ = model.transcribe(str(recording), language="hi", task="transcribe",
                                         beam_size=3, vad_filter=False)
         pieces: list[str] = []
@@ -174,6 +200,7 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
                 if length > MAX_TRANSCRIPT_CHARS:
                     raise ValueError("Transcription exceeds the 8000-character review limit.")
                 pieces.append(cleaned)
+        _require_unchanged_recording(recording, recording_sha256)
     except (ValueError, TypeError):
         raise
     except Exception as exc:
