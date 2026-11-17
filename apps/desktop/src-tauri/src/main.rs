@@ -517,10 +517,44 @@ struct SessionInferencePaths {
     inference: PathBuf,
 }
 
-static SESSION_INFERENCE_PATHS: OnceLock<Mutex<Option<SessionInferencePaths>>> = OnceLock::new();
+/// A slow Python probe must not restore a source selection after Clear, or
+/// overwrite a newer selection from another Settings request. Keep the
+/// generation and selection under ONE lock so checking a generation and
+/// assigning paths are atomic relative to clearing them.
+#[derive(Default)]
+struct SessionInferenceState {
+    generation: u64,
+    selection: Option<SessionInferencePaths>,
+}
 
-fn selected_inference_paths() -> &'static Mutex<Option<SessionInferencePaths>> {
-    SESSION_INFERENCE_PATHS.get_or_init(|| Mutex::new(None))
+impl SessionInferenceState {
+    fn begin_selection(&mut self) -> Result<u64, String> {
+        self.generation = self.generation.checked_add(1)
+            .ok_or_else(|| "Unable to update local inference settings.".to_string())?;
+        Ok(self.generation)
+    }
+
+    fn commit_selection(
+        &mut self, generation: u64, selection: SessionInferencePaths,
+    ) -> Result<(), String> {
+        if self.generation != generation {
+            return Err("A newer local inference selection or clear action replaced this request.".into());
+        }
+        self.selection = Some(selection);
+        Ok(())
+    }
+
+    fn clear_selection(&mut self) -> Result<(), String> {
+        self.begin_selection()?;
+        self.selection = None;
+        Ok(())
+    }
+}
+
+static SESSION_INFERENCE_PATHS: OnceLock<Mutex<SessionInferenceState>> = OnceLock::new();
+
+fn selected_inference_paths() -> &'static Mutex<SessionInferenceState> {
+    SESSION_INFERENCE_PATHS.get_or_init(|| Mutex::new(SessionInferenceState::default()))
 }
 
 const SESSION_PYTHON_VERIFY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -664,6 +698,11 @@ fn validate_session_inference_paths(
 /// child-process paths; the global OS environment is never modified.
 #[tauri::command]
 async fn configure_local_inference(python_path: String, inference_dir: String) -> Result<(), String> {
+    // Reserve the revision BEFORE the potentially slow Python 3.11 probe.
+    // A subsequent Clear (or a second selection) invalidates this revision.
+    let generation = selected_inference_paths().lock()
+        .map_err(|_| "Unable to update local inference settings.".to_string())?
+        .begin_selection()?;
     // Never stall the desktop UI while waiting for an interpreter which may be
     // damaged or point to a Microsoft Store launcher stub.
     tauri::async_runtime::spawn_blocking(move || {
@@ -673,9 +712,9 @@ async fn configure_local_inference(python_path: String, inference_dir: String) -
         verify_selected_python_311(&selection.python)?;
         let mut guard = selected_inference_paths().lock()
             .map_err(|_| "Unable to update local inference settings.".to_string())?;
-        // A failed check leaves the previously configured session intact.
-        *guard = Some(selection);
-        Ok(())
+        // A failed probe leaves the last successfully configured session intact,
+        // but a completed stale probe may NEVER undo Clear or a newer choice.
+        guard.commit_selection(generation, selection)
     })
     .await
     .map_err(|_| "Unable to verify the local Python interpreter.".to_string())?
@@ -685,8 +724,7 @@ async fn configure_local_inference(python_path: String, inference_dir: String) -
 fn clear_local_inference() -> Result<(), String> {
     let mut guard = selected_inference_paths().lock()
         .map_err(|_| "Unable to clear local inference settings.".to_string())?;
-    *guard = None;
-    Ok(())
+    guard.clear_selection()
 }
 
 /// Validate again for every child process: the selected or launcher-supplied
@@ -705,7 +743,7 @@ fn matching_inference_sources(inference: PathBuf) -> Result<PathBuf, String> {
 fn runtime_paths() -> Result<(PathBuf, PathBuf), String> {
     let selected = selected_inference_paths().lock()
         .map_err(|_| "Unable to read local inference settings.".to_string())?
-        .clone();
+        .selection.clone();
     if let Some(config) = selected {
         return Ok((config.python, matching_inference_sources(config.inference)?));
     }
@@ -2651,6 +2689,39 @@ mod tests {
         drop(first);
         let subsequent = RealSpeechJobGuard::start().unwrap();
         drop(subsequent);
+    }
+
+    #[test]
+    fn session_inference_generation_blocks_stale_probe_after_clear_or_replacement() {
+        // Exercise the exact state transitions without modifying the global
+        // runtime configuration, so Rust test workers remain independent.
+        let mut state = SessionInferenceState::default();
+        let first = state.begin_selection().unwrap();
+        let stale = SessionInferencePaths {
+            python: PathBuf::from("old-python"), inference: PathBuf::from("old-sources"),
+        };
+        state.clear_selection().unwrap();
+        assert!(state.commit_selection(first, stale.clone()).is_err());
+        assert!(state.selection.is_none(), "Clear must not be undone by a late probe");
+
+        let second = state.begin_selection().unwrap();
+        let third = state.begin_selection().unwrap();
+        let latest = SessionInferencePaths {
+            python: PathBuf::from("new-python"), inference: PathBuf::from("new-sources"),
+        };
+        assert!(state.commit_selection(second, stale).is_err());
+        state.commit_selection(third, latest).unwrap();
+        assert_eq!(state.selection.as_ref().unwrap().python, PathBuf::from("new-python"));
+
+        // A failed newer probe must preserve a previously accepted choice;
+        // it still invalidates any older probe that might complete later.
+        let unsuccessful = state.begin_selection().unwrap();
+        assert!(state.commit_selection(unsuccessful - 1, SessionInferencePaths {
+            python: PathBuf::from("too-late"), inference: PathBuf::from("too-late"),
+        }).is_err());
+        assert_eq!(state.selection.as_ref().unwrap().python, PathBuf::from("new-python"));
+        state.clear_selection().unwrap();
+        assert!(state.selection.is_none());
     }
 
     #[test]
