@@ -15,6 +15,9 @@ function Reject([string]$Advice) {
     throw ("KathaSvara Windows candidate check failed: " + $Advice)
 }
 
+if ([Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+    Reject "This preflight must be run on Windows."
+}
 if (-not [Environment]::Is64BitOperatingSystem) {
     Reject "This developer EXE requires a 64-bit Windows system."
 }

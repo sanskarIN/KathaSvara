@@ -18,6 +18,8 @@ def test_candidate_doctor_never_runs_or_installs_anything() -> None:
     script = DOCTOR.read_text(encoding="utf-8")
     assert "[Parameter(Mandatory = $true)]" in script
     assert "[string]$ExecutablePath" in script
+    assert "[System.PlatformID]::Win32NT" in script
+    assert "[Environment]::Is64BitOperatingSystem" in script
     assert '[string]$ChecksumPath = ""' in script
     assert "Get-Item -LiteralPath $ExecutablePath" in script
     assert "BinaryReader" in script
