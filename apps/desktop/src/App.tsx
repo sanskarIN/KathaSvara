@@ -647,6 +647,21 @@ export default function App() {
     }
   }
 
+  function retireSttAfterRuntimeChange() {
+    // A transcript or a WAV/setup probe belongs to the previous Python
+    // runtime and source revision. Changing the runtime must not let a
+    // pending recognizer restore old words or keep capture consent active.
+    // Leave worker busy flags intact until the native child actually exits.
+    discardMicrophone();
+    sttRevision.current += 1;
+    sttWavProbeRevision.current += 1;
+    retireSttDraft();
+    setSttConsent(false);
+    setSttSetup(null);
+    setSttWavReport(null);
+    setSttStatus("Speech runtime changed. Recheck offline STT setup and give fresh consent before transcribing.");
+  }
+
   async function chooseLocalRuntime() {
     invalidateReadiness();
     const revision = ++runtimePickerRevision.current;
@@ -671,6 +686,7 @@ export default function App() {
       setSessionRuntimeConfigured(true);
       setDiagnostics(null);
       setAudioIoReport(null);
+      retireSttAfterRuntimeChange();
       invalidateReferenceProbe();
       setMessage("Working Python 3.11 and matching KathaSvara source verified for this app session. Run the TTS preflight; packages, weights and real Hindi audio remain unverified.");
     } catch {
@@ -691,6 +707,7 @@ export default function App() {
       setSessionRuntimeConfigured(false);
       setDiagnostics(null);
       setAudioIoReport(null);
+      retireSttAfterRuntimeChange();
       invalidateReferenceProbe();
       setMessage("Session runtime selection cleared. New jobs use the launcher environment or automatic source discovery.");
     } catch {
