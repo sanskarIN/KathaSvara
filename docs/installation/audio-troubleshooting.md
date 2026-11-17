@@ -2,6 +2,35 @@
 
 **Status:** KathaSvara's current published [v0.5.6 Windows EXE](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.6) is an **unsigned, unbundled developer preview**, **not** a ready-to-use offline speech installer. It includes the desktop UI, but not the Python 3.11 inference service, Chatterbox package, PyTorch, or model checkpoints. Passing the project's model-free CI tests cannot prove real Hindi speech or reliable playback.
 
+## Explicit real offline STT smoke test without the Windows desktop UI
+
+When WebView2 or the native Settings window is not usable, a separate
+**opt-in, local** test can exercise the actual faster-whisper Hindi recognition
+engine from a selected short mono PCM16 WAV and an already installed,
+licensed multilingual CTranslate2 model. This does not change the published
+v0.5.6 EXE; it requires the matching post-v0.5.6 development source.
+
+Run from the repository root in Windows PowerShell (adjust both absolute
+paths to your own trusted local files):
+
+```powershell
+.\scripts\windows\launch-with-audio.ps1 -VerifyHindiSttWav `
+  -SttWavPath "C:\path\to\your-short-recording.wav" `
+  -SttModelPath "C:\path\to\your-multilingual-model"
+```
+
+Python 3.11 and the separate STT Python dependencies must already be
+configured. Explicit `-InstallSttDependencies` may be supplied to install
+that optional Python extra; no recognition model weights are downloaded.
+The child process has a ten-minute limit and returns only language,
+duration, whether text was found and a character count. **It never prints,
+persists or uploads the private transcript**, selected file path or model
+path. A real local model load may consume CPU/RAM; it is not run by CI.
+A successful smoke test does not certify Hindi accuracy, Windows microphone
+permission or UI launch. Compare and correct the transcript through the
+desktop review interface when available. The separate `-SttDoctorOnly`
+remains entirely model-free.
+
 ## What the generator is for
 
 1. **Voice Studio:** narrate a short Hindi text as a WAV with Chatterbox Multilingual and the supported `hi` language ID.

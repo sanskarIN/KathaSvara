@@ -18,11 +18,15 @@ accuracy, and clean-machine usability are NOT TESTED.
 3. For STT, explicitly choose -InstallSttDependencies and independently
    obtain a licensed multilingual local CTranslate2 faster-whisper model.
    -SttDoctorOnly -SttModelPath checks local setup without model load.
-4. Open Settings, select matching Python/source and local STT model/WAV.
+4. If the Windows desktop cannot open, the explicit
+   -VerifyHindiSttWav -SttWavPath -SttModelPath helper can exercise
+   real local Hindi recognition without the UI, printing only a redacted
+   status and character count, not the transcript. It may take CPU/RAM.
+5. Open Settings, select matching Python/source and local STT model/WAV.
    Only record from the microphone after explicit OS/WebView2 permission.
-5. With separate consent, transcribe; compare and correct Hindi text
+6. With separate consent, transcribe; compare and correct Hindi text
    before inserting it into the story editor.
-6. For TTS, approve model downloads separately and manually review real
+7. For TTS, approve model downloads separately and manually review real
    audio playback, exported WAV and SRT timing.
 
 Checksum in PowerShell:

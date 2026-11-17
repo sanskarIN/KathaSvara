@@ -7,6 +7,7 @@ on:
       - "apps/desktop/**"
       - "services/inference/**"
       - ".github/workflows/windows-portable-candidate.yml"
+      - "scripts/windows/launch-with-audio.ps1"
       - "scripts/windows/inspect-desktop-candidate.ps1"
   workflow_dispatch:
 
@@ -30,6 +31,22 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check launch helpers parse in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach ($script in @(
+            "scripts/windows/launch-with-audio.ps1",
+            "scripts/windows/inspect-desktop-candidate.ps1"
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path (Get-Location) $script), [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              throw "Windows PowerShell 5.1 parser rejected $script."
+            }
+          }
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci --no-audit --no-fund
