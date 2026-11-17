@@ -54,6 +54,8 @@ def test_windows_ci_runs_read_only_candidate_preflight_before_upload() -> None:
     assert preflight < upload
     assert "KathaSvara-unreleased-dev-win64.exe" in after_package
     assert "& ./scripts/windows/inspect-desktop-candidate.ps1" in after_package
+    # A PowerShell-only script can succeed with no LASTEXITCODE defined.
+    assert "if ($LASTEXITCODE -ne 0)" not in after_package
     assert "SHA256SUMS.txt" in after_package
     assert "workflow_dispatch:" in script
 

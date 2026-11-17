@@ -93,7 +93,8 @@ jobs:
         run: |
           & ./scripts/windows/inspect-desktop-candidate.ps1 `
             -ExecutablePath "$((Resolve-Path -LiteralPath 'portable-candidate/KathaSvara-unreleased-dev-win64.exe').Path)"
-          if ($LASTEXITCODE -ne 0) { throw "Windows candidate preflight failed." }
+          # PowerShell functions report failures by throwing; a successful
+          # script with no native commands does not define LASTEXITCODE.
       - uses: actions/upload-artifact@v7
         with:
           name: kathasvara-unreleased-windows-dev-${{ github.run_id }}-${{ github.run_attempt }}
