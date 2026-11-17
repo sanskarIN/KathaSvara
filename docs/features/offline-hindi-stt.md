@@ -66,8 +66,14 @@ download a replacement model, or bypass the need for human review.
 5. Read and check the local processing consent box, then choose **Transcribe
    Hindi WAV offline**. The engine uses CPU INT8, language `hi`, and
    `local_files_only=True`, and displays only model-returned text.
-   Review every word against your recording. The editor can accept a reviewed
-   transcript of at most 3000 characters after overwrite confirmation.
+   Review every word against your recording. In the **editable transcript
+   review field**, correct incorrect Hindi words, compare with the original
+   audio and explicitly confirm review. Changing the text revokes that
+   confirmation until you review it again. Only then may you copy a
+   nonempty, at-most-3000-character reviewed draft to the story editor, with
+   an additional overwrite confirmation if the editor already has text.
+   **Discard transcript** clears the in-memory review draft without changing
+   the story. Recognition results never silently overwrite story text.
 
 On development builds containing the recording-integrity guard, the worker
 checks that the WAV's SHA-256 content still matches the original inspected
@@ -210,6 +216,14 @@ never establishes that a person spoke or that the text will be correct.
 Clipping/long pauses are advisory warnings, not automatic rejections.
 
 ## Limits and acceptance
+
+- Review is explicitly user-controlled. The app cannot determine if a human
+  actually listened, and checking the review box never verifies transcription
+  accuracy. An unreviewed, empty or overlong transcript cannot replace a
+  story. Editing after review requires reconfirmation, and revoking processing
+  consent or leaving Settings discards the review draft. A late recognition
+  result cannot reopen the review after Settings is left; the running local
+  worker still finishes or times out under its native timeout guard.
 
 - Neither tests with mocked Whisper nor a passing build prove actual Hindi
   recognition accuracy or performance on an end-user machine.
