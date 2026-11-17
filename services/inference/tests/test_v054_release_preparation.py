@@ -148,8 +148,10 @@ def test_v054_windows_candidate_and_readme_are_unbundled() -> None:
     instructions = (
         ROOT / "docs/installation/portable-windows-v0.5.6.md"
     ).read_text(encoding="utf-8")
-    assert "KathaSvara-v0.5.6-dev-win64.exe" in candidate
-    assert "portable-windows-v0.5.6.md" in candidate
+    # An unreleased CI snapshot must not reuse the historical published EXE name.
+    assert "KathaSvara-unreleased-dev-win64.exe" in candidate
+    assert "KathaSvara-v0.5.6-dev-win64.exe" not in candidate
+    assert "portable-windows-v0.5.6.md" not in candidate
     assert "KathaSvara-v0.5.4-dev-win64.exe" not in candidate
     for term in (
         "NOT A COMPLETE INSTALLER", "NOT STABLE", "Python 3.11",
