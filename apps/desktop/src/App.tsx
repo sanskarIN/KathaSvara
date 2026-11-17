@@ -344,6 +344,17 @@ export default function App() {
       micSession.current = null;
       setMicWav(null);
       setMicStatus("idle");
+      // Navigating away withdraws capture/transcription consent and prevents
+      // an already-running native recognizer from restoring a private draft
+      // to Settings when it eventually finishes. The worker still holds the
+      // busy lock until it actually completes.
+      sttRevision.current += 1;
+      sttWavProbeRevision.current += 1;
+      retireSttDraft();
+      setSttConsent(false);
+      setSttStatus(null);
+      setSttSetup(null);
+      setSttWavReport(null);
     }
   }, [page]);
 

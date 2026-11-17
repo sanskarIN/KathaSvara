@@ -221,7 +221,9 @@ Clipping/long pauses are advisory warnings, not automatic rejections.
   actually listened, and checking the review box never verifies transcription
   accuracy. An unreviewed, empty or overlong transcript cannot replace a
   story. Editing after review requires reconfirmation, and revoking processing
-  consent discards the review draft.
+  consent or leaving Settings discards the review draft. A late recognition
+  result cannot reopen the review after Settings is left; the running local
+  worker still finishes or times out under its native timeout guard.
 
 - Neither tests with mocked Whisper nor a passing build prove actual Hindi
   recognition accuracy or performance on an end-user machine.

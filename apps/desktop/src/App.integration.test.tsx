@@ -481,6 +481,33 @@ describe("local offline Hindi speech to text", () => {
     expect(window.localStorage.getItem("sttReviewDraft")).toBeNull();
   });
 
+  it("clears private review and consent after leaving Settings; late STT cannot restore it", async () => {
+    let resolveRecognition!: (value: typeof valid) => void;
+    const running = new Promise<typeof valid>(resolve => { resolveRecognition = resolve; });
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockImplementation((name: string) => {
+      if (name === "transcribe_local_wav") return running;
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(screen.getByText(/WAV: Selected privately/)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(screen.getByText(/Offline model: Selected privately/)).toBeTruthy());
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement;
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("transcribe_local_wav", expect.anything()));
+    fireEvent.click(screen.getByRole("button", { name: "Voice Studio" }));
+    await act(async () => { resolveRecognition(valid); });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect((screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement).checked).toBe(false);
+    expect(document.body.textContent).not.toContain("नमस्ते भारत");
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("gives precise incomplete-model guidance after native WAV transcription fails", async () => {
     const privateWav = "C:\\\\private\\\\original-hindi.wav";
     const privateModel = "C:\\\\private\\\\whisper-model";
