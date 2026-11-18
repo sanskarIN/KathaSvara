@@ -5,6 +5,7 @@ import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
 import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./lib/microphone_errors";
 import { publicSttTranscriptionError } from "./lib/stt_errors";
+import { hasUnsafeSttTextControls } from "./lib/stt_text";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -87,9 +88,7 @@ type SttResult = {
 };
 function isValidSttResult(value: SttResult): boolean {
   return typeof value?.text === "string" && [...value.text].length <= 8000
-    // Refuse hidden bidi overrides from a stale or untrusted native worker,
-    // while retaining U+200C/U+200D joiners needed by some Indic conjuncts.
-    && !/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/.test(value.text)
+    && !hasUnsafeSttTextControls(value.text)
     && value.language === "hi" && value.engine === "faster-whisper-local"
     && typeof value.duration_seconds === "number"
     && Number.isFinite(value.duration_seconds) && value.duration_seconds > 0
@@ -994,7 +993,8 @@ export default function App() {
     // story without explicit review and the existing overwrite prompt.
     const text = sttReviewDraft.trim();
     if (!sttConsent || !sttResult?.speech_detected || !sttReviewConfirmed ||
-        sttWorking || validateText(text) !== null) return;
+        sttWorking || validateText(text) !== null ||
+        hasUnsafeSttTextControls(text)) return;
     if (project.text.trim() && !window.confirm(
       "Replace the current story editor text with your reviewed transcription? Save your story first.",
     )) return;
@@ -1598,20 +1598,26 @@ export default function App() {
                       These edits stay in this session until you explicitly send the reviewed text into the story editor.</p>
                     <label className="field-label">
                       <input type="checkbox" checked={sttReviewConfirmed}
-                        disabled={!sttConsent || !sttResult.speech_detected || validateText(sttReviewDraft) !== null}
+                        disabled={!sttConsent || !sttResult.speech_detected || validateText(sttReviewDraft) !== null ||
+                          hasUnsafeSttTextControls(sttReviewDraft)}
                         onChange={event => setSttReviewConfirmed(event.target.checked)} />
                       I compared this transcript with the recording and corrected its text.
                     </label>
                     <div className="preview-actions">
                       <button className="secondary-button"
                         disabled={!sttConsent || !sttResult.speech_detected || !sttReviewConfirmed ||
-                          sttWorking || validateText(sttReviewDraft) !== null}
+                          sttWorking || validateText(sttReviewDraft) !== null ||
+                          hasUnsafeSttTextControls(sttReviewDraft)}
                         onClick={useSttTextInEditor}>Use reviewed text in story editor</button>
                       <button className="quiet-button" onClick={resetSttResult}>Discard transcript</button>
                     </div>
                     {validateText(sttReviewDraft) !== null && (
                       <p className="helper">The reviewed text must not be empty or exceed 3000 characters.
                         Shorten or correct it here before accepting.</p>
+                    )}
+                    {hasUnsafeSttTextControls(sttReviewDraft) && (
+                      <p className="helper" role="status">The transcript contains invisible or unsupported
+                        text-direction controls. Remove those characters before confirming your review.</p>
                     )}
                   </div>
                 )}
