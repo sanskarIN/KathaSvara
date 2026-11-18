@@ -551,7 +551,10 @@ describe("local offline Hindi speech to text", () => {
     await act(async () => { resolveRecognition(valid); });
     expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
     expect(document.body.textContent).not.toContain("नमस्ते भारत");
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "cancel_stt_transcription", expect.objectContaining({ jobId: expect.any(String) }),
+    );
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
   });
 
   it("uses local IPC once consented and only shows the actual recognized text", async () => {
@@ -766,7 +769,10 @@ describe("local offline Hindi speech to text", () => {
     expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
     expect((screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement).checked).toBe(false);
     expect(document.body.textContent).not.toContain("नमस्ते भारत");
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "cancel_stt_transcription", expect.objectContaining({ jobId: expect.any(String) }),
+    );
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
   });
 
   it("gives precise incomplete-model guidance after native WAV transcription fails", async () => {
@@ -841,10 +847,13 @@ describe("local offline Hindi speech to text", () => {
     fireEvent.click(transcribe);
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
     fireEvent.click(consent);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "cancel_stt_transcription", expect.objectContaining({ jobId: expect.any(String) }),
+    ));
     fireEvent.click(consent);
     expect(transcribe.disabled).toBe(true);
     fireEvent.click(transcribe);
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
 
     finishRecognition(valid);
     await waitFor(() => expect(transcribe.disabled).toBe(false));
