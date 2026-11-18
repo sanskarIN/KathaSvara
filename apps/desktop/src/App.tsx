@@ -5,6 +5,7 @@ import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
 import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./lib/microphone_errors";
 import { publicSttTranscriptionError } from "./lib/stt_errors";
+import { createSttJobId } from "./lib/stt_jobs";
 import { hasUnsafeSttTextControls, removeUnsafeSttTextControls } from "./lib/stt_text";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { MICROPHONE_API_ADVICE, probeMicrophoneApiAvailability, type MicrophoneApiReport } from "./lib/microphone_readiness";
@@ -288,6 +289,8 @@ export default function App() {
   const [sttModelPath, setSttModelPath] = useState<string | null>(null);
   const [sttConsent, setSttConsent] = useState(false);
   const [sttWorking, setSttWorking] = useState(false);
+  const [sttCancelRequested, setSttCancelRequested] = useState(false);
+  const activeSttJobId = useRef<string | null>(null);
   const [sttChecking, setSttChecking] = useState(false);
   const [sttSetup, setSttSetup] = useState<SttSetupReport | null>(null);
   const [sttWavReport, setSttWavReport] = useState<SttWavReport | null>(null);
@@ -801,13 +804,20 @@ export default function App() {
 
   async function transcribeMicrophone() {
     if (!sttConsent || !micWav || !sttModelPath || sttWorking || sttChecking) return;
+    let jobId: string;
+    try { jobId = createSttJobId(); } catch {
+      setSttStatus("Secure local transcription identifiers are unavailable. Update WebView2.");
+      return;
+    }
     const revision = ++sttRevision.current;
+    activeSttJobId.current = jobId;
+    setSttCancelRequested(false);
     setSttWorking(true);
     retireSttDraft();
     setSttStatus("Transcribing this locally recorded WAV only after your request.");
     try {
       const result = await invoke<SttResult>("transcribe_microphone_wav", {
-        wavBase64: micWav, modelPath: sttModelPath,
+        wavBase64: micWav, modelPath: sttModelPath, jobId,
       });
       if (revision !== sttRevision.current) return;
       if (!isValidSttResult(result)) {
@@ -825,7 +835,11 @@ export default function App() {
     } finally {
       // Only one native STT worker can be in flight: even a consent change
       // must not make another user action start a second model load.
-      setSttWorking(false);
+      if (activeSttJobId.current === jobId) {
+        activeSttJobId.current = null;
+        setSttWorking(false);
+        setSttCancelRequested(false);
+      }
       // Do not retain microphone WAV in application state after transcription.
       if (revision === sttRevision.current) discardMicrophone();
     }
@@ -961,13 +975,20 @@ export default function App() {
   async function transcribeLocalStt() {
     if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking ||
         sttWavChecking || sttWavReport?.near_silence_hint || sttWavReport?.dc_only_hint) return;
+    let jobId: string;
+    try { jobId = createSttJobId(); } catch {
+      setSttStatus("Secure local transcription identifiers are unavailable. Update WebView2.");
+      return;
+    }
     const revision = ++sttRevision.current;
+    activeSttJobId.current = jobId;
+    setSttCancelRequested(false);
     setSttWorking(true);
     retireSttDraft();
     setSttStatus("Transcribing selected Hindi WAV locally. No microphone, upload or model download.");
     try {
       const response = await invoke<SttResult>("transcribe_local_wav", {
-        wavPath: sttWavPath, modelPath: sttModelPath,
+        wavPath: sttWavPath, modelPath: sttModelPath, jobId,
       });
       if (revision !== sttRevision.current) return;
       if (!isValidSttResult(response)) {
@@ -983,9 +1004,37 @@ export default function App() {
         setSttStatus(publicSttTranscriptionError(error, "wav"));
       }
     } finally {
-      // Native recognition is still running after consent changes; only the
-      // actual completion releases the UI lock, while its result stays retired.
-      setSttWorking(false);
+      // Release the UI lock only when the matching native job has exited.
+      // A cancelled/stale result can never revive the private review draft.
+      if (activeSttJobId.current === jobId) {
+        activeSttJobId.current = null;
+        setSttWorking(false);
+        setSttCancelRequested(false);
+      }
+    }
+  }
+
+  async function cancelSttTranscription() {
+    const jobId = activeSttJobId.current;
+    if (!sttWorking || !jobId || sttCancelRequested) return;
+    // Withdraw trust immediately, including for a response racing Cancel.
+    sttRevision.current += 1;
+    retireSttDraft();
+    setSttConsent(false);
+    discardMicrophone();
+    setSttCancelRequested(true);
+    setSttStatus("Requesting cancellation of local Hindi recognition. Please allow the worker to exit.");
+    try {
+      const acknowledged = await invoke<boolean>("cancel_stt_transcription", { jobId });
+      if (activeSttJobId.current === jobId) {
+        setSttStatus(acknowledged === true
+          ? "Cancellation sent to the local recognizer. Waiting for the worker to exit."
+          : "The previous recognizer could not be located. Its result will still be discarded.");
+      }
+    } catch {
+      if (activeSttJobId.current === jobId) {
+        setSttStatus("Cancellation could not be confirmed. The result is discarded and the worker remains locked until it exits.");
+      }
     }
   }
 
@@ -1596,6 +1645,12 @@ export default function App() {
                   onClick={() => void transcribeLocalStt()}>
                   {sttWorking ? "Recognizing Hindi locally…" : "Transcribe Hindi WAV offline"}
                 </button>
+                {sttWorking && (
+                  <button className="quiet-button" disabled={sttCancelRequested}
+                    onClick={() => void cancelSttTranscription()}>
+                    {sttCancelRequested ? "Cancellation requested…" : "Cancel active Hindi recognition"}
+                  </button>
+                )}
                 {sttStatus && <p role="status">{sttStatus}</p>}
                 {sttResult && (
                   <div>
