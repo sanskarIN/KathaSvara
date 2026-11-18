@@ -5,7 +5,7 @@ import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
 import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./lib/microphone_errors";
 import { publicSttTranscriptionError } from "./lib/stt_errors";
-import { hasUnsafeSttTextControls } from "./lib/stt_text";
+import { hasUnsafeSttTextControls, removeUnsafeSttTextControls } from "./lib/stt_text";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
@@ -1616,8 +1616,17 @@ export default function App() {
                         Shorten or correct it here before accepting.</p>
                     )}
                     {hasUnsafeSttTextControls(sttReviewDraft) && (
-                      <p className="helper" role="status">The transcript contains invisible or unsupported
-                        text-direction controls. Remove those characters before confirming your review.</p>
+                      <div>
+                        <p className="helper" role="status">The transcript contains invisible or unsupported
+                          text-direction controls. Remove those characters before confirming your review.</p>
+                        <button className="secondary-button"
+                          onClick={() => {
+                            // User-directed repair only: never rewrite captured/model text
+                            // automatically, and every edit withdraws review confirmation.
+                            setSttReviewDraft(previous => removeUnsafeSttTextControls(previous));
+                            setSttReviewConfirmed(false);
+                          }}>Remove unsupported text formatting</button>
+                      </div>
                     )}
                   </div>
                 )}
