@@ -862,7 +862,14 @@ export default function App() {
 
   function requestAutomaticSttCancel(updateUi = true) {
     const jobId = activeSttJobId.current;
-    if (!jobId || sttCancelSentForId.current === jobId) return;
+    if (!jobId) return;
+    // A hide event first stops capture, then retires the review UI. Ensure
+    // the second call still updates the busy/cancel button without resending
+    // an IPC request for the same job.
+    if (sttCancelSentForId.current === jobId) {
+      if (updateUi) setSttCancelRequested(true);
+      return;
+    }
     sttCancelSentForId.current = jobId;
     if (updateUi) setSttCancelRequested(true);
     // Even if Cancel reaches Rust before a queued Start, its UUID tombstone
