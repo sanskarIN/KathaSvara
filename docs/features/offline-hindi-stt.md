@@ -215,6 +215,27 @@ a user's machine.
    consent also stop active microphone tracks; invalid/oversized recordings
    are rejected with fixed user-facing guidance.
 
+## No-permission microphone API availability check (development source)
+
+Settings → **Speech to text → Record Hindi from microphone** now offers
+**Check microphone API availability (no permission)**. This button checks
+only whether the current WebView appears to support a secure context,
+`navigator.mediaDevices.getUserMedia`, Web Audio `AudioContext`, and the
+local PCM capture compatibility API. The result explains the first missing
+browser capability and suggests checking Windows WebView2, or choosing an
+existing local WAV instead. The report contains no microphone name, input
+device identifier, path or recording.
+
+**It does not call `getUserMedia`, enumerate devices, construct an
+`AudioContext`, request OS permission, record any audio, start Python or load
+an STT model.** A report of **APIs present** means only that the JavaScript
+interfaces exist. It does not demonstrate that Windows privacy permissions
+are granted, a microphone is connected, audio can be captured, or that Hindi
+recognition works. Actual permission and capture can only be tested with
+the separate consented **Start microphone recording** action and a real
+Windows 11/WebView2 device. The availability check cannot fix hardware
+or install missing speech dependencies.
+
 ## Microphone permission and device error guidance (development source)
 
 A denied or unsupported recording request now produces **fixed, actionable
