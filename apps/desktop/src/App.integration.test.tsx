@@ -370,6 +370,93 @@ describe("local offline Hindi speech to text", () => {
     expect(document.body.textContent).not.toContain("C:\\private");
   });
 
+  it("keeps consent and reviewed words on canceled pickers but revokes both for new input", async () => {
+    const originalWav = "C:\\private\\first.wav";
+    const originalModel = "C:\\private\\first-model";
+    const replacementWav = "C:\\private\\second.wav";
+    const replacementModel = "C:\\private\\second-model";
+    mocks.open.mockResolvedValueOnce(originalWav)
+      .mockResolvedValueOnce(originalModel)
+      .mockResolvedValueOnce(null) // Cancel WAV picker.
+      .mockResolvedValueOnce(replacementWav)
+      .mockResolvedValueOnce(null) // Cancel model picker.
+      .mockResolvedValueOnce(replacementModel);
+    mocks.invoke.mockResolvedValue(valid);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement;
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    fireEvent.click(consent);
+    fireEvent.click(transcribe);
+    await screen.findByLabelText("Recognized Hindi (review required)");
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(3));
+    await act(async () => { await Promise.resolve(); });
+    expect(consent.checked).toBe(true);
+    expect(screen.getByLabelText("Recognized Hindi (review required)")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await waitFor(() => expect(consent.checked).toBe(false));
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(transcribe.disabled).toBe(true);
+    fireEvent.click(transcribe);
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(5));
+    await act(async () => { await Promise.resolve(); });
+    expect(consent.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await waitFor(() => expect(consent.checked).toBe(false));
+    expect(transcribe.disabled).toBe(true);
+    expect(document.body.textContent).not.toContain("नमस्ते भारत");
+    for (const path of [originalWav, originalModel, replacementWav, replacementModel]) {
+      expect(document.body.textContent).not.toContain(path);
+    }
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires in-flight private Hindi recognition when the window becomes hidden", async () => {
+    let resolveRecognition!: (value: typeof valid) => void;
+    const running = new Promise<typeof valid>(resolve => { resolveRecognition = resolve; });
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockImplementation((name: string) => {
+      if (name === "transcribe_local_wav") return running;
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement;
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    fireEvent.click(consent);
+    fireEvent.click(transcribe);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "transcribe_local_wav", expect.anything(),
+    ));
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    try {
+      fireEvent(document, new Event("visibilitychange"));
+    } finally {
+      hidden.mockRestore();
+    }
+    expect(consent.checked).toBe(false);
+    expect(transcribe.disabled).toBe(true);
+    await act(async () => { resolveRecognition(valid); });
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(document.body.textContent).not.toContain("नमस्ते भारत");
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("uses local IPC once consented and only shows the actual recognized text", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\speech.wav")
       .mockResolvedValueOnce("C:\\private\\whisper-model");
