@@ -11,3 +11,12 @@ const UNSAFE_STT_CONTROLS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200
 export function hasUnsafeSttTextControls(text: string): boolean {
   return UNSAFE_STT_CONTROLS.test(text);
 }
+
+/**
+ * A user-initiated repair action, never called automatically on model output
+ * or on paste. Explicitly removes only the same rejected control code points
+ * and leaves Devanagari joiners and ordinary spaces/marks untouched.
+ */
+export function removeUnsafeSttTextControls(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/gu, "");
+}
