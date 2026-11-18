@@ -48,9 +48,15 @@ the app does **not** silently strip or rewrite recognition output.
 
 **Indic shaping stays intact:** U+200C (zero-width non-joiner), U+200D
 (zero-width joiner) and Devanagari combining vowel/virama marks are
-allowed so Hindi conjuncts are not damaged. This is a text-integrity
-check, not proof of correct Hindi recognition, audio quality or full
-Unicode spoofing resistance; human transcript review is still required.
+allowed so Hindi conjuncts are not damaged. The **editable transcript review**
+also checks the same unsafe controls after every manual correction or paste.
+If detected, the review-confirmation checkbox and copy-to-story action remain
+disabled and a fixed, non-leaking guidance message explains that hidden
+characters must be removed. The click handler rechecks the text, not just the
+button state. No pasted text is silently stripped, rewritten or copied into
+the story without fresh approval. This is a text-integrity check, not proof
+of correct Hindi recognition, audio quality or full Unicode spoofing
+resistance; human transcript review is still required.
 
 ## Desktop file-picker regression and no-model setup checks
 
