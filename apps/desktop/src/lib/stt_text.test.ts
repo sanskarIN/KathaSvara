@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
-import { hasUnsafeSttTextControls } from "./stt_text";
+import { hasUnsafeSttTextControls, removeUnsafeSttTextControls } from "./stt_text";
 
 describe("untrusted Hindi STT review and model text controls", () => {
   it.each([
@@ -16,6 +16,18 @@ describe("untrusted Hindi STT review and model text controls", () => {
     },
   );
 
+  it("repairs only forbidden formatting on an explicit call, preserving Hindi glyphs", () => {
+    const original = "क्" + String.fromCodePoint(0x200d) + "ष" +
+      String.fromCodePoint(0x202e) + " हिंदी" + String.fromCodePoint(0x80);
+    expect(removeUnsafeSttTextControls(original)).toBe("क्" + String.fromCodePoint(0x200d) + "ष हिंदी");
+    expect(hasUnsafeSttTextControls(removeUnsafeSttTextControls(original))).toBe(false);
+    expect(original).toContain(String.fromCodePoint(0x202e));
+  });
+
+  it("leaves valid Hindi, newline and tab text byte-for-byte unchanged", () => {
+    const clean = "क्" + String.fromCodePoint(0x200c) + "ष हिंदी\nनई पंक्ति\tशब्द";
+    expect(removeUnsafeSttTextControls(clean)).toBe(clean);
+  });
   it("does not rewrite a user edit or silently remove an unsafe character", () => {
     const input = "मेरी" + String.fromCodePoint(0x202e) + "कहानी";
     expect(hasUnsafeSttTextControls(input)).toBe(true);
