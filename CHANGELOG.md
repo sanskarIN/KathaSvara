@@ -3,6 +3,18 @@
 - Prepare manual exact-main-SHA experimental prerelease with unchanged published v0.5.6 assets.
 - Include post-v0.5.6 offline short Hindi WAV/microphone STT, no-model checks, recording integrity and error/privacy safeguards.
 - Reject English-only recognition models and retain external licensed model dependencies.
+- Verify unsigned Windows candidate x64 PE headers, SHA-256 integrity and
+  WebView2 registration without claiming a successful desktop launch
+  ([merged PR #168](https://github.com/sanskarIN/KathaSvara/pull/168)).
+- Prevent delayed Python session verification from resurrecting cleared or
+  replaced runtime settings ([merged PR #169](https://github.com/sanskarIN/KathaSvara/pull/169)).
+- Add an explicit, transcript-redacted Windows STT smoke mode that runs real
+  **local** recognition on an existing user-selected short WAV/model, without
+  launching the desktop or downloading recognition weights
+  ([merged PR #170](https://github.com/sanskarIN/KathaSvara/pull/170)).
+- Discard stale STT transcript drafts, prior setup results and microphone
+  consent when a Python runtime selection is successfully replaced/cleared
+  ([merged PR #171](https://github.com/sanskarIN/KathaSvara/pull/171)).
 - Do not claim Hindi transcription accuracy or Windows microphone permission acceptance from passing CI.
 - Keep the Windows developer build unsigned, unbundled and not a complete installer.
 
