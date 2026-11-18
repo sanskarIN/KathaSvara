@@ -204,7 +204,12 @@ def test_missing_model_fails_before_inference(tmp_path: Path) -> None:
         transcribe_hindi_wav(str(path), str(tmp_path / "missing"))
 
 
-def test_rejects_untrusted_model_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("code_point", [
+    0x00, 0x80, 0x061C, 0x200E, 0x200F, 0x202A, 0x202E, 0x2066, 0x2069,
+])
+def test_rejects_untrusted_model_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code_point: int,
+) -> None:
     path = wav_file(tmp_path)
     model = model_folder(tmp_path)
 
@@ -213,11 +218,32 @@ def test_rejects_untrusted_model_results(tmp_path: Path, monkeypatch: pytest.Mon
             self.model = SimpleNamespace(is_multilingual=True)
 
         def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
-            return [SimpleNamespace(text="secret\x00path")], None
+            return [SimpleNamespace(text="नमस्ते" + chr(code_point) + "भारत")], None
 
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
     with pytest.raises(ValueError, match="invalid transcription"):
         transcribe_hindi_wav(str(path), str(model))
+
+
+def test_indic_joiners_and_devanagari_marks_remain_valid_in_transcripts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legitimate Hindi conjuncts need ZWNJ/ZWJ; do not over-sanitize them."""
+    path = wav_file(tmp_path)
+    model = model_folder(tmp_path)
+    words = "क्" + chr(0x200D) + "षत्रिय क्" + chr(0x200C) + "ष हिंदी"
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
+            return [SimpleNamespace(text=words)], None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    result = transcribe_hindi_wav(str(path), str(model))
+    assert result["text"] == words
+    assert result["speech_detected"] is True
 
 
 def test_stt_setup_probe_does_not_load_model_or_use_network(
