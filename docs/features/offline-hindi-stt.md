@@ -215,6 +215,34 @@ a user's machine.
    consent also stop active microphone tracks; invalid/oversized recordings
    are rejected with fixed user-facing guidance.
 
+## Cancel active offline Hindi transcription (development source)
+
+When a user explicitly starts recognition from either **Selected Hindi WAV**
+or the **short microphone recording**, Settings now offers **Cancel active
+Hindi recognition**. The desktop sends a fresh cryptographic UUID-v4 with
+each native transcription request; the cancel command targets **only that
+matching STT job**. A cancellation arriving before native startup is
+remembered briefly in a bounded UUID-specific registry, so a queued start
+cannot unexpectedly load the model after the user cancels. A stale cancel
+cannot interrupt a newer STT request or an unrelated TTS/story-render job.
+
+On cancellation, the frontend immediately withdraws STT consent and discards
+any draft or captured in-memory microphone WAV. It keeps recognition controls
+locked until the existing native worker actually exits. Rust's child process
+watchdog checks the cancellation signal during the STT request and asks the
+OS to terminate the local Python recognizer; the Rust microphone scratch WAV
+is removed through its existing guard on both cancellation and normal exit.
+The request does **not** delete any user-selected original WAV or installed
+model folder, and no audio, private path or recognized words appear in
+the cancellation response. A fixed message is used for cancellation failure.
+
+Cancellation is best-effort for process termination: real Windows process
+termination timing, CPU/memory release and temporary scratch cleanup still
+need hands-on Windows/WebView2 acceptance, including cancel during a slow
+model load and near-completion. A Python process may not stop instantaneously.
+**No model load, real microphone or Hindi recognition is exercised by the
+new automated cancellation tests.**
+
 ## No-permission microphone API availability check (development source)
 
 Settings → **Speech to text → Record Hindi from microphone** now offers
