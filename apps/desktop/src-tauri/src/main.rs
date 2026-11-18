@@ -2491,6 +2491,53 @@ mod tests {
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn stt_cancel_registry_scopes_requests_to_exact_uuid_and_handles_early_cancel() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let invalid = "not-a-uuid";
+        assert!(request_stt_cancellation(invalid).is_err());
+        let too_old = Uuid::new_v4().to_string();
+        assert!(request_stt_cancellation(&too_old).unwrap());
+        assert!(SttJobGuard::start(&too_old).is_err());
+        let id = Uuid::new_v4().to_string();
+        let active = SttJobGuard::start(&id).unwrap();
+        assert!(!active.cancel.load(Ordering::Acquire));
+        let stale = Uuid::new_v4().to_string();
+        assert!(request_stt_cancellation(&stale).unwrap());
+        assert!(!active.cancel.load(Ordering::Acquire),
+            "A stale cancellation must never stop the current recognition");
+        assert!(request_stt_cancellation(&id).unwrap());
+        assert!(active.cancel.load(Ordering::Acquire));
+        assert!(SttJobGuard::start(&Uuid::new_v4().to_string()).is_err());
+        drop(active);
+        let fresh = SttJobGuard::start(&Uuid::new_v4().to_string()).unwrap();
+        assert!(!fresh.cancel.load(Ordering::Acquire),
+            "A cancelled previous job cannot poison a later recognition");
+        drop(fresh);
+    }
+
+    #[test]
+    fn stt_cancel_short_circuits_before_starting_any_python_process() {
+        let cancelled = AtomicBool::new(true);
+        // The fake request and missing runtime are intentionally irrelevant:
+        // the cancellation gate is checked before interpreter discovery.
+        let error = invoke_python_with_cancel(
+            json!({"action": "transcribe_hindi_wav"}), None, Some(&cancelled),
+        ).unwrap_err();
+        assert_eq!(error, STT_CANCELLED_MESSAGE);
+    }
+
+    #[test]
+    fn stt_early_cancel_does_not_create_microphone_scratch_wav() {
+        let root = std::env::temp_dir().join(format!("kathasvara-cancel-{}", Uuid::new_v4()));
+        let cancelled = AtomicBool::new(true);
+        let error = transcribe_recorded_microphone(
+            &root, "not even valid audio", "no-model", &cancelled,
+        ).unwrap_err();
+        assert_eq!(error, STT_CANCELLED_MESSAGE);
+        assert!(!root.exists());
+    }
+
+    #[test]
     fn microphone_payload_is_bounded_and_exactly_canonical_pcm16() {
         let mut pcm = minimal_pcm_wav();
         pcm[24..28].copy_from_slice(&16_000u32.to_le_bytes());
@@ -2568,7 +2615,7 @@ mod tests {
         let encoded = STANDARD.encode(silent);
         let unavailable_model = root.join("missing-model");
         let error = transcribe_recorded_microphone(
-            &root, &encoded, unavailable_model.to_str().unwrap()
+            &root, &encoded, unavailable_model.to_str().unwrap(), &AtomicBool::new(false)
         ).unwrap_err();
         assert_eq!(error, MIC_UNUSABLE_SIGNAL);
         assert!(!root.join("stt-microphone").exists());
@@ -2594,7 +2641,7 @@ mod tests {
             fs::write(model.join(name), b"").unwrap();
             assert!(verify_stt_model_folder(&model).is_err());
             let err = transcribe_recorded_microphone(
-                &root, &encoded, model.to_str().unwrap()
+                &root, &encoded, model.to_str().unwrap(), &AtomicBool::new(false)
             ).unwrap_err();
             assert!(err.contains("missing or empty"));
             assert!(!root.join("stt-microphone").exists());
