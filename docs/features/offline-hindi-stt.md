@@ -226,9 +226,14 @@ remembered briefly in a bounded UUID-specific registry, so a queued start
 cannot unexpectedly load the model after the user cancels. A stale cancel
 cannot interrupt a newer STT request or an unrelated TTS/story-render job.
 
-On cancellation, the frontend immediately withdraws STT consent and discards
-any draft or captured in-memory microphone WAV. It keeps recognition controls
-locked until the existing native worker actually exits. Rust's child process
+On **explicit Cancel**, the frontend immediately withdraws STT consent and
+discards any draft or captured in-memory microphone WAV. The same targeted
+native cancellation is now requested automatically when the user **withdraws
+transcription consent, leaves Settings, hides/closes the window, or changes the
+configured speech runtime**. It never attempts to cancel an unrelated
+narration render. The frontend keeps recognition controls locked until the
+original native worker actually exits. A rejected/late reply can never
+restore private text or consent. Rust's child process
 watchdog checks the cancellation signal during the STT request and asks the
 OS to terminate the local Python recognizer; the Rust microphone scratch WAV
 is removed through its existing guard on both cancellation and normal exit.
