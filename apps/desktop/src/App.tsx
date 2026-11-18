@@ -87,7 +87,7 @@ type SttResult = {
 };
 function isValidSttResult(value: SttResult): boolean {
   return typeof value?.text === "string" && [...value.text].length <= 8000
-    && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value.text)
+    // Refuse hidden bidi overrides from a stale or untrusted native worker,\n    // while retaining U+200C/U+200D joiners needed by some Indic conjuncts.\n    && !/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e-\u200f\u202a-\u202e\u2066-\u2069]/.test(value.text)
     && value.language === "hi" && value.engine === "faster-whisper-local"
     && typeof value.duration_seconds === "number"
     && Number.isFinite(value.duration_seconds) && value.duration_seconds > 0
