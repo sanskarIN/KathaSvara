@@ -93,6 +93,30 @@ describe("consented short microphone to Hindi transcript", () => {
     expect(document.body.textContent).not.toContain(privateData);
   });
 
+  it("checks WebView2 microphone APIs without prompting or touching a real device", () => {
+    const previous = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    const getUserMedia = vi.fn(() => Promise.reject(new Error("must not request device access")));
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true, value: { getUserMedia },
+    });
+    try {
+      openSettings();
+      fireEvent.click(screen.getByRole("button", {
+        name: "Check microphone API availability (no permission)",
+      }));
+      const report = screen.getByRole("status", { name: "Microphone API readiness report" });
+      expect(report.textContent).toContain("OS permission requested: No");
+      expect(report.textContent).toContain("Audio recorded: No");
+      expect(report.textContent).toContain("STT model loaded: No");
+      expect(report.textContent).toContain("not a real-device or Hindi recognition test");
+      expect(getUserMedia).not.toHaveBeenCalled();
+      expect(mocks.microphone).not.toHaveBeenCalled();
+      expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+    } finally {
+      if (previous) Object.defineProperty(navigator, "mediaDevices", previous);
+      else Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
   it("does not request a microphone or run STT without consent", async () => {
     openSettings();
     const start = screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement;
