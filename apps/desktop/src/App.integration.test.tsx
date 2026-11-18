@@ -578,6 +578,14 @@ describe("local offline Hindi speech to text", () => {
     fireEvent.click(copy);
     expect(screen.queryByLabelText("NARRATION TEXT")).toBeNull();
     expect(draft.value).toBe(unsafe); // Never silently rewrite or delete personal text.
+    // A separate explicit click repairs only forbidden formatting.
+    const repair = screen.getByRole("button", { name: "Remove unsupported text formatting" });
+    fireEvent.click(repair);
+    expect(draft.value).toBe("नमस्तेभारत");
+    expect(reviewed.checked).toBe(false);
+    expect(reviewed.disabled).toBe(false);
+    expect(copy.disabled).toBe(true);
+    // A legitimate Hindi ZWJ is still allowed after a later user correction.
     fireEvent.change(draft, { target: { value: "क्" + String.fromCodePoint(0x200d) + "ष हिंदी" } });
     expect(reviewed.disabled).toBe(false);
     expect(screen.queryByText(/transcript contains invisible or unsupported/)).toBeNull();
