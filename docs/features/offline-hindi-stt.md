@@ -17,6 +17,23 @@ Recheck the new runtime and grant fresh consent before transcribing again.
 Canceling a file picker or rejecting an invalid interpreter does not change
 the active runtime or automatically discard a previously reviewed draft.
 
+## Private transcript and consent lifecycle
+
+In the development source, selecting a **new WAV** or **new STT model folder**
+retires any previous transcript review draft and any microphone sample, and
+unchecks the permission-to-transcribe box. You must review the selected input,
+recheck the separate local STT setup as appropriate, and grant fresh consent
+before transcription. Canceling a file or folder picker leaves the existing
+selection, consent and reviewed text unchanged. A pending native recognition
+job keeps its busy lock until it exits; its result cannot restore a draft
+invalidated by a later selection.
+
+When the desktop window becomes hidden, the development source also withdraws
+STT consent, retires previous private transcript/review and setup results, and
+discards microphone capture. An in-flight old result is ignored when the
+recognizer eventually finishes. This is a privacy safeguard, not a claim that
+Windows or WebView2 has passed physical microphone tests.
+
 ## Desktop file-picker regression and no-model setup checks
 
 The published v0.5.6 build predates speech-to-text and cannot recognize
