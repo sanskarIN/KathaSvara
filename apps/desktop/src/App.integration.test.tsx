@@ -456,7 +456,7 @@ describe("local offline Hindi speech to text", () => {
       "cancel_stt_transcription", { jobId: activeId },
     ));
     expect((screen.getByRole("button", { name: "Cancellation requested…" }) as HTMLButtonElement).disabled).toBe(true);
-    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    const transcribe = screen.getByRole("button", { name: "Recognizing Hindi locally…" }) as HTMLButtonElement;
     expect(transcribe.disabled).toBe(true);
     await act(async () => { finishRecognition(valid); });
     expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
