@@ -392,6 +392,9 @@ describe("local offline Hindi speech to text", () => {
     fireEvent.click(consent);
     fireEvent.click(transcribe);
     await screen.findByLabelText("Recognized Hindi (review required)");
+    await waitFor(() => expect(
+      (screen.getByRole("button", { name: "Select Hindi WAV" }) as HTMLButtonElement).disabled,
+    ).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
     await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(3));
