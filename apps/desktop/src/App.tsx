@@ -867,7 +867,12 @@ export default function App() {
     if (updateUi) setSttCancelRequested(true);
     // Even if Cancel reaches Rust before a queued Start, its UUID tombstone
     // blocks an unwanted model load. Private drafts are retired independently.
-    void invoke<boolean>("cancel_stt_transcription", { jobId }).catch(() => {});
+    try {
+      void invoke<boolean>("cancel_stt_transcription", { jobId }).catch(() => {});
+    } catch {
+      // Even if the bridge throws synchronously, continue revocation and
+      // keep the UI locked until its original native invocation finishes.
+    }
   }
 
   function resetSttResult() {
