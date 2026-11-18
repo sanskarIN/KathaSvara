@@ -553,6 +553,38 @@ describe("local offline Hindi speech to text", () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("blocks unsafe pasted direction overrides in edited Hindi review, not just model output", async () => {
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockResolvedValueOnce(valid);
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    const draft = await screen.findByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement;
+    const reviewed = screen.getByRole("checkbox", { name: /I compared this transcript with the recording/ }) as HTMLInputElement;
+    const copy = screen.getByRole("button", { name: "Use reviewed text in story editor" }) as HTMLButtonElement;
+    fireEvent.click(reviewed);
+    expect(copy.disabled).toBe(false);
+    const unsafe = "नमस्ते" + String.fromCodePoint(0x202e) + "भारत";
+    fireEvent.change(draft, { target: { value: unsafe } });
+    expect(reviewed.checked).toBe(false);
+    expect(reviewed.disabled).toBe(true);
+    expect(copy.disabled).toBe(true);
+    expect(screen.getByText(/transcript contains invisible or unsupported/)).toBeTruthy();
+    fireEvent.click(copy);
+    expect(screen.queryByLabelText("NARRATION TEXT")).toBeNull();
+    expect(draft.value).toBe(unsafe); // Never silently rewrite or delete personal text.
+    fireEvent.change(draft, { target: { value: "क्" + String.fromCodePoint(0x200d) + "ष हिंदी" } });
+    expect(reviewed.disabled).toBe(false);
+    expect(screen.queryByText(/transcript contains invisible or unsupported/)).toBeNull();
+    expect(copy.disabled).toBe(true); // Editing always requires fresh manual review.
+    fireEvent.click(reviewed);
+    expect(copy.disabled).toBe(false);
+  });
   it("requires fresh review after edits and rejects empty or overlong drafts", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
       .mockResolvedValueOnce("C:\\private\\multilingual-model");
