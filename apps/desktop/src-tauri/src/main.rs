@@ -56,10 +56,18 @@ struct ActiveSttJob {
     id: String,
     cancel: Arc<AtomicBool>,
 }
-static ACTIVE_STT_JOB: OnceLock<Mutex<Option<ActiveSttJob>>> = OnceLock::new();
+/// An early Cancel IPC may reach Rust before the Start IPC. Remember only a
+/// bounded number of UUID-specific tombstones, never private audio or paths.
+struct SttJobRegistry {
+    active: Option<ActiveSttJob>,
+    cancelled_before_start: HashSet<String>,
+}
+static ACTIVE_STT_JOB: OnceLock<Mutex<SttJobRegistry>> = OnceLock::new();
 
-fn stt_job_state() -> &'static Mutex<Option<ActiveSttJob>> {
-    ACTIVE_STT_JOB.get_or_init(|| Mutex::new(None))
+fn stt_job_state() -> &'static Mutex<SttJobRegistry> {
+    ACTIVE_STT_JOB.get_or_init(|| Mutex::new(SttJobRegistry {
+        active: None, cancelled_before_start: HashSet::new(),
+    }))
 }
 
 fn validate_stt_job_id(id: &str) -> Result<(), String> {
@@ -78,24 +86,24 @@ struct SttJobGuard {
 impl SttJobGuard {
     fn start(id: &str) -> Result<Self, String> {
         validate_stt_job_id(id)?;
-        let mut active = stt_job_state().lock()
+        let mut registry = stt_job_state().lock()
             .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
-        if active.is_some() {
+        if registry.cancelled_before_start.remove(id) {
+            return Err(STT_CANCELLED_MESSAGE.into());
+        }
+        if registry.active.is_some() {
             return Err("An offline transcription is already running.".into());
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        *active = Some(ActiveSttJob { id: id.to_owned(), cancel: Arc::clone(&cancel) });
+        registry.active = Some(ActiveSttJob { id: id.to_owned(), cancel: Arc::clone(&cancel) });
         Ok(Self { id: id.to_owned(), cancel })
-    }
-    fn cancelled(&self) -> bool {
-        self.cancel.load(Ordering::Acquire)
     }
 }
 impl Drop for SttJobGuard {
     fn drop(&mut self) {
-        if let Ok(mut active) = stt_job_state().lock() {
-            if active.as_ref().is_some_and(|job| job.id == self.id) {
-                *active = None;
+        if let Ok(mut registry) = stt_job_state().lock() {
+            if registry.active.as_ref().is_some_and(|job| job.id == self.id) {
+                registry.active = None;
             }
         }
     }
@@ -103,13 +111,19 @@ impl Drop for SttJobGuard {
 
 fn request_stt_cancellation(job_id: &str) -> Result<bool, String> {
     validate_stt_job_id(job_id)?;
-    let active = stt_job_state().lock()
+    let mut registry = stt_job_state().lock()
         .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
-    if let Some(job) = active.as_ref().filter(|job| job.id == job_id) {
+    if let Some(job) = registry.active.as_ref().filter(|job| job.id == job_id) {
         job.cancel.store(true, Ordering::Release);
         return Ok(true);
     }
-    Ok(false)
+    // A queued native start can still arrive after the Cancel command.
+    // Bounded tombstones prevent that late start from loading a model.
+    if registry.cancelled_before_start.len() >= 32 {
+        registry.cancelled_before_start.clear();
+    }
+    registry.cancelled_before_start.insert(job_id.to_owned());
+    Ok(true)
 }
 
 /// Cancel only a matching active STT worker, not unrelated speech generation.
