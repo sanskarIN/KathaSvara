@@ -164,6 +164,25 @@ def inspect_stt_setup(model_path: str | None = None) -> dict[str, object]:
     }
 
 
+def _contains_untrusted_transcript_control(text: str) -> bool:
+    """Reject invisible text-direction overrides while preserving Indic joiners.
+
+    Whisper output is untrusted text that may be reviewed/copied to an editor.
+    Devanagari ZWNJ/ZWJ (U+200C/U+200D) are intentionally allowed; Unicode
+    bidi embeddings/overrides/isolates are not necessary for transcription
+    and can make visible words differ from their stored reading order.
+    """
+    for char in text:
+        point = ord(char)
+        if (point < 32 and char not in "\n\t") or 0x7F <= point <= 0x9F:
+            return True
+        if point in (0x061C, 0x200E, 0x200F):
+            return True
+        if 0x202A <= point <= 0x202E or 0x2066 <= point <= 0x2069:
+            return True
+    return False
+
+
 def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
     """Run actual offline ASR; never return a synthetic or placeholder transcript."""
     if not isinstance(wav_path, str) or not isinstance(model_path, str):
@@ -202,7 +221,7 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
             if index >= 200:
                 raise ValueError("Transcription exceeds the 200-segment review limit.")
             text = segment.text
-            if not isinstance(text, str) or any(ord(ch) < 32 and ch not in "\n\t" for ch in text):
+            if not isinstance(text, str) or _contains_untrusted_transcript_control(text):
                 raise ValueError("Speech model produced invalid transcription text.")
             cleaned = text.strip()
             if cleaned:
