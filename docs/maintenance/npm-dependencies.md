@@ -48,6 +48,31 @@ The development source now resolves **TypeScript 7.0.2** with React 19, Vite 8, 
 
 A feature-branch-only bootstrap workflow with write access was removed immediately after updating the reviewed npm files. This change is **not a new release** and does not rewrite the published v0.5.0 artifacts.
 
+## 18 November 2026 — unresolved upstream picomatch advisory
+
+The exact lockfile currently resolves **picomatch 4.0.7** in the **development
+tooling** dependency chain (Vite/Vitest and their transitive glob libraries).
+GitHub Advisory [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+flags a high-severity regular-expression denial-of-service risk for repeated
+extglob patterns. As of this review, the upstream npm picomatch latest tag
+is still 4.0.7; **no confirmed fixed published version is available**.
+The exact lockfile lists `dev: true` for affected build/test packages, but
+this limits exposure rather than proving that build-time input is safe.
+
+**Do not** replace the dependency with an unreviewed fork, claim the
+advisory is fixed, or pass `npm audit` by ignoring this risk. A successful
+React test or Windows compilation is not a passed dependency security audit.
+
+CI reports **functional React tests/build** and **the complete strict
+high+ npm audit** in *independent jobs*. Functional regressions remain
+visible even while high+ dependency audit is red. The audit job still runs
+`npm audit --audit-level=high` unchanged, so the full suite remains blocked
+until a verified remediation is available. Review
+https://github.com/micromatch/picomatch/issues/247 for upstream updates.
+After a fixed release, upgrade the pinned graph on Node 22, run strict
+npm audit, React tests/build, and Windows candidate checks before claiming
+the security gate passes. This risk is separate from real Hindi/Windows QA.
+
 ## Release immutability and limitations
 
 Previous version-specific GitHub publication workflows are kept unchanged to preserve their tested SHA and release history. Future release workflows should use `npm ci` and a complete pinned graph. The [v0.5.0 pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) is an unsigned developer EXE, not a complete installer, and manual Chatterbox Hindi playback and clean Windows installation acceptance remain open in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).
