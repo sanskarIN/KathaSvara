@@ -7,6 +7,7 @@ import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./
 import { publicSttTranscriptionError } from "./lib/stt_errors";
 import { hasUnsafeSttTextControls, removeUnsafeSttTextControls } from "./lib/stt_text";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
+import { MICROPHONE_API_ADVICE, probeMicrophoneApiAvailability, type MicrophoneApiReport } from "./lib/microphone_readiness";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
@@ -301,6 +302,7 @@ export default function App() {
   const [micStatus, setMicStatus] = useState<"idle" | "requesting" | "recording" | "processing" | "ready">("idle");
   const [micWav, setMicWav] = useState<string | null>(null);
   const [micGuidance, setMicGuidance] = useState<string | null>(null);
+  const [micApiReport, setMicApiReport] = useState<MicrophoneApiReport | null>(null);
   const micSession = useRef<MicrophoneCapture | null>(null);
   // An OS permission prompt or AudioContext.resume can remain pending after
   // consent is withdrawn. Abort startup before it can retain a late stream.
@@ -1518,6 +1520,9 @@ export default function App() {
                     permission or input-device issues without displaying private OS error text.
                     This feature has not yet passed real-device testing.</p>
                   <div className="preview-actions">
+                    <button className="secondary-button" onClick={() => setMicApiReport(probeMicrophoneApiAvailability())}>
+                      Check microphone API availability (no permission)
+                    </button>
                     <button className="secondary-button"
                       disabled={!sttConsent || sttWorking || sttChecking || micStatus !== "idle"}
                       onClick={() => void startMicrophone()}>
@@ -1529,6 +1534,14 @@ export default function App() {
                       onClick={discardMicrophone}>{micStatus === "requesting"
                         ? "Cancel microphone permission request" : "Discard microphone audio"}</button>
                   </div>
+                  {micApiReport && (
+                    <section aria-label="Microphone API readiness report" role="status" className="diagnostic-report">
+                      <p><strong>WebView microphone API:</strong> {micApiReport.api_present ? "Present" : "Unavailable"}</p>
+                      <p>{MICROPHONE_API_ADVICE[micApiReport.reason]}</p>
+                      <p className="helper">OS permission requested: No. Audio recorded: No. STT model loaded: No.
+                        This is an API presence check, not a real-device or Hindi recognition test.</p>
+                    </section>
+                  )}
                   <p role="status">{micGuidance || "Microphone is off. No audio captured."}</p>
                   {micStatus === "recording" && <p role="status"><strong>Microphone is recording now.</strong></p>}
                   {micStatus === "ready" && micWav && (
