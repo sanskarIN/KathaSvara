@@ -1379,21 +1379,30 @@ fn write_transient_microphone_wav(
 }
 
 fn transcribe_recorded_microphone(
-    root: &Path, wav_base64: &str, model_path: &str,
+    root: &Path, wav_base64: &str, model_path: &str, cancel: &AtomicBool,
 ) -> Result<Value, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let bytes = decode_microphone_wav(wav_base64)?;
     // Reject unusable PCM and incomplete models *before* creating any
     // temporary recording, rather than relying solely on the Python worker.
     verify_microphone_signal(&bytes)?;
     let model = Path::new(model_path);
     verify_stt_model_folder(model)?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let scratch = write_transient_microphone_wav(root, &bytes)?;
     verify_stt_paths(&scratch.path, model)?;
-    let response = invoke_python(json!({
+    let response = invoke_python_with_cancel(json!({
         "action": "transcribe_hindi_wav",
         "wav_path": scratch.path,
         "model_path": model_path,
-    }))?;
+    }), None, Some(cancel))?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let result = response.get("result")
         .ok_or_else(|| "Offline STT did not return a transcript.".to_string())?;
     validate_stt_result(result)
@@ -1406,18 +1415,22 @@ async fn transcribe_microphone_wav(
     app: tauri::AppHandle,
     wav_base64: String,
     model_path: String,
+    job_id: String,
 ) -> Result<Value, String> {
+    validate_stt_job_id(&job_id)?;
     if wav_base64.len() > MAX_MIC_WAV_B64_CHARS
         || model_path.len() > 4096
     {
         return Err("Local microphone transcription request exceeds its size limit.".into());
     }
     let guard = RealSpeechJobGuard::start()?;
+    let stt = SttJobGuard::start(&job_id)?;
     let root = app_dir(&app)
         .map_err(|_| "Cannot access private microphone scratch storage.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
-        transcribe_recorded_microphone(&root, &wav_base64, &model_path)
+        let _stt = &stt;
+        transcribe_recorded_microphone(&root, &wav_base64, &model_path, &stt.cancel)
     }).await.map_err(|_| "Microphone transcription worker stopped unexpectedly.".to_string())?
 }
 
@@ -1426,18 +1439,25 @@ async fn transcribe_microphone_wav(
 async fn transcribe_local_wav(
     wav_path: String,
     model_path: String,
+    job_id: String,
 ) -> Result<Value, String> {
+    validate_stt_job_id(&job_id)?;
     verify_stt_paths(Path::new(&wav_path), Path::new(&model_path))?;
     let guard = RealSpeechJobGuard::start()?;
+    let stt = SttJobGuard::start(&job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
+        let _stt = &stt;
         // Revalidate after switching threads, immediately before child launch.
         verify_stt_paths(Path::new(&wav_path), Path::new(&model_path))?;
-        let response = invoke_python(json!({
+        let response = invoke_python_with_cancel(json!({
             "action": "transcribe_hindi_wav",
             "wav_path": wav_path,
             "model_path": model_path,
-        }))?;
+        }), None, Some(&stt.cancel))?;
+        if stt.cancel.load(Ordering::Acquire) {
+            return Err(STT_CANCELLED_MESSAGE.into());
+        }
         let result = response.get("result")
             .ok_or_else(|| "Offline STT did not return a transcript.".to_string())?;
         validate_stt_result(result)
@@ -2458,7 +2478,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            configure_local_inference, clear_local_inference, probe_stt_setup, probe_stt_wav, transcribe_local_wav, transcribe_microphone_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, probe_stt_setup, probe_stt_wav, transcribe_local_wav, transcribe_microphone_wav, cancel_stt_transcription, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
