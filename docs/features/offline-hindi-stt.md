@@ -34,6 +34,24 @@ discards microphone capture. An in-flight old result is ignored when the
 recognizer eventually finishes. This is a privacy safeguard, not a claim that
 Windows or WebView2 has passed physical microphone tests.
 
+## Transcript text integrity at the three trust boundaries
+
+Recognized words are **untrusted model output**, even when processing is
+entirely offline. Development-source Python, native Rust IPC and React
+now reject C0/C1 control characters (except newlines and tabs), and
+invisible Unicode directional formatting controls (Arabic letter mark,
+left-to-right/right-to-left marks, bidi embeddings and overrides, and
+isolate controls). Such characters can otherwise disguise the visible
+reading order of words copied into a story script. If the model emits
+these characters, the result is rejected with fixed error guidance;
+the app does **not** silently strip or rewrite recognition output.
+
+**Indic shaping stays intact:** U+200C (zero-width non-joiner), U+200D
+(zero-width joiner) and Devanagari combining vowel/virama marks are
+allowed so Hindi conjuncts are not damaged. This is a text-integrity
+check, not proof of correct Hindi recognition, audio quality or full
+Unicode spoofing resistance; human transcript review is still required.
+
 ## Desktop file-picker regression and no-model setup checks
 
 The published v0.5.6 build predates speech-to-text and cannot recognize
