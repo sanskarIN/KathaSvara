@@ -369,6 +369,16 @@ export default function App() {
     const visibility = () => {
       if (document.hidden) {
         revoke();
+        // A hidden window must not retain consent, an unreviewed transcript,
+        // or a late recognition result that may arrive after tab switching.
+        // Keep native busy locks until their in-flight calls actually finish.
+        sttRevision.current += 1;
+        sttWavProbeRevision.current += 1;
+        retireSttDraft();
+        setSttConsent(false);
+        setSttSetup(null);
+        setSttWavReport(null);
+        setSttStatus(null);
         setMicWav(null);
         setMicStatus("idle");
         setMicGuidance("Microphone capture discarded because the window is hidden.");
@@ -844,8 +854,6 @@ export default function App() {
   async function chooseSttWav() {
     if (sttWavChecking || sttChecking || sttWorking) return;
     const revision = ++sttRevision.current;
-    retireSttDraft();
-    setSttStatus(null);
     try {
       const chosen = await open({
         title: "Select a local Hindi recording to transcribe",
@@ -853,10 +861,15 @@ export default function App() {
         filters: [{ name: "Short mono PCM16 WAV", extensions: ["wav"] }],
       });
       if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      // Consent is about this particular recording. Never reuse consent or
+      // a reviewed draft for another file; cancelled dialogs change nothing.
+      discardMicrophone();
+      retireSttDraft();
+      setSttConsent(false);
       sttWavProbeRevision.current += 1;
       setSttWavReport(null);
       setSttWavPath(chosen);
-      setSttStatus("Local WAV selected (private path hidden).");
+      setSttStatus("Local WAV selected (private path hidden). Review this recording and give fresh consent.");
     } catch {
       if (revision === sttRevision.current) {
         setSttStatus("Unable to select a local WAV recording.");
@@ -866,17 +879,20 @@ export default function App() {
 
   async function chooseSttModel() {
     const revision = ++sttRevision.current;
-    retireSttDraft();
-    setSttStatus(null);
-    setSttSetup(null);
     try {
       const chosen = await open({
         title: "Select an existing offline faster-whisper model folder",
         multiple: false, directory: true,
       });
       if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      // A different model may have different runtime/license expectations.
+      // Canceling the picker must not discard an already reviewed draft.
+      discardMicrophone();
+      retireSttDraft();
+      setSttConsent(false);
+      setSttSetup(null);
       setSttModelPath(chosen);
-      setSttStatus("Offline model folder selected (private path hidden).");
+      setSttStatus("Offline model folder selected (private path hidden). Recheck setup and give fresh consent.");
     } catch {
       if (revision === sttRevision.current) {
         setSttStatus("Unable to select the local STT model folder.");
