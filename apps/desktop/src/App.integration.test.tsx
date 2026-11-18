@@ -484,6 +484,42 @@ describe("local offline Hindi speech to text", () => {
 
 
 
+  it.each([0x80, 0x061c, 0x200e, 0x200f, 0x202e, 0x2066, 0x2069])(
+    "rejects invisible native transcript control U+%s before review", async codePoint => {
+      const tainted = "नमस्ते" + String.fromCodePoint(codePoint) + "भारत";
+      mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+        .mockResolvedValueOnce("C:\\private\\multilingual-model");
+      mocks.invoke.mockResolvedValueOnce({ ...valid, text: tainted });
+      openSettings();
+      fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+      await screen.findByText(/WAV: Selected privately/);
+      fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+      await screen.findByText(/Offline model: Selected privately/);
+      fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+      await screen.findByText(/Local transcription returned an invalid result/);
+      expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Use reviewed text in story editor" })).toBeNull();
+      expect(document.body.textContent).not.toContain(tainted);
+    },
+  );
+
+  it("keeps Indic joiners in a valid native Hindi transcript for manual review", async () => {
+    const joined = "क्" + String.fromCodePoint(0x200d) + "ष हिंदी";
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockResolvedValueOnce({ ...valid, text: joined });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    const draft = await screen.findByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement;
+    expect(draft.value).toBe(joined);
+    expect((screen.getByRole("button", { name: "Use reviewed text in story editor" }) as HTMLButtonElement).disabled).toBe(true);
+  });
   it("allows corrections only after explicit review and overwrite confirmation", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
       .mockResolvedValueOnce("C:\\private\\multilingual-model");
