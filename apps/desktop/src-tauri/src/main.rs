@@ -11,7 +11,7 @@ use std::{
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -50,6 +50,77 @@ impl Drop for RealSpeechJobGuard {
         REAL_SPEECH_JOB_ACTIVE.store(false, Ordering::Release);
     }
 }
+/// One cancellable recognizer at a time. The UUID is supplied separately
+/// per request so a delayed cancel cannot affect another job or TTS render.
+struct ActiveSttJob {
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+static ACTIVE_STT_JOB: OnceLock<Mutex<Option<ActiveSttJob>>> = OnceLock::new();
+
+fn stt_job_state() -> &'static Mutex<Option<ActiveSttJob>> {
+    ACTIVE_STT_JOB.get_or_init(|| Mutex::new(None))
+}
+
+fn validate_stt_job_id(id: &str) -> Result<(), String> {
+    const INVALID: &str = "Invalid offline transcription job ID.";
+    let parsed = Uuid::parse_str(id).map_err(|_| INVALID.to_string())?;
+    if parsed.to_string() != id || parsed.get_version_num() != 4 {
+        return Err(INVALID.into());
+    }
+    Ok(())
+}
+
+struct SttJobGuard {
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+impl SttJobGuard {
+    fn start(id: &str) -> Result<Self, String> {
+        validate_stt_job_id(id)?;
+        let mut active = stt_job_state().lock()
+            .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
+        if active.is_some() {
+            return Err("An offline transcription is already running.".into());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        *active = Some(ActiveSttJob { id: id.to_owned(), cancel: Arc::clone(&cancel) });
+        Ok(Self { id: id.to_owned(), cancel })
+    }
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+    }
+}
+impl Drop for SttJobGuard {
+    fn drop(&mut self) {
+        if let Ok(mut active) = stt_job_state().lock() {
+            if active.as_ref().is_some_and(|job| job.id == self.id) {
+                *active = None;
+            }
+        }
+    }
+}
+
+fn request_stt_cancellation(job_id: &str) -> Result<bool, String> {
+    validate_stt_job_id(job_id)?;
+    let active = stt_job_state().lock()
+        .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
+    if let Some(job) = active.as_ref().filter(|job| job.id == job_id) {
+        job.cancel.store(true, Ordering::Release);
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Cancel only a matching active STT worker, not unrelated speech generation.
+#[tauri::command]
+fn cancel_stt_transcription(job_id: String) -> Result<bool, String> {
+    request_stt_cancellation(&job_id)
+}
+
+const STT_CANCELLED_MESSAGE: &str =
+    "Offline Hindi transcription cancelled. No transcript was accepted.";
+
 static ACTIVE_RENDER_JOBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn active_render_jobs() -> &'static Mutex<HashSet<String>> {
@@ -888,6 +959,17 @@ fn invoke_python_with_reference(
     request: Value,
     reference_wav_path: Option<&str>,
 ) -> Result<Value, String> {
+    invoke_python_with_cancel(request, reference_wav_path, None)
+}
+
+fn invoke_python_with_cancel(
+    request: Value,
+    reference_wav_path: Option<&str>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Value, String> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let (python, directory) = runtime_paths()?;
     if !directory.join("kathasvara/cli.py").is_file() {
         return Err("Inference sources are missing. Configure the source directory in Settings.".into());
@@ -928,6 +1010,10 @@ fn invoke_python_with_reference(
     );
     let started = Instant::now();
     loop {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            stop_inference_child(&mut child);
+            return Err(STT_CANCELLED_MESSAGE.into());
+        }
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
@@ -951,6 +1037,9 @@ fn invoke_python_with_reference(
     let response = output_reader.join()
         .map_err(|_| "Inference output reader terminated unexpectedly.".to_string())??;
     request_status?;
+    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     // Upstream model libraries may print progress to stdout. The final JSON
     // response is a complete line, not necessarily the entire output stream.
     let data: Value = response
@@ -958,6 +1047,9 @@ fn invoke_python_with_reference(
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
         .next_back()
         .ok_or_else(|| "Inference service did not return valid JSON.".to_string())?;
+    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     if !status.success() || data.get("ok") != Some(&Value::Bool(true)) {
         return Err(
             data.get("message").and_then(Value::as_str)
