@@ -1033,8 +1033,16 @@ fn validate_stt_result(result: &Value) -> Result<Value, String> {
     const INVALID: &str = "Offline STT returned an invalid transcript. Update inference sources.";
     let text = result.get("text").and_then(Value::as_str).ok_or(INVALID)?;
     let duration = result.get("duration_seconds").and_then(Value::as_f64).ok_or(INVALID)?;
-    if text.chars().count() > 8_000 || text.chars().any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
-        || !duration.is_finite() || !(0.0..=60.0).contains(&duration)
+    // Imported Python output is untrusted. Reject invisible bidi control
+    // characters that can disguise the apparent reading order in Hindi
+    // review, but preserve Indic ZWNJ/ZWJ shaping characters.
+    let unsafe_text = text.chars().any(|ch| {
+        (ch.is_control() && ch != '\n' && ch != '\t')
+            || matches!(ch as u32,
+                0x061c | 0x200e | 0x200f | 0x202a..=0x202e | 0x2066..=0x2069)
+    });
+    if text.chars().count() > 8_000 || unsafe_text
+        || !duration.is_finite() || duration <= 0.0 || duration > 60.0
         || result.get("language").and_then(Value::as_str) != Some("hi")
         || result.get("engine").and_then(Value::as_str) != Some("faster-whisper-local")
         || result.get("network_used") != Some(&Value::Bool(false))
@@ -2555,6 +2563,18 @@ mod tests {
         bad = good.clone();
         bad["text"] = json!("private\u{0000}path");
         assert!(validate_stt_result(&bad).is_err());
+        bad = good.clone();
+        bad["duration_seconds"] = json!(0.0);
+        assert!(validate_stt_result(&bad).is_err());
+        for point in [0x80, 0x061c, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069] {
+            bad = good.clone();
+            bad["text"] = json!(format!("नमस्ते{}भारत", char::from_u32(point).unwrap()));
+            assert!(validate_stt_result(&bad).is_err());
+        }
+        // Hindi shaping joiners are valid, not unsafe direction overrides.
+        let mut joined = good.clone();
+        joined["text"] = json!(format!("क्{}ष", char::from_u32(0x200d).unwrap()));
+        assert_eq!(validate_stt_result(&joined).unwrap(), joined);
     }
 
     #[test]
