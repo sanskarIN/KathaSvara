@@ -291,6 +291,7 @@ export default function App() {
   const [sttWorking, setSttWorking] = useState(false);
   const [sttCancelRequested, setSttCancelRequested] = useState(false);
   const activeSttJobId = useRef<string | null>(null);
+  const sttCancelSentForId = useRef<string | null>(null);
   const [sttChecking, setSttChecking] = useState(false);
   const [sttSetup, setSttSetup] = useState<SttSetupReport | null>(null);
   const [sttWavReport, setSttWavReport] = useState<SttWavReport | null>(null);
@@ -350,10 +351,9 @@ export default function App() {
       micSession.current = null;
       setMicWav(null);
       setMicStatus("idle");
-      // Navigating away withdraws capture/transcription consent and prevents
-      // an already-running native recognizer from restoring a private draft
-      // to Settings when it eventually finishes. The worker still holds the
-      // busy lock until it actually completes.
+      // Navigation is a privacy revocation: cancel native recognition rather
+      // than merely ignoring its late reply; retain busy lock until exit.
+      requestAutomaticSttCancel();
       sttRevision.current += 1;
       sttWavProbeRevision.current += 1;
       retireSttDraft();
@@ -366,6 +366,8 @@ export default function App() {
 
   useEffect(() => {
     const revoke = () => {
+      // Unmount/close must request cancellation without setting React state.
+      requestAutomaticSttCancel(false);
       micRevision.current += 1;
       micStartup.current?.abort();
       micStartup.current = null;
@@ -375,9 +377,8 @@ export default function App() {
     const visibility = () => {
       if (document.hidden) {
         revoke();
-        // A hidden window must not retain consent, an unreviewed transcript,
-        // or a late recognition result that may arrive after tab switching.
-        // Keep native busy locks until their in-flight calls actually finish.
+        // Hidden windows revoke both the UI draft and active native STT.
+        requestAutomaticSttCancel();
         sttRevision.current += 1;
         sttWavProbeRevision.current += 1;
         retireSttDraft();
@@ -664,6 +665,7 @@ export default function App() {
   }
 
   function retireSttAfterRuntimeChange() {
+    requestAutomaticSttCancel();
     // A transcript or a WAV/setup probe belongs to the previous Python
     // runtime and source revision. Changing the runtime must not let a
     // pending recognizer restore old words or keep capture consent active.
@@ -811,6 +813,7 @@ export default function App() {
     }
     const revision = ++sttRevision.current;
     activeSttJobId.current = jobId;
+    sttCancelSentForId.current = null;
     setSttCancelRequested(false);
     setSttWorking(true);
     retireSttDraft();
@@ -857,7 +860,18 @@ export default function App() {
     setSttReviewConfirmed(false);
   }
 
+  function requestAutomaticSttCancel(updateUi = true) {
+    const jobId = activeSttJobId.current;
+    if (!jobId || sttCancelSentForId.current === jobId) return;
+    sttCancelSentForId.current = jobId;
+    if (updateUi) setSttCancelRequested(true);
+    // Even if Cancel reaches Rust before a queued Start, its UUID tombstone
+    // blocks an unwanted model load. Private drafts are retired independently.
+    void invoke<boolean>("cancel_stt_transcription", { jobId }).catch(() => {});
+  }
+
   function resetSttResult() {
+    requestAutomaticSttCancel();
     discardMicrophone();
     sttRevision.current += 1;
     retireSttDraft();
@@ -982,6 +996,7 @@ export default function App() {
     }
     const revision = ++sttRevision.current;
     activeSttJobId.current = jobId;
+    sttCancelSentForId.current = null;
     setSttCancelRequested(false);
     setSttWorking(true);
     retireSttDraft();
@@ -1023,7 +1038,8 @@ export default function App() {
     setSttConsent(false);
     discardMicrophone();
     setSttCancelRequested(true);
-    setSttStatus("Requesting cancellation of local Hindi recognition. Please allow the worker to exit.");
+    sttCancelSentForId.current = jobId;
+    setSttStatus("Requesting cancellation of local Hindi recognition. The worker remains locked until it exits.");
     try {
       const acknowledged = await invoke<boolean>("cancel_stt_transcription", { jobId });
       if (activeSttJobId.current === jobId) {
