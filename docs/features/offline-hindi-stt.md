@@ -52,9 +52,13 @@ allowed so Hindi conjuncts are not damaged. The **editable transcript review**
 also checks the same unsafe controls after every manual correction or paste.
 If detected, the review-confirmation checkbox and copy-to-story action remain
 disabled and a fixed, non-leaking guidance message explains that hidden
-characters must be removed. The click handler rechecks the text, not just the
-button state. No pasted text is silently stripped, rewritten or copied into
-the story without fresh approval. This is a text-integrity check, not proof
+characters must be removed. Because these characters are difficult to locate
+visually, an explicit **Remove unsupported text formatting** button is offered.
+Only clicking that button removes the known rejected characters; it does not
+delete Hindi ZWNJ/ZWJ or ordinary Devanagari marks. The corrected text stays
+editable and requires a **fresh manual review** before copying. The click
+handler rechecks the text, not just the button state. No pasted text is silently
+stripped, rewritten or copied into the story without fresh approval. This is a text-integrity check, not proof
 of correct Hindi recognition, audio quality or full Unicode spoofing
 resistance; human transcript review is still required.
 
