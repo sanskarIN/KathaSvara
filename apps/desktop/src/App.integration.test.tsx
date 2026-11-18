@@ -159,6 +159,40 @@ describe("consented short microphone to Hindi transcript", () => {
     expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
   });
 
+  it("cancels native microphone recognition without reusing private recorded audio", async () => {
+    let finishRecognition!: (result: typeof modelTranscript) => void;
+    const pending = new Promise<typeof modelTranscript>(resolve => { finishRecognition = resolve; });
+    const discarded = vi.fn();
+    mocks.microphone.mockImplementation(async (completed: (wav: string) => void) => ({
+      stop: () => queueMicrotask(() => completed("UklGRi4AAABXQVZF")),
+      discard: discarded,
+    }));
+    mocks.open.mockResolvedValueOnce("C:\\private\\local-stt-model");
+    let activeId: string | null = null;
+    mocks.invoke.mockImplementation((command: string, args: { jobId?: string }) => {
+      if (command === "transcribe_microphone_wav") { activeId = args.jobId ?? null; return pending; }
+      if (command === "cancel_stt_transcription") return Promise.resolve(args.jobId === activeId);
+      throw new Error("Unexpected command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await screen.findByText("Microphone is recording now.");
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
+    await screen.findByRole("button", { name: "Transcribe recorded Hindi offline" });
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe recorded Hindi offline" }));
+    const cancel = await screen.findByRole("button", { name: "Cancel active Hindi recognition" });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("cancel_stt_transcription", { jobId: activeId }));
+    expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    await act(async () => { finishRecognition(modelTranscript); });
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(document.body.textContent).not.toContain(modelTranscript.text);
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "transcribe_microphone_wav")).toHaveLength(1);
+  });
   it("offers fixed native microphone-signal advice without leaking a private worker error", async () => {
     mocks.microphone.mockImplementation(async (completed: (wav: string) => void) => ({
       stop: () => queueMicrotask(() => completed("UklGRi4AAABXQVZF")),
