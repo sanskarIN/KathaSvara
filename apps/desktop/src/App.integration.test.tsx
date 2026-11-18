@@ -150,10 +150,11 @@ describe("consented short microphone to Hindi transcript", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transcribe recorded Hindi offline" }));
     await waitFor(() => expect((screen.getByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement).value)
       .toBe("नमस्ते भारत"));
-    expect(mocks.invoke).toHaveBeenCalledWith("transcribe_microphone_wav", {
+    expect(mocks.invoke).toHaveBeenCalledWith("transcribe_microphone_wav", expect.objectContaining({
       wavBase64: "UklGRi4AAABXQVZF",
       modelPath: "C:\\private\\local-stt-model",
-    });
+      jobId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    }));
     expect(document.body.textContent).not.toContain("C:\\private");
     expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
   });
@@ -394,6 +395,41 @@ describe("local offline Hindi speech to text", () => {
     expect(document.body.textContent).not.toContain("C:\\private");
   });
 
+  it("cancels the exact native WAV recognition job and refuses a late transcript", async () => {
+    let finishRecognition!: (result: typeof valid) => void;
+    const pending = new Promise<typeof valid>(resolve => { finishRecognition = resolve; });
+    let activeId: string | null = null;
+    mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
+      .mockResolvedValueOnce("C:\\private\\multilingual-model");
+    mocks.invoke.mockImplementation((command: string, args: { jobId?: string }) => {
+      if (command === "transcribe_local_wav") { activeId = args.jobId ?? null; return pending; }
+      if (command === "cancel_stt_transcription") return Promise.resolve(args.jobId === activeId);
+      throw new Error("Unexpected native command");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Choose offline STT model folder" }));
+    await screen.findByText(/Offline model: Selected privately/);
+    const consent = screen.getByRole("checkbox", { name: /permission to transcribe/ }) as HTMLInputElement;
+    fireEvent.click(consent);
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
+    const cancel = await screen.findByRole("button", { name: "Cancel active Hindi recognition" });
+    expect(activeId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    fireEvent.click(cancel);
+    expect(consent.checked).toBe(false);
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      "cancel_stt_transcription", { jobId: activeId },
+    ));
+    expect((screen.getByRole("button", { name: "Cancellation requested…" }) as HTMLButtonElement).disabled).toBe(true);
+    const transcribe = screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }) as HTMLButtonElement;
+    expect(transcribe.disabled).toBe(true);
+    await act(async () => { finishRecognition(valid); });
+    expect(screen.queryByLabelText("Recognized Hindi (review required)")).toBeNull();
+    expect(document.body.textContent).not.toContain(valid.text);
+    expect(screen.queryByRole("button", { name: "Cancellation requested…" })).toBeNull();
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "transcribe_local_wav")).toHaveLength(1);
+  });
   it("keeps consent and reviewed words on canceled pickers but revokes both for new input", async () => {
     const originalWav = "C:\\private\\first.wav";
     const originalModel = "C:\\private\\first-model";
@@ -500,9 +536,10 @@ describe("local offline Hindi speech to text", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transcribe Hindi WAV offline" }));
     await waitFor(() => expect((screen.getByLabelText("Recognized Hindi (review required)") as HTMLTextAreaElement).value)
       .toBe("नमस्ते भारत"));
-    expect(mocks.invoke).toHaveBeenCalledWith("transcribe_local_wav", {
+    expect(mocks.invoke).toHaveBeenCalledWith("transcribe_local_wav", expect.objectContaining({
       wavPath: "C:\\private\\speech.wav", modelPath: "C:\\private\\whisper-model",
-    });
+      jobId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    }));
     expect(document.body.textContent).not.toContain("C:\\private");
   });
 
