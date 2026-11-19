@@ -38,11 +38,13 @@ Windows or WebView2 has passed physical microphone tests.
 
 Recognized words are **untrusted model output**, even when processing is
 entirely offline. Development-source Python, native Rust IPC and React
-now reject C0/C1 control characters (except newlines and tabs), and
-invisible Unicode directional formatting controls (Arabic letter mark,
-left-to-right/right-to-left marks, bidi embeddings and overrides, and
-isolate controls). Such characters can otherwise disguise the visible
-reading order of words copied into a story script. If the model emits
+now reject C0/C1 control characters (except newlines and tabs), invisible
+Unicode direction controls (Arabic letter mark, left-to-right/right-to-left
+marks, bidi embeddings, overrides and isolates), plus non-rendering formatting
+characters such as soft hyphen (U+00AD), combining grapheme joiner (U+034F),
+zero-width space (U+200B), word joiner (U+2060), deprecated directional
+controls (U+206A–U+206F) and BOM (U+FEFF). Such characters can disguise
+the visible reading order or apparent spacing of reviewed Hindi words. If the model emits
 these characters, the result is rejected with fixed error guidance;
 the app does **not** silently strip or rewrite recognition output.
 
