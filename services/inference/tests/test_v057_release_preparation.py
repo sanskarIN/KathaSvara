@@ -87,10 +87,10 @@ def test_v057_publication_disclosures_and_history() -> None:
     assert "v0.5.6" in manual
     # Release documentation must not silently drop hardware-only tests for
     # permission races, expanded PCM file compatibility, or cancel/recovery.
-    for gate in ("D5", "D6", "D7"):
-        assert f"| {gate} |" in manual
+    for gate_id in ("D5", "D6", "D7"):
+        assert f"| {gate_id} |" in manual
         assert next(line for line in manual.splitlines()
-                    if line.startswith(f"| {gate} |")).endswith("| NOT TESTED |")
+                    if line.startswith(f"| {gate_id} |")).endswith("| NOT TESTED |")
     for marker in ("44.1 kHz", "22.05", "32 kHz", "track becoming muted",
                    "Python process exit", "consensual Hindi WAV"):
         assert marker.lower() in manual.lower()
