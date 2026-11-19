@@ -57,6 +57,19 @@ def test_stt_rejects_unsupported_rate_without_loading_a_model(tmp_path: Path, ra
         inspect_stt_wav(path)
 
 
+@pytest.mark.parametrize("rate", [8_000, 22_050, 44_100, 48_000])
+def test_one_pcm_frame_has_precise_nonzero_duration(tmp_path: Path, rate: int) -> None:
+    # The shared signal inspector rounds milliseconds, but STT's native
+    # contract explicitly allows one frame and needs a positive duration.
+    result = inspect_stt_wav(wav_file(tmp_path, frames=1, sample_rate=rate))
+    assert result["frames"] == 1
+    assert result["sample_rate"] == rate
+    assert result["duration_seconds"] > 0
+    assert result["duration_seconds"] == pytest.approx(1 / rate)
+    assert result["model_loaded"] is False
+    assert result["network_used"] is False
+
+
 def test_stt_rejects_invalid_and_oversized_audio(tmp_path: Path) -> None:
     path = wav_file(tmp_path, channels=2)
     with pytest.raises(ValueError, match="mono PCM16"):
