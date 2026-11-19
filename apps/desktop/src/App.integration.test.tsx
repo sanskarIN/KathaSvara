@@ -494,6 +494,25 @@ describe("model-free selected WAV signal preflight", () => {
     expect(document.body.textContent).not.toContain("C:\\private");
   });
 
+  it("rejects a rounded timing claim from a 44.1 kHz WAV probe", async () => {
+    const path = "C:\\private\\rounded.wav";
+    mocks.open.mockResolvedValueOnce(path);
+    mocks.invoke.mockImplementation(async (name: string) => {
+      if (name === "probe_stt_wav") {
+        return { ...good, sample_rate: 44100, frames: 12345, duration_seconds: 0.280 };
+      }
+      throw new Error("No model should run during WAV inspection");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Check selected WAV signal (no model)" }));
+    await screen.findByText(/WAV inspection returned an invalid report/);
+    expect(screen.queryByLabelText("Selected STT WAV signal report")).toBeNull();
+    expect(document.body.textContent).not.toContain(path);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+  });
+
   it("rejects a contradictory or privacy-unsafe native WAV report", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\voice.wav");
     mocks.invoke.mockResolvedValueOnce({ ...good, network_used: true });
