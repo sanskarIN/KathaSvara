@@ -225,9 +225,13 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
                 raise ValueError("Speech model produced invalid transcription text.")
             cleaned = text.strip()
             if cleaned:
-                length += len(cleaned) + 1
-                if length > MAX_TRANSCRIPT_CHARS:
+                # Count only the separators actually emitted by join(): the
+                # last segment has no trailing space. A valid transcript of
+                # exactly MAX_TRANSCRIPT_CHARS must remain reviewable.
+                extra = len(cleaned) + (1 if pieces else 0)
+                if length + extra > MAX_TRANSCRIPT_CHARS:
                     raise ValueError("Transcription exceeds the 8000-character review limit.")
+                length += extra
                 pieces.append(cleaned)
         _require_unchanged_recording(recording, recording_sha256)
     except (ValueError, TypeError):
