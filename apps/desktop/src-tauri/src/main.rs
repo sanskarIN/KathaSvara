@@ -6,7 +6,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     fs,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
@@ -61,12 +61,16 @@ struct ActiveSttJob {
 struct SttJobRegistry {
     active: Option<ActiveSttJob>,
     cancelled_before_start: HashSet<String>,
+    // FIFO retention: on overflow evict only the oldest early cancellation,
+    // never erase all other pending cancellations at once.
+    cancelled_before_start_order: VecDeque<String>,
 }
 static ACTIVE_STT_JOB: OnceLock<Mutex<SttJobRegistry>> = OnceLock::new();
 
 fn stt_job_state() -> &'static Mutex<SttJobRegistry> {
     ACTIVE_STT_JOB.get_or_init(|| Mutex::new(SttJobRegistry {
         active: None, cancelled_before_start: HashSet::new(),
+        cancelled_before_start_order: VecDeque::new(),
     }))
 }
 
@@ -89,6 +93,7 @@ impl SttJobGuard {
         let mut registry = stt_job_state().lock()
             .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
         if registry.cancelled_before_start.remove(id) {
+            registry.cancelled_before_start_order.retain(|pending| pending != id);
             return Err(STT_CANCELLED_MESSAGE.into());
         }
         if registry.active.is_some() {
@@ -118,11 +123,18 @@ fn request_stt_cancellation(job_id: &str) -> Result<bool, String> {
         return Ok(true);
     }
     // A queued native start can still arrive after the Cancel command.
-    // Bounded tombstones prevent that late start from loading a model.
-    if registry.cancelled_before_start.len() >= 32 {
-        registry.cancelled_before_start.clear();
+    // Keep the newest 32 pending UUIDs. Clearing *all* tombstones when full
+    // silently revives other cancelled starts, so evict exactly one oldest.
+    if registry.cancelled_before_start.contains(job_id) {
+        return Ok(true);
+    }
+    if registry.cancelled_before_start_order.len() >= 32 {
+        if let Some(expired) = registry.cancelled_before_start_order.pop_front() {
+            registry.cancelled_before_start.remove(&expired);
+        }
     }
     registry.cancelled_before_start.insert(job_id.to_owned());
+    registry.cancelled_before_start_order.push_back(job_id.to_owned());
     Ok(true)
 }
 
@@ -2513,6 +2525,43 @@ mod tests {
         assert!(!fresh.cancel.load(Ordering::Acquire),
             "A cancelled previous job cannot poison a later recognition");
         drop(fresh);
+    }
+
+    #[test]
+    fn stt_cancel_overflow_preserves_newer_prestart_cancellations() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        // Make the test independent of previously consumed global tombstones.
+        {
+            let mut state = stt_job_state().lock().unwrap();
+            assert!(state.active.is_none());
+            state.cancelled_before_start.clear();
+            state.cancelled_before_start_order.clear();
+        }
+        let ids: Vec<String> = (0..33).map(|_| Uuid::new_v4().to_string()).collect();
+        for id in &ids[..32] {
+            assert!(request_stt_cancellation(id).unwrap());
+        }
+        // Repeated Cancel for one UUID must not consume a second FIFO slot.
+        assert!(request_stt_cancellation(&ids[31]).unwrap());
+        assert!(request_stt_cancellation(&ids[32]).unwrap());
+        {
+            let state = stt_job_state().lock().unwrap();
+            assert_eq!(state.cancelled_before_start.len(), 32);
+            assert_eq!(state.cancelled_before_start_order.len(), 32);
+            assert!(!state.cancelled_before_start.contains(&ids[0]));
+            assert!(state.cancelled_before_start.contains(&ids[1]));
+            assert!(state.cancelled_before_start.contains(&ids[31]));
+            assert!(state.cancelled_before_start.contains(&ids[32]));
+        }
+        // Even after overflow, a late Start for a recently cancelled ID
+        // must fail before it can load weights or create a scratch recording.
+        assert!(SttJobGuard::start(&ids[1]).is_err());
+        assert!(SttJobGuard::start(&ids[32]).is_err());
+        {
+            let mut state = stt_job_state().lock().unwrap();
+            state.cancelled_before_start.clear();
+            state.cancelled_before_start_order.clear();
+        }
     }
 
     #[test]
