@@ -60,7 +60,9 @@ def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
 
     sample_rate = report["sample_rate_hz"]
     frames = report["frames"]
-    if sample_rate not in (8_000, 16_000, 24_000, 48_000) or frames > sample_rate * MAX_STT_SECONDS:
+    # Preserve ordinary 44.1 kHz and 32 kHz WAV exports; the strict RIFF
+    # validator already handles these PCM rates without any resampling.
+    if sample_rate not in (8_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000) or frames > sample_rate * MAX_STT_SECONDS:
         raise ValueError("Use mono PCM16 WAV audio of 60 seconds or less.")
     hints = report["level_hints"]
     quiet = bool(hints["near_silence_hint"])
