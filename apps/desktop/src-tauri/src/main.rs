@@ -2734,6 +2734,15 @@ mod tests {
             unsupported["frames"] = json!(rate);
             assert!(validate_stt_wav_report(&unsupported).is_err());
         }
+        for rate in [8_000_u64, 44_100, 48_000] {
+            let mut shortest = good.clone();
+            shortest["sample_rate"] = json!(rate);
+            shortest["frames"] = json!(1);
+            shortest["duration_seconds"] = json!(1.0 / rate as f64);
+            assert_eq!(validate_stt_wav_report(&shortest).unwrap(), shortest);
+            shortest["duration_seconds"] = json!(0.0);
+            assert!(validate_stt_wav_report(&shortest).is_err());
+        }
         let mut invalid = good.clone();
         invalid["signal_review_required"] = json!(false);
         assert!(validate_stt_wav_report(&invalid).is_err());
