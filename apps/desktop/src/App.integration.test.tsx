@@ -258,6 +258,60 @@ describe("consented short microphone to Hindi transcript", () => {
     expect(document.body.textContent).not.toContain(secret);
   });
 
+  it("keeps a completed early microphone capture ready when startup resolves afterward", async () => {
+    const discard = vi.fn();
+    mocks.microphone.mockImplementationOnce(async (completed: (wav: string) => void) => {
+      completed("UklGRi4AAABXQVZF");
+      return { stop: vi.fn(), discard };
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await screen.findByRole("button", { name: "Transcribe recorded Hindi offline" });
+    expect(screen.queryByText("Microphone is recording now.")).toBeNull();
+    expect(screen.getByText(/Microphone capture stopped/)).toBeTruthy();
+    expect(discard).toHaveBeenCalledOnce();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+  });
+
+  it("does not revive recording after a device failure before startup settles", async () => {
+    const discard = vi.fn();
+    mocks.microphone.mockImplementationOnce(async (
+      _completed: (wav: string) => void,
+      failed: (code: string) => void,
+    ) => {
+      failed("device_disconnected");
+      return { stop: vi.fn(), discard };
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await screen.findByText(/Microphone input disconnected during recording/);
+    await waitFor(() => expect(discard).toHaveBeenCalledOnce());
+    expect(screen.queryByText("Microphone is recording now.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Transcribe recorded Hindi offline" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Start microphone recording" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_microphone_wav", expect.anything());
+  });
+
+  it("preserves fixed interruption guidance when startup rejects after the callback", async () => {
+    const privateData = "C:\\private\\microphone-secret";
+    mocks.microphone.mockImplementationOnce(async (
+      _completed: (wav: string) => void,
+      failed: (code: string) => void,
+    ) => {
+      failed("device_disconnected");
+      throw new Error(privateData);
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: /permission to transcribe/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Start microphone recording" }));
+    await screen.findByText(/Microphone input disconnected during recording/);
+    expect(screen.queryByText(/Microphone startup failed/)).toBeNull();
+    expect(document.body.textContent).not.toContain(privateData);
+    expect(screen.queryByText("Microphone is recording now.")).toBeNull();
+  });
+
   it("cancels an in-flight Windows permission prompt and discards its late session", async () => {
     let finishPermission!: (session: { stop: () => void; discard: () => void }) => void;
     const pending = new Promise<{ stop: () => void; discard: () => void }>(
