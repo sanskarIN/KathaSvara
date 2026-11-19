@@ -76,3 +76,14 @@ def test_v057_publication_disclosures_and_history() -> None:
         assert "Chatterbox" in document and "faster-whisper" in document
     assert "SHA256SUMS.txt" in windows
     assert "NOT TESTED" in windows
+    manual = (ROOT / "docs/qa/windows-v057-stt-manual-acceptance.md").read_text(
+        encoding="utf-8"
+    )
+    assert "NOT STABLE" in manual and "NOT PUBLISHED" in manual
+    assert "NOT TESTED" in manual
+    for marker in ("inspect-desktop-candidate.ps1", "-SttDoctorOnly",
+                   "-VerifyHindiSttWav", "human", "SHA256SUMS.txt"):
+        assert marker.lower() in manual.lower()
+    assert "v0.5.6" in manual
+    assert "windows-v057-stt-manual-acceptance.md" in draft
+    assert "windows-v057-stt-manual-acceptance.md" in gate
