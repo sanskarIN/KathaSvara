@@ -15,12 +15,13 @@ import pytest
 from kathasvara.local_stt import inspect_stt_setup, inspect_stt_wav, transcribe_hindi_wav
 
 
-def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1) -> Path:
+def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1,
+             sample_rate: int = 16_000) -> Path:
     path = root / "spoken.wav"
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(channels)
         wav.setsampwidth(2)
-        wav.setframerate(16000)
+        wav.setframerate(sample_rate)
         # Varying mono PCM16 signal rather than a constant DC-only buffer.
         wav.writeframes((struct.pack("<h", 250) + struct.pack("<h", -250))
                         * (frames * channels // 2)
@@ -36,9 +37,10 @@ def model_folder(root: Path) -> Path:
     return model
 
 
-def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path) -> None:
-    result = inspect_stt_wav(wav_file(tmp_path))
-    assert result["sample_rate"] == 16000
+@pytest.mark.parametrize("rate", [8_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000])
+def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path, rate: int) -> None:
+    result = inspect_stt_wav(wav_file(tmp_path, frames=rate, sample_rate=rate))
+    assert result["sample_rate"] == rate
     assert result["duration_seconds"] == 1.0
     assert result["model_loaded"] is False
     assert result["audio_transcribed"] is False
@@ -46,6 +48,13 @@ def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path) -> None
     assert result["near_silence_hint"] is False
     assert result["dc_only_hint"] is False
     assert result["signal_review_required"] is False
+
+
+@pytest.mark.parametrize("rate", [11_025, 96_000])
+def test_stt_rejects_unsupported_rate_without_loading_a_model(tmp_path: Path, rate: int) -> None:
+    path = wav_file(tmp_path, frames=rate, sample_rate=rate)
+    with pytest.raises(ValueError, match="mono PCM16 WAV audio of 60 seconds"):
+        inspect_stt_wav(path)
 
 
 def test_stt_rejects_invalid_and_oversized_audio(tmp_path: Path) -> None:
@@ -111,10 +120,11 @@ def test_stt_strict_riff_validation_rejects_extra_chunks(tmp_path: Path) -> None
         inspect_stt_wav(path)
 
 
+@pytest.mark.parametrize("rate", [16_000, 44_100])
 def test_offline_asr_uses_local_model_and_real_segment_text(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rate: int,
 ) -> None:
-    audio = wav_file(tmp_path)
+    audio = wav_file(tmp_path, frames=rate, sample_rate=rate)
     folder = model_folder(tmp_path)
     used: list[tuple[str, dict[str, object]]] = []
 
