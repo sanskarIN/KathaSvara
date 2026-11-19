@@ -180,9 +180,12 @@ a user's machine.
    bounded and tested against a direct numerical reference. This improves
    capture responsiveness but does not prove Hindi recognition accuracy.
    An unsupported Web Audio capture graph fails safely and releases
-   microphone tracks. If an already recording input device disconnects or
-   access is revoked, the capture discards partial audio, releases tracks
-   and reports a fixed error instead of presenting an incomplete WAV.
+   microphone tracks. If an input device ends or becomes muted at startup
+   or while recording (for example, after a Windows input interruption),
+   the capture discards partial audio, releases tracks and reports fixed
+   device guidance instead of presenting an incomplete WAV. A mute event
+   is deliberately treated as an interruption, not a resumable recording.
+   No browser-level mute check proves actual Windows device acceptance.
    The completed 16 kHz WAV also receives a **model-free microphone signal
    check** before any transcription is offered. Digital or near-silent input
    (raw RMS at or below -60 dBFS) and DC-only signal are discarded with
