@@ -1199,10 +1199,12 @@ fn validate_stt_wav_report(report: &Value) -> Result<Value, String> {
         .ok_or(STT_WAV_INVALID)?;
     let review = report.get("signal_review_required").and_then(Value::as_bool)
         .ok_or(STT_WAV_INVALID)?;
+    // Unlike the millisecond-rounded generic WAV diagnostic, the STT
+    // worker reports exact frames/rate. Reject contradictory timing claims.
     if !matches!(rate, 8_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000)
         || frames == 0 || frames > rate * 60
         || !duration.is_finite() || duration <= 0.0 || duration > 60.0
-        || (duration - frames as f64 / rate as f64).abs() > 0.002
+        || (duration - frames as f64 / rate as f64).abs() > 0.000_000_1
         || review != (quiet || dc || clipping || pause)
         || report.get("model_loaded") != Some(&Value::Bool(false))
         || report.get("audio_transcribed") != Some(&Value::Bool(false))
@@ -2728,6 +2730,15 @@ mod tests {
             compatible["frames"] = json!(rate);
             assert_eq!(validate_stt_wav_report(&compatible).unwrap(), compatible);
         }
+        // The old 2 ms tolerance would incorrectly accept this rounded
+        // report. A precise fractional frame duration must still pass.
+        let mut rounded = good.clone();
+        rounded["sample_rate"] = json!(44_100);
+        rounded["frames"] = json!(12_345);
+        rounded["duration_seconds"] = json!(0.280);
+        assert!(validate_stt_wav_report(&rounded).is_err());
+        rounded["duration_seconds"] = json!(12_345_f64 / 44_100_f64);
+        assert_eq!(validate_stt_wav_report(&rounded).unwrap(), rounded);
         for rate in [11_025_u64, 96_000] {
             let mut unsupported = good.clone();
             unsupported["sample_rate"] = json!(rate);
