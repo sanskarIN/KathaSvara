@@ -85,5 +85,14 @@ def test_v057_publication_disclosures_and_history() -> None:
                    "-VerifyHindiSttWav", "human", "SHA256SUMS.txt"):
         assert marker.lower() in manual.lower()
     assert "v0.5.6" in manual
+    # Release documentation must not silently drop hardware-only tests for
+    # permission races, expanded PCM file compatibility, or cancel/recovery.
+    for gate in ("D5", "D6", "D7"):
+        assert f"| {gate} |" in manual
+        assert next(line for line in manual.splitlines()
+                    if line.startswith(f"| {gate} |")).endswith("| NOT TESTED |")
+    for marker in ("44.1 kHz", "22.05", "32 kHz", "track becoming muted",
+                   "Python process exit", "consensual Hindi WAV"):
+        assert marker.lower() in manual.lower()
     assert "windows-v057-stt-manual-acceptance.md" in draft
     assert "windows-v057-stt-manual-acceptance.md" in gate
