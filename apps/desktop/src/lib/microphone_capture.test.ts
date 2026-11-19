@@ -131,6 +131,26 @@ describe("private microphone WAV encoding", () => {
     expect(() => classifyMicrophoneSignal(new Uint8Array(44))).toThrow();
   });
 
+  it("rejects swapped RIFF markers and contradictory canonical PCM fields", () => {
+    const valid = encodeMonoPcm16([new Float32Array([0.2, -0.2, 0.3])], 16_000);
+    const mutations: Array<(bytes: Uint8Array, view: DataView) => void> = [
+      bytes => { bytes[0] = 0; },   // RIFF signature
+      bytes => { bytes[8] = 0; },   // WAVE
+      bytes => { bytes[12] = 0; },  // fmt chunk ID
+      bytes => { bytes[36] = 0; },  // data chunk ID
+      (_bytes, view) => view.setUint32(4, 0, true),  // RIFF declared size
+      (_bytes, view) => view.setUint32(16, 18, true), // noncanonical fmt size
+      (_bytes, view) => view.setUint16(20, 3, true), // floating-point format
+      (_bytes, view) => view.setUint32(28, 16_000, true), // wrong byte rate
+      (_bytes, view) => view.setUint16(32, 4, true), // wrong block alignment
+    ];
+    for (const mutate of mutations) {
+      const altered = valid.slice();
+      mutate(altered, new DataView(altered.buffer));
+      expect(() => classifyMicrophoneSignal(altered)).toThrow("Invalid recorded WAV header");
+    }
+  });
+
   it("rejects empty, oversized, inconsistent and invalid input", () => {
     expect(() => encodeMonoPcm16([new Float32Array(0)], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(40 * 16_000)], 16_000)).toThrow();
@@ -241,10 +261,12 @@ describe("microphone Web Audio recording lifecycle", () => {
     audio.sendSamples(new Float32Array(240).fill(0.25));
     const oldHandler = audio.processor.onaudioprocess as (event: AudioProcessingEvent) => void;
     session.discard();
+    const lateOutput = new Float32Array(480).fill(0.75);
     oldHandler({
       inputBuffer: { getChannelData: () => new Float32Array(480).fill(0.5) },
-      outputBuffer: { getChannelData: () => new Float32Array(480) },
+      outputBuffer: { getChannelData: () => lateOutput },
     } as unknown as AudioProcessingEvent);
+    expect(Array.from(lateOutput).every(value => value === 0)).toBe(true);
     session.stop();
     await Promise.resolve();
     expect(completed).not.toHaveBeenCalled();
