@@ -150,6 +150,10 @@ includes common 44.1 kHz WAV recordings without a separate conversion step.
 Browser microphone captures are still normalized to 16 kHz PCM16 WAV before
 handoff. These accepted input rates do not imply that a multilingual model
 is installed or that Hindi recognition succeeds on actual speech.
+The STT signal probe returns precise frame-based durations, even below one
+millisecond, rather than millisecond-rounded diagnostic values. The Rust
+bridge and React independently verify the duration matches the reported
+sample rate and frame count before displaying a signal result.
 Larger/multichannel/compressed recordings must be converted externally with
 trusted local tooling. Paths remain session-local and are never displayed in
 UI status. Input audio is never uploaded by KathaSvara, and no transcript is
