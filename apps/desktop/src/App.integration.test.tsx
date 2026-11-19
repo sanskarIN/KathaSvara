@@ -400,7 +400,13 @@ describe("model-free selected WAV signal preflight", () => {
     mocks.open.mockResolvedValueOnce(path);
     mocks.invoke.mockImplementation(async (name: string) => {
       if (name === "probe_stt_wav") {
-        return { ...good, sample_rate: 44100, frames: 1, duration_seconds: 1 / 44100 };
+        return {
+          ...good, sample_rate: 44100, frames: 1,
+          duration_seconds: 1 / 44100,
+          // With one positive sample, the real signal probe reports DC-only,
+          // so the UI may inspect it but must not offer recognition.
+          dc_only_hint: true, signal_review_required: true,
+        };
       }
       throw new Error("No model should run during a one-frame WAV probe");
     });
@@ -408,7 +414,7 @@ describe("model-free selected WAV signal preflight", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
     await screen.findByText(/WAV: Selected privately/);
     fireEvent.click(screen.getByRole("button", { name: "Check selected WAV signal (no model)" }));
-    await screen.findByText(/Readable PCM16 audio/);
+    await screen.findByText(/No usable signal detected/);
     expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
     expect(document.body.textContent).not.toContain(path);
   });
