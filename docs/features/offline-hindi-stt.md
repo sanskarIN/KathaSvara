@@ -143,8 +143,13 @@ The fingerprint remains internal and is not added to public setup results.
 
 The first post-v0.5.6 STT development change supported an **existing file** only.
 Later development added a short microphone capture path with
-explicit permission and a separate transcription action. It requires **mono, 16-bit PCM WAV**, sample rate 8, 16, 24 or
-48 kHz, duration **1 frame to 60 seconds**, and size **44 bytes to 6 MiB**.
+explicit permission and a separate transcription action. User-selected audio
+must be **mono, 16-bit PCM WAV** at 8, 16, 22.05, 24, 32, 44.1 or 48 kHz,
+duration **1 frame to 60 seconds**, and size **44 bytes to 6 MiB**. This
+includes common 44.1 kHz WAV recordings without a separate conversion step.
+Browser microphone captures are still normalized to 16 kHz PCM16 WAV before
+handoff. These accepted input rates do not imply that a multilingual model
+is installed or that Hindi recognition succeeds on actual speech.
 Larger/multichannel/compressed recordings must be converted externally with
 trusted local tooling. Paths remain session-local and are never displayed in
 UI status. Input audio is never uploaded by KathaSvara, and no transcript is
