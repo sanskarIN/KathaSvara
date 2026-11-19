@@ -71,7 +71,8 @@ function isConsistentSttWavReport(report: SttWavReport): boolean {
     && report.frames > 0 && report.frames <= rate * 60
     && Number.isFinite(report.duration_seconds)
     && report.duration_seconds > 0 && report.duration_seconds <= 60
-    && Math.abs(report.duration_seconds - report.frames / rate) <= 0.002
+    // The STT worker returns precise frames/rate, not rounded milliseconds.
+    && Math.abs(report.duration_seconds - report.frames / rate) <= 0.0000001
     && typeof report.near_silence_hint === "boolean"
     && typeof report.dc_only_hint === "boolean"
     && typeof report.possible_clipping_hint === "boolean"
