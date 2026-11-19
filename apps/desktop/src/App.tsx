@@ -66,7 +66,7 @@ type SttWavReport = {
 function isConsistentSttWavReport(report: SttWavReport): boolean {
   if (typeof report !== "object" || report === null) return false;
   const rate = report.sample_rate;
-  return [8000, 16000, 24000, 48000].includes(rate)
+  return [8000, 16000, 22050, 24000, 32000, 44100, 48000].includes(rate)
     && Number.isSafeInteger(report.frames)
     && report.frames > 0 && report.frames <= rate * 60
     && Number.isFinite(report.duration_seconds)
