@@ -582,7 +582,10 @@ describe("local offline Hindi speech to text", () => {
 
 
 
-  it.each([0x80, 0x061c, 0x200e, 0x200f, 0x202e, 0x2066, 0x2069])(
+  it.each([
+    0x80, 0x00ad, 0x034f, 0x061c, 0x200b, 0x200e, 0x200f,
+    0x202e, 0x2060, 0x2066, 0x2069, 0x206a, 0x206f, 0xfeff,
+  ])(
     "rejects invisible native transcript control U+%s before review", async codePoint => {
       const tainted = "नमस्ते" + String.fromCodePoint(codePoint) + "भारत";
       mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
@@ -651,7 +654,7 @@ describe("local offline Hindi speech to text", () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks unsafe pasted direction overrides in edited Hindi review, not just model output", async () => {
+  it("blocks invisible pasted formatting in edited Hindi review, not just model output", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\spoken.wav")
       .mockResolvedValueOnce("C:\\private\\multilingual-model");
     mocks.invoke.mockResolvedValueOnce(valid);
@@ -667,7 +670,8 @@ describe("local offline Hindi speech to text", () => {
     const copy = screen.getByRole("button", { name: "Use reviewed text in story editor" }) as HTMLButtonElement;
     fireEvent.click(reviewed);
     expect(copy.disabled).toBe(false);
-    const unsafe = "नमस्ते" + String.fromCodePoint(0x202e) + "भारत";
+    const unsafe = "नमस्ते" + String.fromCodePoint(0x202e) +
+      "भारत" + String.fromCodePoint(0x200b) + String.fromCodePoint(0xfeff);
     fireEvent.change(draft, { target: { value: unsafe } });
     expect(reviewed.checked).toBe(false);
     expect(reviewed.disabled).toBe(true);
