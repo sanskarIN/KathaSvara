@@ -751,6 +751,9 @@ export default function App() {
     const revision = ++micRevision.current;
     const controller = new AbortController();
     micStartup.current = controller;
+    // A capture may stop, disconnect, or fail while the Web Audio startup
+    // promise is still settling. Never revive a retired microphone session.
+    let settledDuringStartup = false;
     setMicWav(null);
     setMicGuidance("Requesting microphone access. Windows may ask for permission.");
     setMicStatus("requesting");
@@ -758,6 +761,7 @@ export default function App() {
       const recording = await beginMicrophoneCapture(
         (wav) => {
           if (revision !== micRevision.current) return;
+          settledDuringStartup = true;
           if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(wav);
@@ -766,6 +770,7 @@ export default function App() {
         },
         (code) => {
           if (revision !== micRevision.current) return;
+          settledDuringStartup = true;
           if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(null);
@@ -776,7 +781,11 @@ export default function App() {
         },
         controller.signal,
       );
-      if (revision !== micRevision.current || controller.signal.aborted) {
+      if (revision !== micRevision.current || controller.signal.aborted ||
+          settledDuringStartup) {
+        // A callback can complete before a delayed startup promise settles.
+        // The callback already chose "ready" or safe failure; discard only
+        // the retired capture handle, never overwrite that UI decision.
         recording.discard();
         if (micStartup.current === controller) micStartup.current = null;
         return;
@@ -786,7 +795,8 @@ export default function App() {
       setMicGuidance("Microphone recording is active. Stop when finished (30-second maximum).");
     } catch (error) {
       if (micStartup.current === controller) micStartup.current = null;
-      if (revision === micRevision.current && !controller.signal.aborted) {
+      if (revision === micRevision.current && !controller.signal.aborted &&
+          !settledDuringStartup) {
         setMicStatus("idle");
         // Only show a fixed message selected by the standardized DOMException
         // name, never an OS/WebView exception message or private device ID.
