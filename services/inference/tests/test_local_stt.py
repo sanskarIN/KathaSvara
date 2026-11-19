@@ -309,3 +309,37 @@ def test_stt_setup_reports_absent_package_or_model_without_private_paths(
     assert report["network_used"] is False
     assert "private" not in str(report) and "secret-model" not in str(report)
     assert report["next_action_code"] in {"select_python_311", "install_stt_extra"}
+
+@pytest.mark.parametrize(("segment_lengths", "allowed"), [
+    ((8000,), True),
+    ((4000, 3999), True),  # One actual joining space: exactly 8000 chars.
+    ((4000, 4000), False),  # One joining space makes 8001.
+    ((8001,), False),
+    ((4000, 0, 3999), True),  # Empty segments add no separator.
+])
+def test_transcript_limit_counts_only_emitted_text_and_spaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    segment_lengths: tuple[int, ...], allowed: bool,
+) -> None:
+    """Prevent off-by-one rejection of valid Hindi at the review limit."""
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    texts = ["क" * count for count in segment_lengths]
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
+            return [SimpleNamespace(text=text) for text in texts], None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    if allowed:
+        result = transcribe_hindi_wav(str(audio), str(folder))
+        assert result["text"] == " ".join(text for text in texts if text)
+        assert len(result["text"]) == 8000
+        assert result["network_used"] is False
+        assert result["human_review_required"] is True
+    else:
+        with pytest.raises(ValueError, match="8000-character review limit"):
+            transcribe_hindi_wav(str(audio), str(folder))
