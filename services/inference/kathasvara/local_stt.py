@@ -72,7 +72,10 @@ def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
     public_report: dict[str, object] = {
         "sample_rate": sample_rate,
         "frames": frames,
-        "duration_seconds": report["duration_seconds"],
+        # Shared WAV inspection rounds diagnostic seconds to three decimals.
+        # Preserve sub-millisecond one-frame recordings here, otherwise the
+        # native IPC rejects a valid short PCM16 WAV as zero-duration.
+        "duration_seconds": frames / sample_rate,
         "near_silence_hint": quiet,
         "dc_only_hint": dc_only,
         "possible_clipping_hint": clipping,
