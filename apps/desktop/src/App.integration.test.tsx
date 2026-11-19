@@ -373,6 +373,28 @@ describe("model-free selected WAV signal preflight", () => {
     expect(screen.getByText(/No model loaded/)).toBeTruthy();
   });
 
+  it.each([22050, 32000, 44100])(
+    "accepts a consistent %i Hz selected-WAV probe without a model load", async rate => {
+      const selectedWav = "C:\\private\\spoken.wav";
+      mocks.open.mockResolvedValueOnce(selectedWav);
+      mocks.invoke.mockImplementation(async (name: string) => {
+        if (name === "probe_stt_wav") {
+          return { ...good, sample_rate: rate, frames: rate, duration_seconds: 1 };
+        }
+        throw new Error("No speech model should load during WAV inspection");
+      });
+      openSettings();
+      fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+      await screen.findByText(/WAV: Selected privately/);
+      fireEvent.click(screen.getByRole("button", { name: "Check selected WAV signal (no model)" }));
+      await screen.findByText(/Readable PCM16 audio/);
+      expect(screen.getByText(new RegExp(rate + " Hz"))).toBeTruthy();
+      expect(mocks.invoke).toHaveBeenCalledWith("probe_stt_wav", { wavPath: selectedWav });
+      expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+      expect(document.body.textContent).not.toContain(selectedWav);
+    },
+  );
+
   it("blocks transcription of a silent WAV even with local model and consent", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\silent.wav")
       .mockResolvedValueOnce("C:\\private\\offline-model");
