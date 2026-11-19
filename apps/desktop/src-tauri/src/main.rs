@@ -1199,7 +1199,7 @@ fn validate_stt_wav_report(report: &Value) -> Result<Value, String> {
         .ok_or(STT_WAV_INVALID)?;
     let review = report.get("signal_review_required").and_then(Value::as_bool)
         .ok_or(STT_WAV_INVALID)?;
-    if !matches!(rate, 8_000 | 16_000 | 24_000 | 48_000)
+    if !matches!(rate, 8_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000)
         || frames == 0 || frames > rate * 60
         || !duration.is_finite() || duration <= 0.0 || duration > 60.0
         || (duration - frames as f64 / rate as f64).abs() > 0.002
@@ -2722,6 +2722,18 @@ mod tests {
             "model_loaded": false, "audio_transcribed": false, "network_used": false,
         });
         assert_eq!(validate_stt_wav_report(&good).unwrap(), good);
+        for rate in [8_000_u64, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000] {
+            let mut compatible = good.clone();
+            compatible["sample_rate"] = json!(rate);
+            compatible["frames"] = json!(rate);
+            assert_eq!(validate_stt_wav_report(&compatible).unwrap(), compatible);
+        }
+        for rate in [11_025_u64, 96_000] {
+            let mut unsupported = good.clone();
+            unsupported["sample_rate"] = json!(rate);
+            unsupported["frames"] = json!(rate);
+            assert!(validate_stt_wav_report(&unsupported).is_err());
+        }
         let mut invalid = good.clone();
         invalid["signal_review_required"] = json!(false);
         assert!(validate_stt_wav_report(&invalid).is_err());
