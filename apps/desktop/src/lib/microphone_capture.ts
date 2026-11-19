@@ -250,14 +250,17 @@ export async function beginMicrophoneCapture(
   let received = 0;
   let samples: Float32Array | null = null;
   let onAbort: (() => void) | null = null;
-  let onTrackEnded: (() => void) | null = null;
+  let onTrackInterrupted: (() => void) | null = null;
 
   const release = () => {
     if (onAbort) signal?.removeEventListener("abort", onAbort);
     onAbort = null;
-    if (onTrackEnded) {
-      for (const track of stream.getTracks()) track.removeEventListener("ended", onTrackEnded);
-      onTrackEnded = null;
+    if (onTrackInterrupted) {
+      for (const track of stream.getTracks()) {
+        track.removeEventListener("ended", onTrackInterrupted);
+        track.removeEventListener("mute", onTrackInterrupted);
+      }
+      onTrackInterrupted = null;
     }
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
@@ -361,18 +364,23 @@ export async function beginMicrophoneCapture(
     const tracks = stream.getTracks();
     // A device can vanish or Windows can revoke capture while the UI still
     // shows "recording". Never hand a stale/partial WAV to transcription.
-    if (tracks.some(track => track.readyState === "ended")) {
-      throw new Error("Microphone device ended during startup.");
+    if (tracks.some(track => track.readyState === "ended" || track.muted)) {
+      throw new Error("Microphone device unavailable during startup.");
     }
-    onTrackEnded = () => {
+    onTrackInterrupted = () => {
       if (stopped) return;
+      // A muted capture device may return plausible partial PCM before the
+      // operating system revokes its input. Never submit that partial WAV.
       handle.discard();
       failed("device_disconnected");
     };
-    for (const track of tracks) track.addEventListener("ended", onTrackEnded);
-    // Catch a track that ended in the short gap before listeners attached.
-    if (tracks.some(track => track.readyState === "ended")) {
-      throw new Error("Microphone device ended during startup.");
+    for (const track of tracks) {
+      track.addEventListener("ended", onTrackInterrupted);
+      track.addEventListener("mute", onTrackInterrupted);
+    }
+    // Catch an ending or mute in the gap before listeners were attached.
+    if (tracks.some(track => track.readyState === "ended" || track.muted)) {
+      throw new Error("Microphone device unavailable during startup.");
     }
     timer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
     return handle;
