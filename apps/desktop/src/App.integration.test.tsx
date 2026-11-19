@@ -395,6 +395,24 @@ describe("model-free selected WAV signal preflight", () => {
     },
   );
 
+  it("accepts the exact positive duration of a one-frame 44.1 kHz WAV probe", async () => {
+    const path = "C:\\private\\one-frame.wav";
+    mocks.open.mockResolvedValueOnce(path);
+    mocks.invoke.mockImplementation(async (name: string) => {
+      if (name === "probe_stt_wav") {
+        return { ...good, sample_rate: 44100, frames: 1, duration_seconds: 1 / 44100 };
+      }
+      throw new Error("No model should run during a one-frame WAV probe");
+    });
+    openSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Select Hindi WAV" }));
+    await screen.findByText(/WAV: Selected privately/);
+    fireEvent.click(screen.getByRole("button", { name: "Check selected WAV signal (no model)" }));
+    await screen.findByText(/Readable PCM16 audio/);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transcribe_local_wav", expect.anything());
+    expect(document.body.textContent).not.toContain(path);
+  });
+
   it("blocks transcription of a silent WAV even with local model and consent", async () => {
     mocks.open.mockResolvedValueOnce("C:\\private\\silent.wav")
       .mockResolvedValueOnce("C:\\private\\offline-model");
