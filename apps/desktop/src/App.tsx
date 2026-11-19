@@ -1073,7 +1073,9 @@ export default function App() {
     const text = sttReviewDraft.trim();
     if (!sttConsent || !sttResult?.speech_detected || !sttReviewConfirmed ||
         sttWorking || validateText(text) !== null ||
-        hasUnsafeSttTextControls(text)) return;
+        // Inspect the raw draft before trim(): trim() removes U+FEFF,
+        // which must not bypass this independent click-time integrity gate.
+        hasUnsafeSttTextControls(sttReviewDraft)) return;
     if (project.text.trim() && !window.confirm(
       "Replace the current story editor text with your reviewed transcription? Save your story first.",
     )) return;
@@ -1714,7 +1716,7 @@ export default function App() {
                     {hasUnsafeSttTextControls(sttReviewDraft) && (
                       <div>
                         <p className="helper" role="status">The transcript contains invisible or unsupported
-                          text-direction controls. Remove those characters before confirming your review.</p>
+                          formatting controls. Remove those characters before confirming your review.</p>
                         <button className="secondary-button"
                           onClick={() => {
                             // User-directed repair only: never rewrite captured/model text
