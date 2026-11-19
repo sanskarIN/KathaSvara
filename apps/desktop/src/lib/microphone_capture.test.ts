@@ -417,7 +417,8 @@ describe("microphone Web Audio recording lifecycle", () => {
     await Promise.resolve();
     expect(mutedOutput.every(sample => sample === 0)).toBe(true);
     expect(completed).not.toHaveBeenCalled();
-    expect(failed).toHaveBeenCalledExactlyOnceWith("device_disconnected");
+    expect(failed).toHaveBeenCalledOnce();
+    expect(failed).toHaveBeenCalledWith("device_disconnected");
     expect(audio.track.stop).toHaveBeenCalledOnce();
     expect(audio.track.removeEventListener).toHaveBeenCalledWith("mute", expect.any(Function));
     expect(audio.processor.disconnect).toHaveBeenCalledOnce();
