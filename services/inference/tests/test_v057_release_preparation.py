@@ -77,6 +77,10 @@ def test_v057_publication_disclosures_and_history() -> None:
     assert "DRAFT — NOT PUBLISHED" in draft
     assert "DRAFT — NOT PUBLISHED" in gate
     assert "DRAFT — NOT PUBLISHED" not in release
+    # The same published-notes file is used verbatim by gh release create.
+    # No draft-only self-description should survive into the public release.
+    assert "proposed copy" not in release.lower()
+    assert "not proof of actual GitHub publication" not in release.lower()
     for document in (draft, release, windows):
         assert "NOT A COMPLETE INSTALLER" in document
         assert "Python 3.11" in document
