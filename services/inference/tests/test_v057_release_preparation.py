@@ -36,8 +36,15 @@ def test_v057_release_manual_exact_sha_and_predecessor_guards() -> None:
     )
     prep = jobs.partition("\n  prepare:")[2].partition("\n  python:")[0]
     publish = jobs.partition("\n  publish:")[2]
+    security = jobs.partition("\n  frontend-security:")[2].partition("\n  frontend:")[0]
+    assert security
+    assert "needs: prepare" in security
+    assert "ref: ${{ needs.prepare.outputs.sha }}" in security
+    assert "npm ci --no-audit --no-fund" in security
+    assert re.search(r"(?m)^        run: npm audit --audit-level=high$", security)
+    assert "frontend-security" in publish.partition("\n    needs: [")[2].split("]", 1)[0]
     assert prep and publish
-    for item in ("prepare", "python", "frontend", "rust-windows", "windows-python-lock",
+    for item in ("prepare", "python", "frontend", "frontend-security", "rust-windows", "windows-python-lock",
                  "windows-exe", "publish"):
         assert re.search(rf"(?m)^  {item}:$", jobs)
     for block in (prep, publish):
