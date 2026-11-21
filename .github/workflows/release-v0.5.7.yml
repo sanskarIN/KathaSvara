@@ -10,6 +10,11 @@ on:
         description: "Exact 40-character commit SHA at the tip of main"
         required: true
         type: string
+      publish_release:
+        description: "Publish prerelease after checks (false runs validation only)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -189,7 +194,9 @@ jobs:
 
   publish:
     needs: [prepare, python, frontend, rust-windows, windows-python-lock, windows-exe]
-    if: ${{ success() }}
+    # Fail closed: an ordinary manual run validates source and produces a
+    # disposable unsigned candidate artifact but cannot create a release.
+    if: ${{ success() && inputs.publish_release == true }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
