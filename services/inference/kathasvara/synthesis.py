@@ -33,6 +33,10 @@ def synthesize(
         raise ValueError("Output must be an absolute .wav filename.")
     if output.exists():
         raise FileExistsError("Refusing to overwrite existing audio.")
+    # Split and validate final Hindi writing units before loading optional
+    # audio libraries or initializing the potentially expensive TTS model.
+    # Snapshot the chunks once: model loading cannot change this input plan.
+    speech_chunks = tuple(split_for_engine(validated))
     try:
         import numpy as np
         import soundfile as sf
@@ -54,7 +58,7 @@ def synthesize(
     silence = np.zeros(int(rate * 0.14), dtype=np.float32)
     chunks = 0
     with StreamingWav(output, rate, sf, rate * 20 * 60) as writer:
-        for chunk in split_for_engine(validated):
+        for chunk in speech_chunks:
             audio = adapter.generate(chunk, settings)
             if hasattr(audio, "detach"):
                 audio = audio.detach().cpu().numpy()

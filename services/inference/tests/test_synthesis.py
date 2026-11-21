@@ -117,3 +117,53 @@ def test_inference_does_not_publish_silent_pcm(
         synthesize("नमस्कार।", output, VoiceSettings(), SilentEngine())
     assert not output.exists()
     assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_voice_studio_rejects_oversized_written_unit_before_model_load(tmp_path) -> None:
+    """Invalid Hindi must not initialize a potentially downloading TTS model."""
+    class MustNotLoad(FakeEngine):
+        def load(self) -> None:
+            raise AssertionError("Invalid input must fail before model loading")
+
+        def generate(self, text: str, settings: VoiceSettings) -> np.ndarray:
+            raise AssertionError("Invalid input must never reach synthesis")
+
+    output = tmp_path / "invalid-hindi.wav"
+    # A written Hindi unit longer than 280 code points cannot be split safely.
+    invalid_text = "क" + "\u093c" * 280 + "अ"
+    with pytest.raises(ValueError, match="written Hindi character exceeds"):
+        synthesize(invalid_text, output, VoiceSettings(), MustNotLoad())
+    assert not output.exists()
+    assert list(tmp_path.glob("*.partial.wav")) == []
+
+
+def test_voice_studio_chunks_are_planned_once_before_model_load(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Model initialization cannot change or re-run the validated chunk plan."""
+    from kathasvara import synthesis as synthesis_module
+
+    trace: list[str] = []
+    original_split = synthesis_module.split_for_engine
+
+    def trace_split(text: str) -> list[str]:
+        trace.append("split")
+        return original_split(text)
+
+    class TracedEngine(FakeEngine):
+        def load(self) -> None:
+            trace.append("load")
+
+        def generate(self, text: str, settings: VoiceSettings) -> np.ndarray:
+            trace.append("generate:" + text)
+            return super().generate(text, settings)
+
+    monkeypatch.setattr(synthesis_module, "split_for_engine", trace_split)
+    source = "राजा भोज ने कहा। " * 40
+    report = synthesize(source, tmp_path / "planned.wav", VoiceSettings(), TracedEngine())
+    generated = [event.removeprefix("generate:") for event in trace if event.startswith("generate:")]
+    assert trace[:2] == ["split", "load"]
+    assert trace.count("split") == 1
+    assert len(generated) > 1
+    assert generated == original_split(source)
+    assert report["chunks"] == len(generated)
