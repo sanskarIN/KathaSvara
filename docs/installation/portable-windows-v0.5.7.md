@@ -25,7 +25,14 @@ accuracy, and clean-machine usability are NOT TESTED.
 5. Open Settings, select matching Python/source and local STT model/WAV.
    Only record from the microphone after explicit OS/WebView2 permission.
 6. With separate consent, transcribe; compare and correct Hindi text
-   before inserting it into the story editor.
+   before inserting it into the story editor. New WAV/model selection or
+   runtime replacement requires fresh STT consent; hiding the app or
+   leaving Settings discards private unreviewed text. Job-scoped cancel
+   requests stop the matching recognition worker; this has only been
+   exercised by automated tests, NOT on real Windows hardware.
+   The microphone API availability check does not request permission.
+   Explicitly remove unsupported invisible formatting in a reviewed
+   transcript if needed; it will not be silently changed.
 7. For TTS, approve model downloads separately and manually review real
    audio playback, exported WAV and SRT timing.
 
