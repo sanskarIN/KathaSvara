@@ -139,9 +139,22 @@ export function classifyMicrophoneSignal(wav: Uint8Array): MicrophoneSignal {
     throw new Error("Recorded WAV exceeds the microphone limit.");
   }
   const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
-  if (view.getUint32(40, true) !== frames * 2 ||
+  // This is an integrity check on the exact PCM16 format produced above,
+  // not a permissive WAV decoder. Reject a swapped chunk, invalid format,
+  // or contradictory RIFF/byte-rate fields before treating audio as usable.
+  const marker = (offset: number, ascii: string): boolean =>
+    [...ascii].every((letter, index) => wav[offset + index] === letter.charCodeAt(0));
+  if (!marker(0, "RIFF") || !marker(8, "WAVE") ||
+      !marker(12, "fmt ") || !marker(36, "data") ||
+      view.getUint32(4, true) !== wav.byteLength - 8 ||
+      view.getUint32(16, true) !== 16 ||
+      view.getUint16(20, true) !== 1 ||
+      view.getUint16(22, true) !== 1 ||
       view.getUint32(24, true) !== MICROPHONE_RATE ||
-      view.getUint16(22, true) !== 1 || view.getUint16(34, true) !== 16) {
+      view.getUint32(28, true) !== MICROPHONE_RATE * 2 ||
+      view.getUint16(32, true) !== 2 ||
+      view.getUint16(34, true) !== 16 ||
+      view.getUint32(40, true) !== frames * 2) {
     throw new Error("Invalid recorded WAV header.");
   }
   let sampleSum = 0;
@@ -237,14 +250,17 @@ export async function beginMicrophoneCapture(
   let received = 0;
   let samples: Float32Array | null = null;
   let onAbort: (() => void) | null = null;
-  let onTrackEnded: (() => void) | null = null;
+  let onTrackInterrupted: (() => void) | null = null;
 
   const release = () => {
     if (onAbort) signal?.removeEventListener("abort", onAbort);
     onAbort = null;
-    if (onTrackEnded) {
-      for (const track of stream.getTracks()) track.removeEventListener("ended", onTrackEnded);
-      onTrackEnded = null;
+    if (onTrackInterrupted) {
+      for (const track of stream.getTracks()) {
+        track.removeEventListener("ended", onTrackInterrupted);
+        track.removeEventListener("mute", onTrackInterrupted);
+      }
+      onTrackInterrupted = null;
     }
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
@@ -322,19 +338,23 @@ export async function beginMicrophoneCapture(
     source = context.createMediaStreamSource(stream);
     processor = context.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (event) => {
-      if (stopped || !samples) return;
       try {
-        // ScriptProcessor must have an output connection to receive events,
-        // but no recorded sound is ever fed into the speakers.
+        // The ScriptProcessor output must be silence on *every* callback,
+        // including one queued just before stop/discard disconnected the node.
+        // Never forward microphone samples to the speakers.
         event.outputBuffer.getChannelData(0).fill(0);
+        if (stopped || !samples) return;
         const input = event.inputBuffer.getChannelData(0);
         const take = Math.min(input.length, samples.length - received);
         if (take > 0) samples.set(input.subarray(0, take), received);
         received += take;
         if (received >= maxFrames) handle.stop();
       } catch {
-        handle.discard();
-        failed("capture_failed");
+        // A retired callback must not report another error after revocation.
+        if (!stopped) {
+          handle.discard();
+          failed("capture_failed");
+        }
       }
     };
     source.connect(processor);
@@ -344,18 +364,23 @@ export async function beginMicrophoneCapture(
     const tracks = stream.getTracks();
     // A device can vanish or Windows can revoke capture while the UI still
     // shows "recording". Never hand a stale/partial WAV to transcription.
-    if (tracks.some(track => track.readyState === "ended")) {
-      throw new Error("Microphone device ended during startup.");
+    if (tracks.some(track => track.readyState === "ended" || track.muted)) {
+      throw new Error("Microphone device unavailable during startup.");
     }
-    onTrackEnded = () => {
+    onTrackInterrupted = () => {
       if (stopped) return;
+      // A muted capture device may return plausible partial PCM before the
+      // operating system revokes its input. Never submit that partial WAV.
       handle.discard();
       failed("device_disconnected");
     };
-    for (const track of tracks) track.addEventListener("ended", onTrackEnded);
-    // Catch a track that ended in the short gap before listeners attached.
-    if (tracks.some(track => track.readyState === "ended")) {
-      throw new Error("Microphone device ended during startup.");
+    for (const track of tracks) {
+      track.addEventListener("ended", onTrackInterrupted);
+      track.addEventListener("mute", onTrackInterrupted);
+    }
+    // Catch an ending or mute in the gap before listeners were attached.
+    if (tracks.some(track => track.readyState === "ended" || track.muted)) {
+      throw new Error("Microphone device unavailable during startup.");
     }
     timer = setTimeout(() => handle.stop(), MICROPHONE_MAX_SECONDS * 1000);
     return handle;

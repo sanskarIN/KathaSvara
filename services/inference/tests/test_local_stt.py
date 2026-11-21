@@ -15,12 +15,13 @@ import pytest
 from kathasvara.local_stt import inspect_stt_setup, inspect_stt_wav, transcribe_hindi_wav
 
 
-def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1) -> Path:
+def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1,
+             sample_rate: int = 16_000) -> Path:
     path = root / "spoken.wav"
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(channels)
         wav.setsampwidth(2)
-        wav.setframerate(16000)
+        wav.setframerate(sample_rate)
         # Varying mono PCM16 signal rather than a constant DC-only buffer.
         wav.writeframes((struct.pack("<h", 250) + struct.pack("<h", -250))
                         * (frames * channels // 2)
@@ -36,9 +37,10 @@ def model_folder(root: Path) -> Path:
     return model
 
 
-def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path) -> None:
-    result = inspect_stt_wav(wav_file(tmp_path))
-    assert result["sample_rate"] == 16000
+@pytest.mark.parametrize("rate", [8_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000])
+def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path, rate: int) -> None:
+    result = inspect_stt_wav(wav_file(tmp_path, frames=rate, sample_rate=rate))
+    assert result["sample_rate"] == rate
     assert result["duration_seconds"] == 1.0
     assert result["model_loaded"] is False
     assert result["audio_transcribed"] is False
@@ -46,6 +48,26 @@ def test_valid_short_mono_wav_is_inspected_without_model(tmp_path: Path) -> None
     assert result["near_silence_hint"] is False
     assert result["dc_only_hint"] is False
     assert result["signal_review_required"] is False
+
+
+@pytest.mark.parametrize("rate", [11_025, 96_000])
+def test_stt_rejects_unsupported_rate_without_loading_a_model(tmp_path: Path, rate: int) -> None:
+    path = wav_file(tmp_path, frames=rate, sample_rate=rate)
+    with pytest.raises(ValueError, match="mono PCM16 WAV audio of 60 seconds"):
+        inspect_stt_wav(path)
+
+
+@pytest.mark.parametrize("rate", [8_000, 22_050, 44_100, 48_000])
+def test_one_pcm_frame_has_precise_nonzero_duration(tmp_path: Path, rate: int) -> None:
+    # The shared signal inspector rounds milliseconds, but STT's native
+    # contract explicitly allows one frame and needs a positive duration.
+    result = inspect_stt_wav(wav_file(tmp_path, frames=1, sample_rate=rate))
+    assert result["frames"] == 1
+    assert result["sample_rate"] == rate
+    assert result["duration_seconds"] > 0
+    assert result["duration_seconds"] == pytest.approx(1 / rate)
+    assert result["model_loaded"] is False
+    assert result["network_used"] is False
 
 
 def test_stt_rejects_invalid_and_oversized_audio(tmp_path: Path) -> None:
@@ -111,10 +133,11 @@ def test_stt_strict_riff_validation_rejects_extra_chunks(tmp_path: Path) -> None
         inspect_stt_wav(path)
 
 
+@pytest.mark.parametrize("rate", [16_000, 44_100])
 def test_offline_asr_uses_local_model_and_real_segment_text(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rate: int,
 ) -> None:
-    audio = wav_file(tmp_path)
+    audio = wav_file(tmp_path, frames=rate, sample_rate=rate)
     folder = model_folder(tmp_path)
     used: list[tuple[str, dict[str, object]]] = []
 
@@ -204,7 +227,13 @@ def test_missing_model_fails_before_inference(tmp_path: Path) -> None:
         transcribe_hindi_wav(str(path), str(tmp_path / "missing"))
 
 
-def test_rejects_untrusted_model_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("code_point", [
+    0x00, 0x80, 0x00AD, 0x034F, 0x061C, 0x200B, 0x200E, 0x200F,
+    0x202A, 0x202E, 0x2060, 0x2066, 0x2069, 0x206A, 0x206F, 0xFEFF,
+])
+def test_rejects_untrusted_model_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code_point: int,
+) -> None:
     path = wav_file(tmp_path)
     model = model_folder(tmp_path)
 
@@ -213,11 +242,32 @@ def test_rejects_untrusted_model_results(tmp_path: Path, monkeypatch: pytest.Mon
             self.model = SimpleNamespace(is_multilingual=True)
 
         def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
-            return [SimpleNamespace(text="secret\x00path")], None
+            return [SimpleNamespace(text="नमस्ते" + chr(code_point) + "भारत")], None
 
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
     with pytest.raises(ValueError, match="invalid transcription"):
         transcribe_hindi_wav(str(path), str(model))
+
+
+def test_indic_joiners_and_devanagari_marks_remain_valid_in_transcripts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legitimate Hindi conjuncts need ZWNJ/ZWJ; do not over-sanitize them."""
+    path = wav_file(tmp_path)
+    model = model_folder(tmp_path)
+    words = "क्" + chr(0x200D) + "षत्रिय क्" + chr(0x200C) + "ष हिंदी"
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
+            return [SimpleNamespace(text=words)], None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    result = transcribe_hindi_wav(str(path), str(model))
+    assert result["text"] == words
+    assert result["speech_detected"] is True
 
 
 def test_stt_setup_probe_does_not_load_model_or_use_network(
@@ -283,3 +333,37 @@ def test_stt_setup_reports_absent_package_or_model_without_private_paths(
     assert report["network_used"] is False
     assert "private" not in str(report) and "secret-model" not in str(report)
     assert report["next_action_code"] in {"select_python_311", "install_stt_extra"}
+
+@pytest.mark.parametrize(("segment_lengths", "allowed"), [
+    ((8000,), True),
+    ((4000, 3999), True),  # One actual joining space: exactly 8000 chars.
+    ((4000, 4000), False),  # One joining space makes 8001.
+    ((8001,), False),
+    ((4000, 0, 3999), True),  # Empty segments add no separator.
+])
+def test_transcript_limit_counts_only_emitted_text_and_spaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    segment_lengths: tuple[int, ...], allowed: bool,
+) -> None:
+    """Prevent off-by-one rejection of valid Hindi at the review limit."""
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    texts = ["क" * count for count in segment_lengths]
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, *_: object, **__: object) -> tuple[list[object], None]:
+            return [SimpleNamespace(text=text) for text in texts], None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    if allowed:
+        result = transcribe_hindi_wav(str(audio), str(folder))
+        assert result["text"] == " ".join(text for text in texts if text)
+        assert len(result["text"]) == 8000
+        assert result["network_used"] is False
+        assert result["human_review_required"] is True
+    else:
+        with pytest.raises(ValueError, match="8000-character review limit"):
+            transcribe_hindi_wav(str(audio), str(folder))

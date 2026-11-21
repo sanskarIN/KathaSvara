@@ -111,12 +111,31 @@ jobs:
           cache-dependency-path: apps/desktop/package-lock.json
       - name: Install frontend packages
         run: npm ci --no-audit --no-fund
-      - name: Audit complete locked npm dependency graph (high+)
-        run: npm audit --audit-level=high
       - name: React unit and mocked desktop interaction tests (no real audio)
         run: npm run test
       - name: Typecheck and build
         run: npm run build
+
+  frontend-security:
+    name: Frontend dependency audit (high+)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install exact locked frontend dependencies
+        run: npm ci --no-audit --no-fund
+      # Keep this hard-failing while any high/critical advisory is unresolved.
+      # A security finding must not prevent the independent functional tests
+      # from reporting actionable results in the separate frontend job.
+      - name: Audit complete locked npm dependency graph (high+)
+        run: npm audit --audit-level=high
 
   rust-windows:
     name: Windows Rust desktop checks

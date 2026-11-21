@@ -60,7 +60,9 @@ def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
 
     sample_rate = report["sample_rate_hz"]
     frames = report["frames"]
-    if sample_rate not in (8_000, 16_000, 24_000, 48_000) or frames > sample_rate * MAX_STT_SECONDS:
+    # Preserve ordinary 44.1 kHz and 32 kHz WAV exports; the strict RIFF
+    # validator already handles these PCM rates without any resampling.
+    if sample_rate not in (8_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000) or frames > sample_rate * MAX_STT_SECONDS:
         raise ValueError("Use mono PCM16 WAV audio of 60 seconds or less.")
     hints = report["level_hints"]
     quiet = bool(hints["near_silence_hint"])
@@ -70,7 +72,10 @@ def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
     public_report: dict[str, object] = {
         "sample_rate": sample_rate,
         "frames": frames,
-        "duration_seconds": report["duration_seconds"],
+        # Shared WAV inspection rounds diagnostic seconds to three decimals.
+        # Preserve sub-millisecond one-frame recordings here, otherwise the
+        # native IPC rejects a valid short PCM16 WAV as zero-duration.
+        "duration_seconds": frames / sample_rate,
         "near_silence_hint": quiet,
         "dc_only_hint": dc_only,
         "possible_clipping_hint": clipping,
@@ -164,6 +169,25 @@ def inspect_stt_setup(model_path: str | None = None) -> dict[str, object]:
     }
 
 
+def _contains_untrusted_transcript_control(text: str) -> bool:
+    """Reject invisible direction/format controls while preserving Indic joiners.
+
+    Whisper output is untrusted text that may be reviewed/copied to an editor.
+    Devanagari ZWNJ/ZWJ (U+200C/U+200D) are intentionally allowed; Unicode
+    bidi controls and non-rendering format marks are not necessary for Hindi
+    transcription and can make displayed words differ from stored text.
+    """
+    for char in text:
+        point = ord(char)
+        if (point < 32 and char not in "\n\t") or 0x7F <= point <= 0x9F:
+            return True
+        if point in (0x00AD, 0x034F, 0x061C, 0x200B, 0x200E, 0x200F, 0xFEFF):
+            return True
+        if 0x202A <= point <= 0x202E or 0x2060 <= point <= 0x206F:
+            return True
+    return False
+
+
 def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
     """Run actual offline ASR; never return a synthetic or placeholder transcript."""
     if not isinstance(wav_path, str) or not isinstance(model_path, str):
@@ -202,13 +226,17 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
             if index >= 200:
                 raise ValueError("Transcription exceeds the 200-segment review limit.")
             text = segment.text
-            if not isinstance(text, str) or any(ord(ch) < 32 and ch not in "\n\t" for ch in text):
+            if not isinstance(text, str) or _contains_untrusted_transcript_control(text):
                 raise ValueError("Speech model produced invalid transcription text.")
             cleaned = text.strip()
             if cleaned:
-                length += len(cleaned) + 1
-                if length > MAX_TRANSCRIPT_CHARS:
+                # Count only the separators actually emitted by join(): the
+                # last segment has no trailing space. A valid transcript of
+                # exactly MAX_TRANSCRIPT_CHARS must remain reviewable.
+                extra = len(cleaned) + (1 if pieces else 0)
+                if length + extra > MAX_TRANSCRIPT_CHARS:
                     raise ValueError("Transcription exceeds the 8000-character review limit.")
+                length += extra
                 pieces.append(cleaned)
         _require_unchanged_recording(recording, recording_sha256)
     except (ValueError, TypeError):

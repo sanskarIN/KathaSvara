@@ -5,7 +5,10 @@ import CastStudio from "./CastStudio";
 import { publicDesktopError } from "./lib/public_errors";
 import { publicMicrophoneCaptureFailure, publicMicrophoneStartupError } from "./lib/microphone_errors";
 import { publicSttTranscriptionError } from "./lib/stt_errors";
+import { createSttJobId } from "./lib/stt_jobs";
+import { hasUnsafeSttTextControls, removeUnsafeSttTextControls } from "./lib/stt_text";
 import { beginMicrophoneCapture, MICROPHONE_MAX_SECONDS, type MicrophoneCapture } from "./lib/microphone_capture";
+import { MICROPHONE_API_ADVICE, probeMicrophoneApiAvailability, type MicrophoneApiReport } from "./lib/microphone_readiness";
 import { version as desktopVersion } from "../package.json";
 import { legacyToStoryV2, type StoryV2 } from "./lib/story_v2";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
@@ -63,12 +66,13 @@ type SttWavReport = {
 function isConsistentSttWavReport(report: SttWavReport): boolean {
   if (typeof report !== "object" || report === null) return false;
   const rate = report.sample_rate;
-  return [8000, 16000, 24000, 48000].includes(rate)
+  return [8000, 16000, 22050, 24000, 32000, 44100, 48000].includes(rate)
     && Number.isSafeInteger(report.frames)
     && report.frames > 0 && report.frames <= rate * 60
     && Number.isFinite(report.duration_seconds)
     && report.duration_seconds > 0 && report.duration_seconds <= 60
-    && Math.abs(report.duration_seconds - report.frames / rate) <= 0.002
+    // The STT worker returns precise frames/rate, not rounded milliseconds.
+    && Math.abs(report.duration_seconds - report.frames / rate) <= 0.0000001
     && typeof report.near_silence_hint === "boolean"
     && typeof report.dc_only_hint === "boolean"
     && typeof report.possible_clipping_hint === "boolean"
@@ -87,7 +91,7 @@ type SttResult = {
 };
 function isValidSttResult(value: SttResult): boolean {
   return typeof value?.text === "string" && [...value.text].length <= 8000
-    && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value.text)
+    && !hasUnsafeSttTextControls(value.text)
     && value.language === "hi" && value.engine === "faster-whisper-local"
     && typeof value.duration_seconds === "number"
     && Number.isFinite(value.duration_seconds) && value.duration_seconds > 0
@@ -286,6 +290,9 @@ export default function App() {
   const [sttModelPath, setSttModelPath] = useState<string | null>(null);
   const [sttConsent, setSttConsent] = useState(false);
   const [sttWorking, setSttWorking] = useState(false);
+  const [sttCancelRequested, setSttCancelRequested] = useState(false);
+  const activeSttJobId = useRef<string | null>(null);
+  const sttCancelSentForId = useRef<string | null>(null);
   const [sttChecking, setSttChecking] = useState(false);
   const [sttSetup, setSttSetup] = useState<SttSetupReport | null>(null);
   const [sttWavReport, setSttWavReport] = useState<SttWavReport | null>(null);
@@ -300,6 +307,7 @@ export default function App() {
   const [micStatus, setMicStatus] = useState<"idle" | "requesting" | "recording" | "processing" | "ready">("idle");
   const [micWav, setMicWav] = useState<string | null>(null);
   const [micGuidance, setMicGuidance] = useState<string | null>(null);
+  const [micApiReport, setMicApiReport] = useState<MicrophoneApiReport | null>(null);
   const micSession = useRef<MicrophoneCapture | null>(null);
   // An OS permission prompt or AudioContext.resume can remain pending after
   // consent is withdrawn. Abort startup before it can retain a late stream.
@@ -344,10 +352,9 @@ export default function App() {
       micSession.current = null;
       setMicWav(null);
       setMicStatus("idle");
-      // Navigating away withdraws capture/transcription consent and prevents
-      // an already-running native recognizer from restoring a private draft
-      // to Settings when it eventually finishes. The worker still holds the
-      // busy lock until it actually completes.
+      // Navigation is a privacy revocation: cancel native recognition rather
+      // than merely ignoring its late reply; retain busy lock until exit.
+      requestAutomaticSttCancel();
       sttRevision.current += 1;
       sttWavProbeRevision.current += 1;
       retireSttDraft();
@@ -360,6 +367,8 @@ export default function App() {
 
   useEffect(() => {
     const revoke = () => {
+      // Unmount/close must request cancellation without setting React state.
+      requestAutomaticSttCancel(false);
       micRevision.current += 1;
       micStartup.current?.abort();
       micStartup.current = null;
@@ -369,6 +378,15 @@ export default function App() {
     const visibility = () => {
       if (document.hidden) {
         revoke();
+        // Hidden windows revoke both the UI draft and active native STT.
+        requestAutomaticSttCancel();
+        sttRevision.current += 1;
+        sttWavProbeRevision.current += 1;
+        retireSttDraft();
+        setSttConsent(false);
+        setSttSetup(null);
+        setSttWavReport(null);
+        setSttStatus(null);
         setMicWav(null);
         setMicStatus("idle");
         setMicGuidance("Microphone capture discarded because the window is hidden.");
@@ -648,6 +666,7 @@ export default function App() {
   }
 
   function retireSttAfterRuntimeChange() {
+    requestAutomaticSttCancel();
     // A transcript or a WAV/setup probe belongs to the previous Python
     // runtime and source revision. Changing the runtime must not let a
     // pending recognizer restore old words or keep capture consent active.
@@ -733,6 +752,9 @@ export default function App() {
     const revision = ++micRevision.current;
     const controller = new AbortController();
     micStartup.current = controller;
+    // A capture may stop, disconnect, or fail while the Web Audio startup
+    // promise is still settling. Never revive a retired microphone session.
+    let settledDuringStartup = false;
     setMicWav(null);
     setMicGuidance("Requesting microphone access. Windows may ask for permission.");
     setMicStatus("requesting");
@@ -740,6 +762,7 @@ export default function App() {
       const recording = await beginMicrophoneCapture(
         (wav) => {
           if (revision !== micRevision.current) return;
+          settledDuringStartup = true;
           if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(wav);
@@ -748,6 +771,7 @@ export default function App() {
         },
         (code) => {
           if (revision !== micRevision.current) return;
+          settledDuringStartup = true;
           if (micStartup.current === controller) micStartup.current = null;
           micSession.current = null;
           setMicWav(null);
@@ -758,7 +782,11 @@ export default function App() {
         },
         controller.signal,
       );
-      if (revision !== micRevision.current || controller.signal.aborted) {
+      if (revision !== micRevision.current || controller.signal.aborted ||
+          settledDuringStartup) {
+        // A callback can complete before a delayed startup promise settles.
+        // The callback already chose "ready" or safe failure; discard only
+        // the retired capture handle, never overwrite that UI decision.
         recording.discard();
         if (micStartup.current === controller) micStartup.current = null;
         return;
@@ -768,7 +796,8 @@ export default function App() {
       setMicGuidance("Microphone recording is active. Stop when finished (30-second maximum).");
     } catch (error) {
       if (micStartup.current === controller) micStartup.current = null;
-      if (revision === micRevision.current && !controller.signal.aborted) {
+      if (revision === micRevision.current && !controller.signal.aborted &&
+          !settledDuringStartup) {
         setMicStatus("idle");
         // Only show a fixed message selected by the standardized DOMException
         // name, never an OS/WebView exception message or private device ID.
@@ -788,13 +817,21 @@ export default function App() {
 
   async function transcribeMicrophone() {
     if (!sttConsent || !micWav || !sttModelPath || sttWorking || sttChecking) return;
+    let jobId: string;
+    try { jobId = createSttJobId(); } catch {
+      setSttStatus("Secure local transcription identifiers are unavailable. Update WebView2.");
+      return;
+    }
     const revision = ++sttRevision.current;
+    activeSttJobId.current = jobId;
+    sttCancelSentForId.current = null;
+    setSttCancelRequested(false);
     setSttWorking(true);
     retireSttDraft();
     setSttStatus("Transcribing this locally recorded WAV only after your request.");
     try {
       const result = await invoke<SttResult>("transcribe_microphone_wav", {
-        wavBase64: micWav, modelPath: sttModelPath,
+        wavBase64: micWav, modelPath: sttModelPath, jobId,
       });
       if (revision !== sttRevision.current) return;
       if (!isValidSttResult(result)) {
@@ -812,7 +849,11 @@ export default function App() {
     } finally {
       // Only one native STT worker can be in flight: even a consent change
       // must not make another user action start a second model load.
-      setSttWorking(false);
+      if (activeSttJobId.current === jobId) {
+        activeSttJobId.current = null;
+        setSttWorking(false);
+        setSttCancelRequested(false);
+      }
       // Do not retain microphone WAV in application state after transcription.
       if (revision === sttRevision.current) discardMicrophone();
     }
@@ -830,7 +871,30 @@ export default function App() {
     setSttReviewConfirmed(false);
   }
 
+  function requestAutomaticSttCancel(updateUi = true) {
+    const jobId = activeSttJobId.current;
+    if (!jobId) return;
+    // A hide event first stops capture, then retires the review UI. Ensure
+    // the second call still updates the busy/cancel button without resending
+    // an IPC request for the same job.
+    if (sttCancelSentForId.current === jobId) {
+      if (updateUi) setSttCancelRequested(true);
+      return;
+    }
+    sttCancelSentForId.current = jobId;
+    if (updateUi) setSttCancelRequested(true);
+    // Even if Cancel reaches Rust before a queued Start, its UUID tombstone
+    // blocks an unwanted model load. Private drafts are retired independently.
+    try {
+      void invoke<boolean>("cancel_stt_transcription", { jobId }).catch(() => {});
+    } catch {
+      // Even if the bridge throws synchronously, continue revocation and
+      // keep the UI locked until its original native invocation finishes.
+    }
+  }
+
   function resetSttResult() {
+    requestAutomaticSttCancel();
     discardMicrophone();
     sttRevision.current += 1;
     retireSttDraft();
@@ -844,8 +908,6 @@ export default function App() {
   async function chooseSttWav() {
     if (sttWavChecking || sttChecking || sttWorking) return;
     const revision = ++sttRevision.current;
-    retireSttDraft();
-    setSttStatus(null);
     try {
       const chosen = await open({
         title: "Select a local Hindi recording to transcribe",
@@ -853,10 +915,15 @@ export default function App() {
         filters: [{ name: "Short mono PCM16 WAV", extensions: ["wav"] }],
       });
       if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      // Consent is about this particular recording. Never reuse consent or
+      // a reviewed draft for another file; cancelled dialogs change nothing.
+      discardMicrophone();
+      retireSttDraft();
+      setSttConsent(false);
       sttWavProbeRevision.current += 1;
       setSttWavReport(null);
       setSttWavPath(chosen);
-      setSttStatus("Local WAV selected (private path hidden).");
+      setSttStatus("Local WAV selected (private path hidden). Review this recording and give fresh consent.");
     } catch {
       if (revision === sttRevision.current) {
         setSttStatus("Unable to select a local WAV recording.");
@@ -866,17 +933,20 @@ export default function App() {
 
   async function chooseSttModel() {
     const revision = ++sttRevision.current;
-    retireSttDraft();
-    setSttStatus(null);
-    setSttSetup(null);
     try {
       const chosen = await open({
         title: "Select an existing offline faster-whisper model folder",
         multiple: false, directory: true,
       });
       if (revision !== sttRevision.current || typeof chosen !== "string") return;
+      // A different model may have different runtime/license expectations.
+      // Canceling the picker must not discard an already reviewed draft.
+      discardMicrophone();
+      retireSttDraft();
+      setSttConsent(false);
+      setSttSetup(null);
       setSttModelPath(chosen);
-      setSttStatus("Offline model folder selected (private path hidden).");
+      setSttStatus("Offline model folder selected (private path hidden). Recheck setup and give fresh consent.");
     } catch {
       if (revision === sttRevision.current) {
         setSttStatus("Unable to select the local STT model folder.");
@@ -942,13 +1012,21 @@ export default function App() {
   async function transcribeLocalStt() {
     if (!sttConsent || !sttWavPath || !sttModelPath || sttWorking || sttChecking ||
         sttWavChecking || sttWavReport?.near_silence_hint || sttWavReport?.dc_only_hint) return;
+    let jobId: string;
+    try { jobId = createSttJobId(); } catch {
+      setSttStatus("Secure local transcription identifiers are unavailable. Update WebView2.");
+      return;
+    }
     const revision = ++sttRevision.current;
+    activeSttJobId.current = jobId;
+    sttCancelSentForId.current = null;
+    setSttCancelRequested(false);
     setSttWorking(true);
     retireSttDraft();
     setSttStatus("Transcribing selected Hindi WAV locally. No microphone, upload or model download.");
     try {
       const response = await invoke<SttResult>("transcribe_local_wav", {
-        wavPath: sttWavPath, modelPath: sttModelPath,
+        wavPath: sttWavPath, modelPath: sttModelPath, jobId,
       });
       if (revision !== sttRevision.current) return;
       if (!isValidSttResult(response)) {
@@ -964,9 +1042,38 @@ export default function App() {
         setSttStatus(publicSttTranscriptionError(error, "wav"));
       }
     } finally {
-      // Native recognition is still running after consent changes; only the
-      // actual completion releases the UI lock, while its result stays retired.
-      setSttWorking(false);
+      // Release the UI lock only when the matching native job has exited.
+      // A cancelled/stale result can never revive the private review draft.
+      if (activeSttJobId.current === jobId) {
+        activeSttJobId.current = null;
+        setSttWorking(false);
+        setSttCancelRequested(false);
+      }
+    }
+  }
+
+  async function cancelSttTranscription() {
+    const jobId = activeSttJobId.current;
+    if (!sttWorking || !jobId || sttCancelRequested) return;
+    // Withdraw trust immediately, including for a response racing Cancel.
+    sttRevision.current += 1;
+    retireSttDraft();
+    setSttConsent(false);
+    discardMicrophone();
+    setSttCancelRequested(true);
+    sttCancelSentForId.current = jobId;
+    setSttStatus("Requesting cancellation of local Hindi recognition. The worker remains locked until it exits.");
+    try {
+      const acknowledged = await invoke<boolean>("cancel_stt_transcription", { jobId });
+      if (activeSttJobId.current === jobId) {
+        setSttStatus(acknowledged === true
+          ? "Cancellation sent to the local recognizer. Waiting for the worker to exit."
+          : "The previous recognizer could not be located. Its result will still be discarded.");
+      }
+    } catch {
+      if (activeSttJobId.current === jobId) {
+        setSttStatus("Cancellation could not be confirmed. The result is discarded and the worker remains locked until it exits.");
+      }
     }
   }
 
@@ -976,7 +1083,10 @@ export default function App() {
     // story without explicit review and the existing overwrite prompt.
     const text = sttReviewDraft.trim();
     if (!sttConsent || !sttResult?.speech_detected || !sttReviewConfirmed ||
-        sttWorking || validateText(text) !== null) return;
+        sttWorking || validateText(text) !== null ||
+        // Inspect the raw draft before trim(): trim() removes U+FEFF,
+        // which must not bypass this independent click-time integrity gate.
+        hasUnsafeSttTextControls(sttReviewDraft)) return;
     if (project.text.trim() && !window.confirm(
       "Replace the current story editor text with your reviewed transcription? Save your story first.",
     )) return;
@@ -1500,6 +1610,9 @@ export default function App() {
                     permission or input-device issues without displaying private OS error text.
                     This feature has not yet passed real-device testing.</p>
                   <div className="preview-actions">
+                    <button className="secondary-button" onClick={() => setMicApiReport(probeMicrophoneApiAvailability())}>
+                      Check microphone API availability (no permission)
+                    </button>
                     <button className="secondary-button"
                       disabled={!sttConsent || sttWorking || sttChecking || micStatus !== "idle"}
                       onClick={() => void startMicrophone()}>
@@ -1511,6 +1624,14 @@ export default function App() {
                       onClick={discardMicrophone}>{micStatus === "requesting"
                         ? "Cancel microphone permission request" : "Discard microphone audio"}</button>
                   </div>
+                  {micApiReport && (
+                    <section aria-label="Microphone API readiness report" role="status" className="diagnostic-report">
+                      <p><strong>WebView microphone API:</strong> {micApiReport.api_present ? "Present" : "Unavailable"}</p>
+                      <p>{MICROPHONE_API_ADVICE[micApiReport.reason]}</p>
+                      <p className="helper">OS permission requested: No. Audio recorded: No. STT model loaded: No.
+                        This is an API presence check, not a real-device or Hindi recognition test.</p>
+                    </section>
+                  )}
                   <p role="status">{micGuidance || "Microphone is off. No audio captured."}</p>
                   {micStatus === "recording" && <p role="status"><strong>Microphone is recording now.</strong></p>}
                   {micStatus === "ready" && micWav && (
@@ -1565,6 +1686,12 @@ export default function App() {
                   onClick={() => void transcribeLocalStt()}>
                   {sttWorking ? "Recognizing Hindi locally…" : "Transcribe Hindi WAV offline"}
                 </button>
+                {sttWorking && (
+                  <button className="quiet-button" disabled={sttCancelRequested}
+                    onClick={() => void cancelSttTranscription()}>
+                    {sttCancelRequested ? "Cancellation requested…" : "Cancel active Hindi recognition"}
+                  </button>
+                )}
                 {sttStatus && <p role="status">{sttStatus}</p>}
                 {sttResult && (
                   <div>
@@ -1580,20 +1707,35 @@ export default function App() {
                       These edits stay in this session until you explicitly send the reviewed text into the story editor.</p>
                     <label className="field-label">
                       <input type="checkbox" checked={sttReviewConfirmed}
-                        disabled={!sttConsent || !sttResult.speech_detected || validateText(sttReviewDraft) !== null}
+                        disabled={!sttConsent || !sttResult.speech_detected || validateText(sttReviewDraft) !== null ||
+                          hasUnsafeSttTextControls(sttReviewDraft)}
                         onChange={event => setSttReviewConfirmed(event.target.checked)} />
                       I compared this transcript with the recording and corrected its text.
                     </label>
                     <div className="preview-actions">
                       <button className="secondary-button"
                         disabled={!sttConsent || !sttResult.speech_detected || !sttReviewConfirmed ||
-                          sttWorking || validateText(sttReviewDraft) !== null}
+                          sttWorking || validateText(sttReviewDraft) !== null ||
+                          hasUnsafeSttTextControls(sttReviewDraft)}
                         onClick={useSttTextInEditor}>Use reviewed text in story editor</button>
                       <button className="quiet-button" onClick={resetSttResult}>Discard transcript</button>
                     </div>
                     {validateText(sttReviewDraft) !== null && (
                       <p className="helper">The reviewed text must not be empty or exceed 3000 characters.
                         Shorten or correct it here before accepting.</p>
+                    )}
+                    {hasUnsafeSttTextControls(sttReviewDraft) && (
+                      <div>
+                        <p className="helper" role="status">The transcript contains invisible or unsupported
+                          formatting controls. Remove those characters before confirming your review.</p>
+                        <button className="secondary-button"
+                          onClick={() => {
+                            // User-directed repair only: never rewrite captured/model text
+                            // automatically, and every edit withdraws review confirmation.
+                            setSttReviewDraft(previous => removeUnsafeSttTextControls(previous));
+                            setSttReviewConfirmed(false);
+                          }}>Remove unsupported text formatting</button>
+                      </div>
                     )}
                   </div>
                 )}

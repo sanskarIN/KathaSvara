@@ -131,6 +131,26 @@ describe("private microphone WAV encoding", () => {
     expect(() => classifyMicrophoneSignal(new Uint8Array(44))).toThrow();
   });
 
+  it("rejects swapped RIFF markers and contradictory canonical PCM fields", () => {
+    const valid = encodeMonoPcm16([new Float32Array([0.2, -0.2, 0.3])], 16_000);
+    const mutations: Array<(bytes: Uint8Array, view: DataView) => void> = [
+      bytes => { bytes[0] = 0; },   // RIFF signature
+      bytes => { bytes[8] = 0; },   // WAVE
+      bytes => { bytes[12] = 0; },  // fmt chunk ID
+      bytes => { bytes[36] = 0; },  // data chunk ID
+      (_bytes, view) => view.setUint32(4, 0, true),  // RIFF declared size
+      (_bytes, view) => view.setUint32(16, 18, true), // noncanonical fmt size
+      (_bytes, view) => view.setUint16(20, 3, true), // floating-point format
+      (_bytes, view) => view.setUint32(28, 16_000, true), // wrong byte rate
+      (_bytes, view) => view.setUint16(32, 4, true), // wrong block alignment
+    ];
+    for (const mutate of mutations) {
+      const altered = valid.slice();
+      mutate(altered, new DataView(altered.buffer));
+      expect(() => classifyMicrophoneSignal(altered)).toThrow("Invalid recorded WAV header");
+    }
+  });
+
   it("rejects empty, oversized, inconsistent and invalid input", () => {
     expect(() => encodeMonoPcm16([new Float32Array(0)], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(40 * 16_000)], 16_000)).toThrow();
@@ -154,19 +174,27 @@ afterEach(() => {
 
 function mockWebAudioCapture() {
   const endedListeners = new Set<() => void>();
+  const mutedListeners = new Set<() => void>();
   const track = {
     stop: vi.fn(),
     readyState: "live" as "live" | "ended",
+    muted: false,
     addEventListener: vi.fn((event: string, listener: () => void) => {
       if (event === "ended") endedListeners.add(listener);
+      if (event === "mute") mutedListeners.add(listener);
     }),
     removeEventListener: vi.fn((event: string, listener: () => void) => {
       if (event === "ended") endedListeners.delete(listener);
+      if (event === "mute") mutedListeners.delete(listener);
     }),
   };
   const disconnect = () => {
     track.readyState = "ended";
     for (const listener of [...endedListeners]) listener();
+  };
+  const muteInput = () => {
+    track.muted = true;
+    for (const listener of [...mutedListeners]) listener();
   };
   const getUserMedia = vi.fn().mockResolvedValue({
     getTracks: () => [track],
@@ -199,7 +227,7 @@ function mockWebAudioCapture() {
     } as unknown as AudioProcessingEvent);
     return output;
   }
-  return { track, disconnect, getUserMedia, source, processor, resume, close, sendSamples };
+  return { track, disconnect, muteInput, getUserMedia, source, processor, resume, close, sendSamples };
 }
 
 describe("microphone Web Audio recording lifecycle", () => {
@@ -241,10 +269,12 @@ describe("microphone Web Audio recording lifecycle", () => {
     audio.sendSamples(new Float32Array(240).fill(0.25));
     const oldHandler = audio.processor.onaudioprocess as (event: AudioProcessingEvent) => void;
     session.discard();
+    const lateOutput = new Float32Array(480).fill(0.75);
     oldHandler({
       inputBuffer: { getChannelData: () => new Float32Array(480).fill(0.5) },
-      outputBuffer: { getChannelData: () => new Float32Array(480) },
+      outputBuffer: { getChannelData: () => lateOutput },
     } as unknown as AudioProcessingEvent);
+    expect(Array.from(lateOutput).every(value => value === 0)).toBe(true);
     session.stop();
     await Promise.resolve();
     expect(completed).not.toHaveBeenCalled();
@@ -369,6 +399,44 @@ describe("microphone Web Audio recording lifecycle", () => {
     expect(audio.close).toHaveBeenCalledOnce();
     audio.disconnect();
     expect(failed).toHaveBeenCalledOnce();
+  });
+
+  it("discards partial PCM if Windows mutes the input track mid-recording", async () => {
+    const audio = mockWebAudioCapture();
+    const completed = vi.fn(), failed = vi.fn();
+    const session = await beginMicrophoneCapture(completed, failed);
+    audio.sendSamples(Float32Array.from({ length: 480 }, (_, i) => i % 2 ? -0.4 : 0.4));
+    const lateHandler = audio.processor.onaudioprocess as (event: AudioProcessingEvent) => void;
+    audio.muteInput();
+    const mutedOutput = new Float32Array(480).fill(0.5);
+    lateHandler({
+      inputBuffer: { getChannelData: () => new Float32Array(480).fill(0.6) },
+      outputBuffer: { getChannelData: () => mutedOutput },
+    } as unknown as AudioProcessingEvent);
+    session.stop();
+    await Promise.resolve();
+    expect(mutedOutput.every(sample => sample === 0)).toBe(true);
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).toHaveBeenCalledOnce();
+    expect(failed).toHaveBeenCalledWith("device_disconnected");
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.track.removeEventListener).toHaveBeenCalledWith("mute", expect.any(Function));
+    expect(audio.processor.disconnect).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
+    audio.muteInput();
+    expect(failed).toHaveBeenCalledOnce();
+  });
+
+  it("fails safely when an already-muted track is granted by the OS", async () => {
+    const audio = mockWebAudioCapture();
+    audio.track.muted = true;
+    const completed = vi.fn(), failed = vi.fn();
+    await expect(beginMicrophoneCapture(completed, failed))
+      .rejects.toThrow("Microphone audio capture could not start");
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
   });
 
   it("refuses to record from a track that ended while the audio graph was starting", async () => {

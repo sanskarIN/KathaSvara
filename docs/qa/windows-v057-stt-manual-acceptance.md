@@ -20,8 +20,10 @@ performed the checks. No model or recording is downloaded by reading this file.
   a multilingual local CTranslate2 faster-whisper model. The selected
   `config.json`, `model.bin` and `tokenizer.json` must be nonempty.
 - Use a brief recording of your own voice (or one with clear consent).
-  For WAV/file STT, supply mono PCM16 audio of at most 60 seconds and 6 MiB.
-  The desktop microphone path is capped at 30 seconds.
+  For WAV/file STT, supply mono PCM16 audio of at most 60 seconds and 6 MiB
+  at 8, 16, 22.05, 24, 32, 44.1 or 48 kHz. The desktop microphone path is
+  capped at 30 seconds and converts its recording to 16 kHz. File-acceptance
+  checks do not prove speech intelligibility.
 - Record only generic outcomes and the workflow/source SHA in shared issue
   reports. Do not paste your private WAV, model paths, transcript, device
   identifiers, credentials or unauthorized third-party recordings into
@@ -90,8 +92,12 @@ In Settings, independently verify:
 2. Selecting a local PCM16 WAV, a local model folder and running separate
    model-free STT/WAV preflight never silently loads weights or captures audio.
 3. Start/stop/discard and the 30-second microphone cap work on the actual
-   Windows audio input device. Test permission denial, device disconnection
-   and near-silent input; no private WAV should remain after discard.
+   Windows audio input device. Test permission denial, device disconnection,
+   a track becoming muted, and near-silent input; no private WAV should
+   remain after discard. If capture ends or fails while the permission/audio
+   startup is still settling, the UI must not switch back to recording.
+   A denied permission prompt must not leave a live audio track. The OS
+   permission dialog itself may remain open despite an app-level cancel.
 4. After explicit recognition, compare the resulting Hindi text with the
    original recording. Fix misheard words in the **review-only** draft and
    reconfirm before transferring to the story editor. Reject unsupported
@@ -103,6 +109,18 @@ In Settings, independently verify:
 6. Restart the app and verify that unreviewed text and private session paths
    were not persisted. Inspect only the app-owned scratch directory for
    expected cleanup; do not inspect other users' files.
+7. Try the same short consensual Hindi WAV as a **16 kHz** file and a
+   **44.1 kHz** mono PCM16 file. Both should pass model-free WAV inspection
+   with frame-consistent durations; they still require a licensed local
+   multilingual model and human transcript review. The smaller accepted
+   rates (22.05 and 32 kHz) should likewise require no forced conversion.
+   A one-frame WAV may pass its header/duration preflight but must **not**
+   trigger a successful recognition claim on an unusable signal.
+8. While deliberately running a slow local recognition, cancel the job
+   before it finishes, hide the window or switch local runtime. No old
+   private transcript may reappear. Verify actual Python process exit,
+   microphone-track release and scratch cleanup on the Windows machine;
+   passing model-free cancellation tests cannot satisfy this gate.
 
 ## Stage E — independent text-to-speech, audio and export checks
 
@@ -127,6 +145,9 @@ signal levels, CI or successful STT.
 | D2 | Human checks and corrects recognized Hindi words before story import | NOT TESTED |
 | D3 | Runtime switch/clear invalidates old STT consent and text | NOT TESTED |
 | D4 | No unintended persisted STT recording or transcript after restart | NOT TESTED |
+| D5 | Input mute/disconnect and startup race fail closed without re-recording | NOT TESTED |
+| D6 | Common-rate mono WAVs preflight correctly; unusable tiny audio stays blocked | NOT TESTED |
+| D7 | Real local cancel during model load exits, discards old text and cleans scratch | NOT TESTED |
 | E1 | Real Hindi narration is understandable when played locally | NOT TESTED |
 | E2 | Exported WAV and SRT are valid and manually checked | NOT TESTED |
 

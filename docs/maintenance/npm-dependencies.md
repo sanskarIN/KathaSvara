@@ -48,6 +48,35 @@ The development source now resolves **TypeScript 7.0.2** with React 19, Vite 8, 
 
 A feature-branch-only bootstrap workflow with write access was removed immediately after updating the reviewed npm files. This change is **not a new release** and does not rewrite the published v0.5.0 artifacts.
 
+## 19 November 2026 — picomatch advisory withdrawn; strict audit revalidated
+
+The locked frontend development-tooling dependency graph includes
+`picomatch@4.0.7`. On 18 November, GitHub **withdrew**
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf),
+which previously caused a high+ `npm audit` failure. Withdrawal is **not**
+a published patched picomatch package, not proof that all ReDoS concerns are
+absent, and not evidence that untrusted glob patterns are safe.
+[CVE-2026-112366](https://nvd.nist.gov/vuln/detail/CVE-2026-112366)
+and [upstream discussion](https://github.com/micromatch/picomatch/issues/247)
+remain relevant when assessing practical exposure. The affected lockfile
+entries were development tooling, not bundled STT/TTS model dependencies.
+
+Without changing the locked dependencies, deleting an audit job, using
+`--omit=dev`, or adding an ignore rule, **rerunning the previously failing
+strict audit** on 19 November succeeded at earlier PR #173 head
+`323b148ce0dd0e1f46799a80c9a6300df536fd86`:
+[CI run #44318007302](https://github.com/sanskarIN/KathaSvara/actions/runs/44318007302).
+The separate React, Python and Windows Rust jobs also passed on that head.
+This is a narrow audit result at one commit/date, not clearance for a later
+unverified commit or a production release.
+
+Keep strict `npm audit --audit-level=high` in the CI workflow. Track
+[security issue #174](https://github.com/sanskarIN/KathaSvara/issues/174)
+until the withdrawal and current dependency graph have been reviewed against
+fresh exact-head CI. Do not claim an upstream fix, stable audio, secure input
+handling for untrusted globs, or clean Windows/Hindi listening acceptance from
+the advisory withdrawal. Future security alerts must be assessed independently.
+
 ## Release immutability and limitations
 
 Previous version-specific GitHub publication workflows are kept unchanged to preserve their tested SHA and release history. Future release workflows should use `npm ci` and a complete pinned graph. The [v0.5.0 pre-release](https://github.com/sanskarIN/KathaSvara/releases/tag/v0.5.0) is an unsigned developer EXE, not a complete installer, and manual Chatterbox Hindi playback and clean Windows installation acceptance remain open in [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3).

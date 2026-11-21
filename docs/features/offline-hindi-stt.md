@@ -17,6 +17,53 @@ Recheck the new runtime and grant fresh consent before transcribing again.
 Canceling a file picker or rejecting an invalid interpreter does not change
 the active runtime or automatically discard a previously reviewed draft.
 
+## Private transcript and consent lifecycle
+
+In the development source, selecting a **new WAV** or **new STT model folder**
+retires any previous transcript review draft and any microphone sample, and
+unchecks the permission-to-transcribe box. You must review the selected input,
+recheck the separate local STT setup as appropriate, and grant fresh consent
+before transcription. Canceling a file or folder picker leaves the existing
+selection, consent and reviewed text unchanged. A pending native recognition
+job keeps its busy lock until it exits; its result cannot restore a draft
+invalidated by a later selection.
+
+When the desktop window becomes hidden, the development source also withdraws
+STT consent, retires previous private transcript/review and setup results, and
+discards microphone capture. An in-flight old result is ignored when the
+recognizer eventually finishes. This is a privacy safeguard, not a claim that
+Windows or WebView2 has passed physical microphone tests.
+
+## Transcript text integrity at the three trust boundaries
+
+Recognized words are **untrusted model output**, even when processing is
+entirely offline. Development-source Python, native Rust IPC and React
+now reject C0/C1 control characters (except newlines and tabs), invisible
+Unicode direction controls (Arabic letter mark, left-to-right/right-to-left
+marks, bidi embeddings, overrides and isolates), plus non-rendering formatting
+characters such as soft hyphen (U+00AD), combining grapheme joiner (U+034F),
+zero-width space (U+200B), word joiner (U+2060), deprecated directional
+controls (U+206A–U+206F) and BOM (U+FEFF). Such characters can disguise
+the visible reading order or apparent spacing of reviewed Hindi words. If the model emits
+these characters, the result is rejected with fixed error guidance;
+the app does **not** silently strip or rewrite recognition output.
+
+**Indic shaping stays intact:** U+200C (zero-width non-joiner), U+200D
+(zero-width joiner) and Devanagari combining vowel/virama marks are
+allowed so Hindi conjuncts are not damaged. The **editable transcript review**
+also checks the same unsafe controls after every manual correction or paste.
+If detected, the review-confirmation checkbox and copy-to-story action remain
+disabled and a fixed, non-leaking guidance message explains that hidden
+characters must be removed. Because these characters are difficult to locate
+visually, an explicit **Remove unsupported text formatting** button is offered.
+Only clicking that button removes the known rejected characters; it does not
+delete Hindi ZWNJ/ZWJ or ordinary Devanagari marks. The corrected text stays
+editable and requires a **fresh manual review** before copying. The click
+handler rechecks the text, not just the button state. No pasted text is silently
+stripped, rewritten or copied into the story without fresh approval. This is a text-integrity check, not proof
+of correct Hindi recognition, audio quality or full Unicode spoofing
+resistance; human transcript review is still required.
+
 ## Desktop file-picker regression and no-model setup checks
 
 The published v0.5.6 build predates speech-to-text and cannot recognize
@@ -96,8 +143,17 @@ The fingerprint remains internal and is not added to public setup results.
 
 The first post-v0.5.6 STT development change supported an **existing file** only.
 Later development added a short microphone capture path with
-explicit permission and a separate transcription action. It requires **mono, 16-bit PCM WAV**, sample rate 8, 16, 24 or
-48 kHz, duration **1 frame to 60 seconds**, and size **44 bytes to 6 MiB**.
+explicit permission and a separate transcription action. User-selected audio
+must be **mono, 16-bit PCM WAV** at 8, 16, 22.05, 24, 32, 44.1 or 48 kHz,
+duration **1 frame to 60 seconds**, and size **44 bytes to 6 MiB**. This
+includes common 44.1 kHz WAV recordings without a separate conversion step.
+Browser microphone captures are still normalized to 16 kHz PCM16 WAV before
+handoff. These accepted input rates do not imply that a multilingual model
+is installed or that Hindi recognition succeeds on actual speech.
+The STT signal probe returns precise frame-based durations, even below one
+millisecond, rather than millisecond-rounded diagnostic values. The Rust
+bridge and React independently verify the duration matches the reported
+sample rate and frame count before displaying a signal result.
 Larger/multichannel/compressed recordings must be converted externally with
 trusted local tooling. Paths remain session-local and are never displayed in
 UI status. Input audio is never uploaded by KathaSvara, and no transcript is
@@ -135,9 +191,12 @@ a user's machine.
    bounded and tested against a direct numerical reference. This improves
    capture responsiveness but does not prove Hindi recognition accuracy.
    An unsupported Web Audio capture graph fails safely and releases
-   microphone tracks. If an already recording input device disconnects or
-   access is revoked, the capture discards partial audio, releases tracks
-   and reports a fixed error instead of presenting an incomplete WAV.
+   microphone tracks. If an input device ends or becomes muted at startup
+   or while recording (for example, after a Windows input interruption),
+   the capture discards partial audio, releases tracks and reports fixed
+   device guidance instead of presenting an incomplete WAV. A mute event
+   is deliberately treated as an interruption, not a resumable recording.
+   No browser-level mute check proves actual Windows device acceptance.
    The completed 16 kHz WAV also receives a **model-free microphone signal
    check** before any transcription is offered. Digital or near-silent input
    (raw RMS at or below -60 dBFS) and DC-only signal are discarded with
@@ -169,6 +228,60 @@ a user's machine.
    away from Settings, hiding or closing the window and withdrawing
    consent also stop active microphone tracks; invalid/oversized recordings
    are rejected with fixed user-facing guidance.
+
+## Cancel active offline Hindi transcription (development source)
+
+When a user explicitly starts recognition from either **Selected Hindi WAV**
+or the **short microphone recording**, Settings now offers **Cancel active
+Hindi recognition**. The desktop sends a fresh cryptographic UUID-v4 with
+each native transcription request; the cancel command targets **only that
+matching STT job**. A cancellation arriving before native startup is
+remembered briefly in a bounded UUID-specific registry, so a queued start
+cannot unexpectedly load the model after the user cancels. A stale cancel
+cannot interrupt a newer STT request or an unrelated TTS/story-render job.
+
+On **explicit Cancel**, the frontend immediately withdraws STT consent and
+discards any draft or captured in-memory microphone WAV. The same targeted
+native cancellation is now requested automatically when the user **withdraws
+transcription consent, leaves Settings, hides/closes the window, or changes the
+configured speech runtime**. It never attempts to cancel an unrelated
+narration render. The frontend keeps recognition controls locked until the
+original native worker actually exits. A rejected/late reply can never
+restore private text or consent. Rust's child process
+watchdog checks the cancellation signal during the STT request and asks the
+OS to terminate the local Python recognizer; the Rust microphone scratch WAV
+is removed through its existing guard on both cancellation and normal exit.
+The request does **not** delete any user-selected original WAV or installed
+model folder, and no audio, private path or recognized words appear in
+the cancellation response. A fixed message is used for cancellation failure.
+
+Cancellation is best-effort for process termination: real Windows process
+termination timing, CPU/memory release and temporary scratch cleanup still
+need hands-on Windows/WebView2 acceptance, including cancel during a slow
+model load and near-completion. A Python process may not stop instantaneously.
+**No model load, real microphone or Hindi recognition is exercised by the
+new automated cancellation tests.**
+
+## No-permission microphone API availability check (development source)
+
+Settings → **Speech to text → Record Hindi from microphone** now offers
+**Check microphone API availability (no permission)**. This button checks
+only whether the current WebView appears to support a secure context,
+`navigator.mediaDevices.getUserMedia`, Web Audio `AudioContext`, and the
+local PCM capture compatibility API. The result explains the first missing
+browser capability and suggests checking Windows WebView2, or choosing an
+existing local WAV instead. The report contains no microphone name, input
+device identifier, path or recording.
+
+**It does not call `getUserMedia`, enumerate devices, construct an
+`AudioContext`, request OS permission, record any audio, start Python or load
+an STT model.** A report of **APIs present** means only that the JavaScript
+interfaces exist. It does not demonstrate that Windows privacy permissions
+are granted, a microphone is connected, audio can be captured, or that Hindi
+recognition works. Actual permission and capture can only be tested with
+the separate consented **Start microphone recording** action and a real
+Windows 11/WebView2 device. The availability check cannot fix hardware
+or install missing speech dependencies.
 
 ## Microphone permission and device error guidance (development source)
 

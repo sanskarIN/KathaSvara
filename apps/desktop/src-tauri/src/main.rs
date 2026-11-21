@@ -6,12 +6,12 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     fs,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -50,6 +50,103 @@ impl Drop for RealSpeechJobGuard {
         REAL_SPEECH_JOB_ACTIVE.store(false, Ordering::Release);
     }
 }
+/// One cancellable recognizer at a time. The UUID is supplied separately
+/// per request so a delayed cancel cannot affect another job or TTS render.
+struct ActiveSttJob {
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+/// An early Cancel IPC may reach Rust before the Start IPC. Remember only a
+/// bounded number of UUID-specific tombstones, never private audio or paths.
+struct SttJobRegistry {
+    active: Option<ActiveSttJob>,
+    cancelled_before_start: HashSet<String>,
+    // FIFO retention: on overflow evict only the oldest early cancellation,
+    // never erase all other pending cancellations at once.
+    cancelled_before_start_order: VecDeque<String>,
+}
+static ACTIVE_STT_JOB: OnceLock<Mutex<SttJobRegistry>> = OnceLock::new();
+
+fn stt_job_state() -> &'static Mutex<SttJobRegistry> {
+    ACTIVE_STT_JOB.get_or_init(|| Mutex::new(SttJobRegistry {
+        active: None, cancelled_before_start: HashSet::new(),
+        cancelled_before_start_order: VecDeque::new(),
+    }))
+}
+
+fn validate_stt_job_id(id: &str) -> Result<(), String> {
+    const INVALID: &str = "Invalid offline transcription job ID.";
+    let parsed = Uuid::parse_str(id).map_err(|_| INVALID.to_string())?;
+    if parsed.to_string() != id || parsed.get_version_num() != 4 {
+        return Err(INVALID.into());
+    }
+    Ok(())
+}
+
+struct SttJobGuard {
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+impl SttJobGuard {
+    fn start(id: &str) -> Result<Self, String> {
+        validate_stt_job_id(id)?;
+        let mut registry = stt_job_state().lock()
+            .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
+        if registry.cancelled_before_start.remove(id) {
+            registry.cancelled_before_start_order.retain(|pending| pending != id);
+            return Err(STT_CANCELLED_MESSAGE.into());
+        }
+        if registry.active.is_some() {
+            return Err("An offline transcription is already running.".into());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        registry.active = Some(ActiveSttJob { id: id.to_owned(), cancel: Arc::clone(&cancel) });
+        Ok(Self { id: id.to_owned(), cancel })
+    }
+}
+impl Drop for SttJobGuard {
+    fn drop(&mut self) {
+        if let Ok(mut registry) = stt_job_state().lock() {
+            if registry.active.as_ref().is_some_and(|job| job.id == self.id) {
+                registry.active = None;
+            }
+        }
+    }
+}
+
+fn request_stt_cancellation(job_id: &str) -> Result<bool, String> {
+    validate_stt_job_id(job_id)?;
+    let mut registry = stt_job_state().lock()
+        .map_err(|_| "Offline STT cancellation registry is unavailable.".to_string())?;
+    if let Some(job) = registry.active.as_ref().filter(|job| job.id == job_id) {
+        job.cancel.store(true, Ordering::Release);
+        return Ok(true);
+    }
+    // A queued native start can still arrive after the Cancel command.
+    // Keep the newest 32 pending UUIDs. Clearing *all* tombstones when full
+    // silently revives other cancelled starts, so evict exactly one oldest.
+    if registry.cancelled_before_start.contains(job_id) {
+        return Ok(true);
+    }
+    if registry.cancelled_before_start_order.len() >= 32 {
+        if let Some(expired) = registry.cancelled_before_start_order.pop_front() {
+            registry.cancelled_before_start.remove(&expired);
+        }
+    }
+    registry.cancelled_before_start.insert(job_id.to_owned());
+    registry.cancelled_before_start_order.push_back(job_id.to_owned());
+    Ok(true)
+}
+
+/// Cancel only a matching active STT worker, not unrelated speech generation.
+#[tauri::command]
+fn cancel_stt_transcription(job_id: String) -> Result<bool, String> {
+    request_stt_cancellation(&job_id)
+}
+
+const STT_CANCELLED_MESSAGE: &str =
+    "Offline Hindi transcription cancelled. No transcript was accepted.";
+
 static ACTIVE_RENDER_JOBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn active_render_jobs() -> &'static Mutex<HashSet<String>> {
@@ -888,6 +985,17 @@ fn invoke_python_with_reference(
     request: Value,
     reference_wav_path: Option<&str>,
 ) -> Result<Value, String> {
+    invoke_python_with_cancel(request, reference_wav_path, None)
+}
+
+fn invoke_python_with_cancel(
+    request: Value,
+    reference_wav_path: Option<&str>,
+    cancel: Option<&AtomicBool>,
+) -> Result<Value, String> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let (python, directory) = runtime_paths()?;
     if !directory.join("kathasvara/cli.py").is_file() {
         return Err("Inference sources are missing. Configure the source directory in Settings.".into());
@@ -928,6 +1036,10 @@ fn invoke_python_with_reference(
     );
     let started = Instant::now();
     loop {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            stop_inference_child(&mut child);
+            return Err(STT_CANCELLED_MESSAGE.into());
+        }
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
@@ -951,6 +1063,9 @@ fn invoke_python_with_reference(
     let response = output_reader.join()
         .map_err(|_| "Inference output reader terminated unexpectedly.".to_string())??;
     request_status?;
+    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     // Upstream model libraries may print progress to stdout. The final JSON
     // response is a complete line, not necessarily the entire output stream.
     let data: Value = response
@@ -958,6 +1073,9 @@ fn invoke_python_with_reference(
         .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
         .next_back()
         .ok_or_else(|| "Inference service did not return valid JSON.".to_string())?;
+    if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     if !status.success() || data.get("ok") != Some(&Value::Bool(true)) {
         return Err(
             data.get("message").and_then(Value::as_str)
@@ -1033,8 +1151,17 @@ fn validate_stt_result(result: &Value) -> Result<Value, String> {
     const INVALID: &str = "Offline STT returned an invalid transcript. Update inference sources.";
     let text = result.get("text").and_then(Value::as_str).ok_or(INVALID)?;
     let duration = result.get("duration_seconds").and_then(Value::as_f64).ok_or(INVALID)?;
-    if text.chars().count() > 8_000 || text.chars().any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
-        || !duration.is_finite() || !(0.0..=60.0).contains(&duration)
+    // Imported Python output is untrusted. Reject hidden direction/format
+    // controls (including soft hyphen, zero-width space and word joiner)
+    // that can disguise reviewed words; preserve Indic ZWNJ/ZWJ joiners.
+    let unsafe_text = text.chars().any(|ch| {
+        (ch.is_control() && ch != '\n' && ch != '\t')
+            || matches!(ch as u32,
+                0x00ad | 0x034f | 0x061c | 0x200b | 0x200e | 0x200f
+                | 0x202a..=0x202e | 0x2060..=0x206f | 0xfeff)
+    });
+    if text.chars().count() > 8_000 || unsafe_text
+        || !duration.is_finite() || duration <= 0.0 || duration > 60.0
         || result.get("language").and_then(Value::as_str) != Some("hi")
         || result.get("engine").and_then(Value::as_str) != Some("faster-whisper-local")
         || result.get("network_used") != Some(&Value::Bool(false))
@@ -1072,10 +1199,12 @@ fn validate_stt_wav_report(report: &Value) -> Result<Value, String> {
         .ok_or(STT_WAV_INVALID)?;
     let review = report.get("signal_review_required").and_then(Value::as_bool)
         .ok_or(STT_WAV_INVALID)?;
-    if !matches!(rate, 8_000 | 16_000 | 24_000 | 48_000)
+    // Unlike the millisecond-rounded generic WAV diagnostic, the STT
+    // worker reports exact frames/rate. Reject contradictory timing claims.
+    if !matches!(rate, 8_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000)
         || frames == 0 || frames > rate * 60
         || !duration.is_finite() || duration <= 0.0 || duration > 60.0
-        || (duration - frames as f64 / rate as f64).abs() > 0.002
+        || (duration - frames as f64 / rate as f64).abs() > 0.000_000_1
         || review != (quiet || dc || clipping || pause)
         || report.get("model_loaded") != Some(&Value::Bool(false))
         || report.get("audio_transcribed") != Some(&Value::Bool(false))
@@ -1265,21 +1394,30 @@ fn write_transient_microphone_wav(
 }
 
 fn transcribe_recorded_microphone(
-    root: &Path, wav_base64: &str, model_path: &str,
+    root: &Path, wav_base64: &str, model_path: &str, cancel: &AtomicBool,
 ) -> Result<Value, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let bytes = decode_microphone_wav(wav_base64)?;
     // Reject unusable PCM and incomplete models *before* creating any
     // temporary recording, rather than relying solely on the Python worker.
     verify_microphone_signal(&bytes)?;
     let model = Path::new(model_path);
     verify_stt_model_folder(model)?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let scratch = write_transient_microphone_wav(root, &bytes)?;
     verify_stt_paths(&scratch.path, model)?;
-    let response = invoke_python(json!({
+    let response = invoke_python_with_cancel(json!({
         "action": "transcribe_hindi_wav",
         "wav_path": scratch.path,
         "model_path": model_path,
-    }))?;
+    }), None, Some(cancel))?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(STT_CANCELLED_MESSAGE.into());
+    }
     let result = response.get("result")
         .ok_or_else(|| "Offline STT did not return a transcript.".to_string())?;
     validate_stt_result(result)
@@ -1292,18 +1430,22 @@ async fn transcribe_microphone_wav(
     app: tauri::AppHandle,
     wav_base64: String,
     model_path: String,
+    job_id: String,
 ) -> Result<Value, String> {
+    validate_stt_job_id(&job_id)?;
     if wav_base64.len() > MAX_MIC_WAV_B64_CHARS
         || model_path.len() > 4096
     {
         return Err("Local microphone transcription request exceeds its size limit.".into());
     }
     let guard = RealSpeechJobGuard::start()?;
+    let stt = SttJobGuard::start(&job_id)?;
     let root = app_dir(&app)
         .map_err(|_| "Cannot access private microphone scratch storage.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
-        transcribe_recorded_microphone(&root, &wav_base64, &model_path)
+        let _stt = &stt;
+        transcribe_recorded_microphone(&root, &wav_base64, &model_path, &stt.cancel)
     }).await.map_err(|_| "Microphone transcription worker stopped unexpectedly.".to_string())?
 }
 
@@ -1312,18 +1454,25 @@ async fn transcribe_microphone_wav(
 async fn transcribe_local_wav(
     wav_path: String,
     model_path: String,
+    job_id: String,
 ) -> Result<Value, String> {
+    validate_stt_job_id(&job_id)?;
     verify_stt_paths(Path::new(&wav_path), Path::new(&model_path))?;
     let guard = RealSpeechJobGuard::start()?;
+    let stt = SttJobGuard::start(&job_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
+        let _stt = &stt;
         // Revalidate after switching threads, immediately before child launch.
         verify_stt_paths(Path::new(&wav_path), Path::new(&model_path))?;
-        let response = invoke_python(json!({
+        let response = invoke_python_with_cancel(json!({
             "action": "transcribe_hindi_wav",
             "wav_path": wav_path,
             "model_path": model_path,
-        }))?;
+        }), None, Some(&stt.cancel))?;
+        if stt.cancel.load(Ordering::Acquire) {
+            return Err(STT_CANCELLED_MESSAGE.into());
+        }
         let result = response.get("result")
             .ok_or_else(|| "Offline STT did not return a transcript.".to_string())?;
         validate_stt_result(result)
@@ -2344,7 +2493,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            configure_local_inference, clear_local_inference, probe_stt_setup, probe_stt_wav, transcribe_local_wav, transcribe_microphone_wav, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
+            configure_local_inference, clear_local_inference, probe_stt_setup, probe_stt_wav, transcribe_local_wav, transcribe_microphone_wav, cancel_stt_transcription, save_project, load_project, list_projects, save_story_v2, load_story_v2, parse_dialogue, preview_pronunciation, preflight_render, audit_production, inspect_script, check_engine, diagnose_engine, probe_tts_runtime, probe_audio_io, inspect_segment_cache, prune_segment_cache, maintain_abandoned_wavs, synthesize, render_story_v2, story_render_progress, story_render_history, forget_render_journal, cancel_story_render, discard_audio, inspect_generated_audio, export_wav, export_subtitles, export_production_manifest
         ])
         .run(tauri::generate_context!())
         .expect("KathaSvara failed to start");
@@ -2355,6 +2504,90 @@ mod tests {
     use super::*;
     // Parallel Rust test workers must not interleave global render/maintenance guards.
     static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn stt_cancel_registry_scopes_requests_to_exact_uuid_and_handles_early_cancel() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        let invalid = "not-a-uuid";
+        assert!(request_stt_cancellation(invalid).is_err());
+        let too_old = Uuid::new_v4().to_string();
+        assert!(request_stt_cancellation(&too_old).unwrap());
+        assert!(SttJobGuard::start(&too_old).is_err());
+        let id = Uuid::new_v4().to_string();
+        let active = SttJobGuard::start(&id).unwrap();
+        assert!(!active.cancel.load(Ordering::Acquire));
+        let stale = Uuid::new_v4().to_string();
+        assert!(request_stt_cancellation(&stale).unwrap());
+        assert!(!active.cancel.load(Ordering::Acquire),
+            "A stale cancellation must never stop the current recognition");
+        assert!(request_stt_cancellation(&id).unwrap());
+        assert!(active.cancel.load(Ordering::Acquire));
+        assert!(SttJobGuard::start(&Uuid::new_v4().to_string()).is_err());
+        drop(active);
+        let fresh = SttJobGuard::start(&Uuid::new_v4().to_string()).unwrap();
+        assert!(!fresh.cancel.load(Ordering::Acquire),
+            "A cancelled previous job cannot poison a later recognition");
+        drop(fresh);
+    }
+
+    #[test]
+    fn stt_cancel_overflow_preserves_newer_prestart_cancellations() {
+        let _lock = REGISTRY_TEST_LOCK.lock().unwrap();
+        // Make the test independent of previously consumed global tombstones.
+        {
+            let mut state = stt_job_state().lock().unwrap();
+            assert!(state.active.is_none());
+            state.cancelled_before_start.clear();
+            state.cancelled_before_start_order.clear();
+        }
+        let ids: Vec<String> = (0..33).map(|_| Uuid::new_v4().to_string()).collect();
+        for id in &ids[..32] {
+            assert!(request_stt_cancellation(id).unwrap());
+        }
+        // Repeated Cancel for one UUID must not consume a second FIFO slot.
+        assert!(request_stt_cancellation(&ids[31]).unwrap());
+        assert!(request_stt_cancellation(&ids[32]).unwrap());
+        {
+            let state = stt_job_state().lock().unwrap();
+            assert_eq!(state.cancelled_before_start.len(), 32);
+            assert_eq!(state.cancelled_before_start_order.len(), 32);
+            assert!(!state.cancelled_before_start.contains(&ids[0]));
+            assert!(state.cancelled_before_start.contains(&ids[1]));
+            assert!(state.cancelled_before_start.contains(&ids[31]));
+            assert!(state.cancelled_before_start.contains(&ids[32]));
+        }
+        // Even after overflow, a late Start for a recently cancelled ID
+        // must fail before it can load weights or create a scratch recording.
+        assert!(SttJobGuard::start(&ids[1]).is_err());
+        assert!(SttJobGuard::start(&ids[32]).is_err());
+        {
+            let mut state = stt_job_state().lock().unwrap();
+            state.cancelled_before_start.clear();
+            state.cancelled_before_start_order.clear();
+        }
+    }
+
+    #[test]
+    fn stt_cancel_short_circuits_before_starting_any_python_process() {
+        let cancelled = AtomicBool::new(true);
+        // The fake request and missing runtime are intentionally irrelevant:
+        // the cancellation gate is checked before interpreter discovery.
+        let error = invoke_python_with_cancel(
+            json!({"action": "transcribe_hindi_wav"}), None, Some(&cancelled),
+        ).unwrap_err();
+        assert_eq!(error, STT_CANCELLED_MESSAGE);
+    }
+
+    #[test]
+    fn stt_early_cancel_does_not_create_microphone_scratch_wav() {
+        let root = std::env::temp_dir().join(format!("kathasvara-cancel-{}", Uuid::new_v4()));
+        let cancelled = AtomicBool::new(true);
+        let error = transcribe_recorded_microphone(
+            &root, "not even valid audio", "no-model", &cancelled,
+        ).unwrap_err();
+        assert_eq!(error, STT_CANCELLED_MESSAGE);
+        assert!(!root.exists());
+    }
 
     #[test]
     fn microphone_payload_is_bounded_and_exactly_canonical_pcm16() {
@@ -2434,7 +2667,7 @@ mod tests {
         let encoded = STANDARD.encode(silent);
         let unavailable_model = root.join("missing-model");
         let error = transcribe_recorded_microphone(
-            &root, &encoded, unavailable_model.to_str().unwrap()
+            &root, &encoded, unavailable_model.to_str().unwrap(), &AtomicBool::new(false)
         ).unwrap_err();
         assert_eq!(error, MIC_UNUSABLE_SIGNAL);
         assert!(!root.join("stt-microphone").exists());
@@ -2460,7 +2693,7 @@ mod tests {
             fs::write(model.join(name), b"").unwrap();
             assert!(verify_stt_model_folder(&model).is_err());
             let err = transcribe_recorded_microphone(
-                &root, &encoded, model.to_str().unwrap()
+                &root, &encoded, model.to_str().unwrap(), &AtomicBool::new(false)
             ).unwrap_err();
             assert!(err.contains("missing or empty"));
             assert!(!root.join("stt-microphone").exists());
@@ -2491,6 +2724,36 @@ mod tests {
             "model_loaded": false, "audio_transcribed": false, "network_used": false,
         });
         assert_eq!(validate_stt_wav_report(&good).unwrap(), good);
+        for rate in [8_000_u64, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000] {
+            let mut compatible = good.clone();
+            compatible["sample_rate"] = json!(rate);
+            compatible["frames"] = json!(rate);
+            assert_eq!(validate_stt_wav_report(&compatible).unwrap(), compatible);
+        }
+        // The old 2 ms tolerance would incorrectly accept this rounded
+        // report. A precise fractional frame duration must still pass.
+        let mut rounded = good.clone();
+        rounded["sample_rate"] = json!(44_100);
+        rounded["frames"] = json!(12_345);
+        rounded["duration_seconds"] = json!(0.280);
+        assert!(validate_stt_wav_report(&rounded).is_err());
+        rounded["duration_seconds"] = json!(12_345_f64 / 44_100_f64);
+        assert_eq!(validate_stt_wav_report(&rounded).unwrap(), rounded);
+        for rate in [11_025_u64, 96_000] {
+            let mut unsupported = good.clone();
+            unsupported["sample_rate"] = json!(rate);
+            unsupported["frames"] = json!(rate);
+            assert!(validate_stt_wav_report(&unsupported).is_err());
+        }
+        for rate in [8_000_u64, 44_100, 48_000] {
+            let mut shortest = good.clone();
+            shortest["sample_rate"] = json!(rate);
+            shortest["frames"] = json!(1);
+            shortest["duration_seconds"] = json!(1.0 / rate as f64);
+            assert_eq!(validate_stt_wav_report(&shortest).unwrap(), shortest);
+            shortest["duration_seconds"] = json!(0.0);
+            assert!(validate_stt_wav_report(&shortest).is_err());
+        }
         let mut invalid = good.clone();
         invalid["signal_review_required"] = json!(false);
         assert!(validate_stt_wav_report(&invalid).is_err());
@@ -2555,6 +2818,23 @@ mod tests {
         bad = good.clone();
         bad["text"] = json!("private\u{0000}path");
         assert!(validate_stt_result(&bad).is_err());
+        bad = good.clone();
+        bad["duration_seconds"] = json!(0.0);
+        assert!(validate_stt_result(&bad).is_err());
+        for point in [
+            0x80, 0x00ad, 0x034f, 0x061c, 0x200b, 0x200e, 0x200f,
+            0x202a, 0x202e, 0x2060, 0x2066, 0x2069, 0x206a, 0x206f, 0xfeff,
+        ] {
+            bad = good.clone();
+            bad["text"] = json!(format!("नमस्ते{}भारत", char::from_u32(point).unwrap()));
+            assert!(validate_stt_result(&bad).is_err());
+        }
+        // Hindi shaping joiners are valid, not unsafe direction overrides.
+        let mut joined = good.clone();
+        joined["text"] = json!(format!("क्{}ष", char::from_u32(0x200d).unwrap()));
+        assert_eq!(validate_stt_result(&joined).unwrap(), joined);
+        joined["text"] = json!(format!("क्{}ष", char::from_u32(0x200c).unwrap()));
+        assert_eq!(validate_stt_result(&joined).unwrap(), joined);
     }
 
     #[test]
