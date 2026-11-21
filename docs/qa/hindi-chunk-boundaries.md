@@ -27,3 +27,24 @@ python -m ruff check kathasvara/hindi.py tests/test_hindi.py
 The no-model tests cover Devanagari vowels, nukta, virama conjuncts, explicit joiners, Unicode variation marks, exact chunk boundaries, ASCII compatibility, lossless reconstruction and impossible oversize sequences.
 
 **Acceptance limitation:** Safe text chunk boundaries are only a structural improvement. They do not establish natural pronunciation, distinct character voices, a working downloaded model, or clean Windows-machine acceptance. Keep [issue #3](https://github.com/sanskarIN/KathaSvara/issues/3) open until real listening and Windows checks are completed.
+
+
+## Standalone Voice Studio preflight (v0.5.7 development source)
+
+Voice Studio's single-narrator `synthesize()` route is separate from the
+scene/character render plan above. It now validates and snapshots the complete
+Hindi chunk sequence **before** importing optional audio libraries or loading
+the TTS model. Previously, an unsplittable Devanagari writing unit could
+trigger an expensive model load before the text error was reported.
+
+The generated speech still uses the identical ordered chunks, pauses, sample
+validation and atomic WAV publication. This change does not install packages,
+fetch model weights, synthesize Hindi in CI, or verify actual listening quality.
+Mock-engine regressions assert that invalid text never loads a model, and that
+valid chunks are prepared once and passed to generation unchanged.
+
+```bash
+cd services/inference
+python -m pytest -q tests/test_synthesis.py tests/test_hindi.py
+python -m ruff check kathasvara/synthesis.py tests/test_synthesis.py
+```
