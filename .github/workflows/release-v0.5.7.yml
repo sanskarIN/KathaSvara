@@ -88,6 +88,29 @@ jobs:
           python -m ruff check .
           python -m pytest -q
 
+  frontend-security:
+    # Repeat strict high+ security auditing on the exact release SHA.
+    # An older green PR check is not a substitute for a release gate.
+    needs: prepare
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install exact locked frontend dependency graph
+        run: npm ci --no-audit --no-fund
+      - name: Reject high or critical npm advisories
+        run: npm audit --audit-level=high
+
   frontend:
     needs: prepare
     runs-on: ubuntu-latest
@@ -188,7 +211,7 @@ jobs:
           retention-days: 30
 
   publish:
-    needs: [prepare, python, frontend, rust-windows, windows-python-lock, windows-exe]
+    needs: [prepare, python, frontend, frontend-security, rust-windows, windows-python-lock, windows-exe]
     if: ${{ success() }}
     runs-on: ubuntu-latest
     permissions:
