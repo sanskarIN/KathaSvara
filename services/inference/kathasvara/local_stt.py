@@ -179,6 +179,11 @@ def _contains_untrusted_transcript_control(text: str) -> bool:
     """
     for char in text:
         point = ord(char)
+        # Unpaired UTF-16 surrogates are not Unicode scalar values. Python
+        # can hold them in strings, but they cannot be reliably exported or
+        # encoded as UTF-8 for a Hindi review/transcript.
+        if 0xD800 <= point <= 0xDFFF:
+            return True
         if (point < 32 and char not in "\n\t") or 0x7F <= point <= 0x9F:
             return True
         if point in (0x00AD, 0x034F, 0x061C, 0x200B, 0x200E, 0x200F, 0xFEFF):
