@@ -151,6 +151,18 @@ describe("private microphone WAV encoding", () => {
     }
   });
 
+  it("accepts exactly 30 seconds but never an extra PCM frame", () => {
+    const exact = new Float32Array(MICROPHONE_RATE * 30);
+    const wav = encodeMonoPcm16([exact], MICROPHONE_RATE);
+    expect(new DataView(wav.buffer).getUint32(40, true)).toBe(MICROPHONE_RATE * 30 * 2);
+    expect(() => encodeMonoPcm16([new Float32Array(exact.length + 1)], MICROPHONE_RATE))
+      .toThrow("30-second limit");
+    expect(() => encodeMonoPcm16([new Float32Array(48_000 * 30 + 1)], 48_000))
+      .toThrow("30-second limit");
+    expect(() => encodeMonoPcm16([new Float32Array(10)], 16_000.5))
+      .toThrow("Unsupported microphone audio format");
+  });
+
   it("rejects empty, oversized, inconsistent and invalid input", () => {
     expect(() => encodeMonoPcm16([new Float32Array(0)], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(40 * 16_000)], 16_000)).toThrow();
