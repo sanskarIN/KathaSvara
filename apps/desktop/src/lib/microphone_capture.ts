@@ -55,17 +55,20 @@ export function encodeMonoPcm16(
   channels: readonly Float32Array[], sourceRate: number, targetRate = MICROPHONE_RATE,
 ): Uint8Array {
   if (channels.length < 1 || channels.length > 2 ||
-      !Number.isFinite(sourceRate) || sourceRate < 8_000 || sourceRate > 192_000 ||
+      !Number.isInteger(sourceRate) || sourceRate < 8_000 || sourceRate > 192_000 ||
       !Number.isInteger(targetRate) || targetRate !== MICROPHONE_RATE) {
     throw new Error("Unsupported microphone audio format.");
   }
   const length = channels[0].length;
   if (!length || channels.some(ch => ch.length !== length) ||
-      length / sourceRate > MICROPHONE_MAX_SECONDS + 0.5) {
+      length > sourceRate * MICROPHONE_MAX_SECONDS) {
     throw new Error("Recording is empty or exceeds the 30-second limit.");
   }
+  // The recording UI and native STT contract both cap microphone audio at
+  // exactly 30 seconds. Do not allow an extra half-second through this reusable
+  // encoder (including a sample-rate mismatch or direct invocation).
   const samples = Math.floor(length * targetRate / sourceRate);
-  if (samples < 1 || samples > targetRate * (MICROPHONE_MAX_SECONDS + 1)) {
+  if (samples < 1 || samples > targetRate * MICROPHONE_MAX_SECONDS) {
     throw new Error("Recording length is invalid.");
   }
   const wav = new Uint8Array(44 + samples * 2);
