@@ -8,6 +8,8 @@ SPDX-License-Identifier: MPL-2.0
 from __future__ import annotations
 
 import hashlib
+import io
+import os
 import stat
 import sys
 import wave
@@ -25,6 +27,99 @@ REFERENCE_CHANGED_ERROR = (
 )
 
 
+def _same_file_state(before: os.stat_result, after: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(after.st_mode)
+        and (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        and before.st_size == after.st_size
+        and before.st_mtime_ns == after.st_mtime_ns
+        and before.st_ctime_ns == after.st_ctime_ns
+    )
+
+
+def _read_reference_bytes(path: Path, info: os.stat_result) -> bytes:
+    """Read one bounded descriptor; never follow a substituted POSIX symlink."""
+    flags = (
+        os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+        getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as source:
+        opened = os.fstat(source.fileno())
+        if not _same_file_state(info, opened):
+            raise ValueError(REFERENCE_CHANGED_ERROR)
+        content = source.read(MAX_REFERENCE_BYTES + 1)
+        if (
+            len(content) != opened.st_size
+            or len(content) > MAX_REFERENCE_BYTES
+            or not _same_file_state(opened, os.fstat(source.fileno()))
+        ):
+            raise ValueError(REFERENCE_CHANGED_ERROR)
+    return content
+
+
+def _validate_reference_riff(content: bytes) -> tuple[int, int, int]:
+    """Check the entire RIFF container, including chunks after audio data.
+
+    Python's wave decoder stops at the first data chunk. Other decoders can
+    interpret malformed trailing or duplicate chunks differently. Reject
+    ambiguous containers before using a reference as a cache identity.
+    """
+    if (
+        len(content) < 44 or content[:4] != b"RIFF"
+        or content[8:12] != b"WAVE"
+        or int.from_bytes(content[4:8], "little") + 8 != len(content)
+    ):
+        raise ValueError(REFERENCE_ERROR)
+    position = 12
+    chunk_count = 0
+    audio_format: tuple[int, int] | None = None
+    frames: int | None = None
+    while position < len(content):
+        if len(content) - position < 8:
+            raise ValueError(REFERENCE_ERROR)
+        chunk_count += 1
+        if chunk_count > 4096:
+            raise ValueError(REFERENCE_ERROR)
+        kind = content[position:position + 4]
+        size = int.from_bytes(content[position + 4:position + 8], "little")
+        start = position + 8
+        next_chunk = start + size + size % 2
+        if next_chunk > len(content):
+            raise ValueError(REFERENCE_ERROR)
+        if kind == b"fmt ":
+            if audio_format is not None or size < 16:
+                raise ValueError(REFERENCE_ERROR)
+            fmt = content[start:start + 16]
+            codec = int.from_bytes(fmt[0:2], "little")
+            channels = int.from_bytes(fmt[2:4], "little")
+            rate = int.from_bytes(fmt[4:8], "little")
+            byte_rate = int.from_bytes(fmt[8:12], "little")
+            alignment = int.from_bytes(fmt[12:14], "little")
+            depth = int.from_bytes(fmt[14:16], "little")
+            if (
+                codec != 1 or channels not in (1, 2)
+                or not 16_000 <= rate <= 48_000 or depth != 16
+                or alignment != channels * 2 or byte_rate != rate * alignment
+            ):
+                raise ValueError(REFERENCE_ERROR)
+            audio_format = channels, rate
+        elif kind == b"data":
+            if frames is not None or audio_format is None:
+                raise ValueError(REFERENCE_ERROR)
+            channels, rate = audio_format
+            alignment = channels * 2
+            if size % alignment:
+                raise ValueError(REFERENCE_ERROR)
+            frames = size // alignment
+            if not 2 * rate <= frames <= 20 * rate:
+                raise ValueError(REFERENCE_ERROR)
+        position = next_chunk
+    if audio_format is None or frames is None:
+        raise ValueError(REFERENCE_ERROR)
+    return audio_format[0], audio_format[1], frames
+
+
 def inspect_reference_wav(path: Path) -> str:
     """Validate one caller-selected reference and return its content digest.
 
@@ -37,14 +132,16 @@ def inspect_reference_wav(path: Path) -> str:
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or not 44 <= info.st_size <= MAX_REFERENCE_BYTES:
             raise ValueError(REFERENCE_ERROR)
-        with wave.open(str(path), "rb") as recording:
+        content = _read_reference_bytes(path, info)
+        expected_channels, expected_rate, expected_frames = _validate_reference_riff(content)
+        with wave.open(io.BytesIO(content), "rb") as recording:
             channels = recording.getnchannels()
             rate = recording.getframerate()
             frames = recording.getnframes()
             width = recording.getsampwidth()
             if (recording.getcomptype() != "NONE" or width != 2 or
-                channels not in (1, 2) or not 16_000 <= rate <= 48_000 or
-                not 2 * rate <= frames <= 20 * rate):
+                channels != expected_channels or rate != expected_rate or
+                frames != expected_frames):
                 raise ValueError(REFERENCE_ERROR)
             # A truncated RIFF file can report plausible frame metadata.
             read_bytes = 0
@@ -103,22 +200,12 @@ def inspect_reference_wav(path: Path) -> str:
                     raise ValueError(REFERENCE_ERROR)
             # A varying waveform is still NOT proof of understandable speech,
             # a particular speaker's identity, consent or clean recording.
+        # Hash the same bounded snapshot whose PCM was checked, not a second
+        # opening of the selected filename. Ordinary persistent replacement
+        # or modification still invalidates the result before it is returned.
         digest = hashlib.sha256()
-        with path.open("rb") as source:
-            while chunk := source.read(128 * 1024):
-                digest.update(chunk)
-        # The waveform gate and SHA-256 are separate bounded reads of this
-        # local file. A same-size rewrite or replacement between them must not
-        # create a cache identity for bytes different from the validated PCM.
-        # lstat also rejects a late symlink substitution without following it.
-        after = path.lstat()
-        if (
-            not stat.S_ISREG(after.st_mode)
-            or (after.st_dev, after.st_ino) != (info.st_dev, info.st_ino)
-            or after.st_size != info.st_size
-            or after.st_mtime_ns != info.st_mtime_ns
-            or after.st_ctime_ns != info.st_ctime_ns
-        ):
+        digest.update(content)
+        if not _same_file_state(info, path.lstat()):
             raise ValueError(REFERENCE_CHANGED_ERROR)
         return digest.hexdigest()
     except (OSError, EOFError, wave.Error) as exc:
