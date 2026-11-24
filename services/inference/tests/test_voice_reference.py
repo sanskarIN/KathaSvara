@@ -389,3 +389,107 @@ def test_bad_reference_is_rejected_before_model_download(
     assert loads == []
     assert str(caught.value) == REFERENCE_ERROR
     assert public_error_message(caught.value) == REFERENCE_ERROR
+
+
+def riff_chunk(kind: bytes, payload: bytes) -> bytes:
+    return kind + len(payload).to_bytes(4, "little") + payload + bytes(len(payload) % 2)
+
+
+def fix_riff_size(content: bytes) -> bytes:
+    return content[:4] + (len(content) - 8).to_bytes(4, "little") + content[8:]
+
+
+@pytest.mark.parametrize("mutation", [
+    "duplicate_data",
+    "duplicate_fmt",
+    "unreported_trailing_bytes",
+    "partial_chunk_header",
+    "oversized_chunk",
+    "incorrect_byte_rate",
+    "incorrect_block_alignment",
+    "data_before_fmt",
+    "too_many_chunks",
+    "missing_metadata_padding",
+])
+def test_reference_rejects_ambiguous_riff_container(tmp_path: Path, mutation: str) -> None:
+    path = tmp_path / "private-voice.wav"
+    make_reference(path)
+    original = path.read_bytes()
+    if mutation == "duplicate_data":
+        altered = fix_riff_size(original + riff_chunk(b"data", bytes(2)))
+    elif mutation == "duplicate_fmt":
+        altered = fix_riff_size(original + original[12:36])
+    elif mutation == "unreported_trailing_bytes":
+        altered = original + b"extra"
+    elif mutation == "partial_chunk_header":
+        altered = fix_riff_size(original + b"JUNK")
+    elif mutation == "oversized_chunk":
+        altered = fix_riff_size(original + b"JUNK" + (1000).to_bytes(4, "little"))
+    elif mutation == "incorrect_byte_rate":
+        altered = original[:28] + (1).to_bytes(4, "little") + original[32:]
+    elif mutation == "incorrect_block_alignment":
+        altered = original[:32] + (4).to_bytes(2, "little") + original[34:]
+    elif mutation == "data_before_fmt":
+        altered = original[:12] + original[36:] + original[12:36]
+    elif mutation == "too_many_chunks":
+        altered = fix_riff_size(original + riff_chunk(b"JUNK", b"") * 4095)
+    else:
+        altered = fix_riff_size(original + b"JUNK" + (1).to_bytes(4, "little") + b"x")
+    path.write_bytes(altered)
+    with pytest.raises(ValueError) as caught:
+        inspect_reference_wav(path)
+    assert str(caught.value) == REFERENCE_ERROR
+    assert str(path) not in str(caught.value)
+
+
+def test_reference_accepts_well_formed_padded_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "metadata.wav"
+    make_reference(path)
+    original = path.read_bytes()
+    altered = fix_riff_size(
+        original[:36] + riff_chunk(b"JUNK", b"odd") + original[36:]
+        + riff_chunk(b"JUNK", b"even")
+    )
+    path.write_bytes(altered)
+    assert inspect_reference_wav(path) == hashlib.sha256(altered).hexdigest()
+
+
+@pytest.mark.parametrize("seconds", [2, 20])
+def test_reference_accepts_exact_duration_boundaries(tmp_path: Path, seconds: int) -> None:
+    path = tmp_path / "boundary.wav"
+    make_reference(path, seconds=seconds)
+    assert inspect_reference_wav(path) == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_malformed_reference_is_rejected_before_loading_tts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    path = tmp_path / "duplicate-data.wav"
+    make_reference(path)
+    path.write_bytes(fix_riff_size(path.read_bytes() + riff_chunk(b"data", bytes(2))))
+    monkeypatch.setenv("KATHASVARA_TTS_REFERENCE_WAV", str(path))
+    loads, requests = install_fake_tts(monkeypatch, has_builtin_voice=True)
+    with pytest.raises(ValueError, match="Reference voice WAV is invalid"):
+        ChatterboxHindi().load()
+    assert loads == []
+    assert requests == []
+
+
+def test_reference_signal_and_digest_use_one_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "snapshot.wav"
+    make_reference(path)
+    original = path.read_bytes()
+    real_open = voice_reference.wave.open
+    observed: list[bytes] = []
+
+    def capture_open(source, *args, **kwargs):
+        # The decoder receives a file-like object, not the mutable pathname.
+        observed.append(source.read())
+        source.seek(0)
+        return real_open(source, *args, **kwargs)
+
+    monkeypatch.setattr(voice_reference.wave, "open", capture_open)
+    assert inspect_reference_wav(path) == hashlib.sha256(original).hexdigest()
+    assert observed == [original]
