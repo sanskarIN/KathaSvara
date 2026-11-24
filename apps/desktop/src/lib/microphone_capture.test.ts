@@ -163,6 +163,22 @@ describe("private microphone WAV encoding", () => {
       .toThrow("Unsupported microphone audio format");
   });
 
+  it("enforces the same exact duration at signal validation and transfer boundaries", () => {
+    const exact = encodeMonoPcm16([new Float32Array(MICROPHONE_RATE * 30)], MICROPHONE_RATE);
+    expect(classifyMicrophoneSignal(exact)).toBe("near_silence");
+    expect(wavToBase64(exact).length).toBeGreaterThan(0);
+
+    // A syntactically canonical RIFF with one additional sample must still fail.
+    const extra = new Uint8Array(exact.length + 2);
+    extra.set(exact);
+    const header = new DataView(extra.buffer);
+    header.setUint32(4, extra.length - 8, true);
+    header.setUint32(40, extra.length - 44, true);
+    expect(() => classifyMicrophoneSignal(extra)).toThrow("microphone limit");
+    expect(() => wavToBase64(extra)).toThrow("local transfer limit");
+    expect(() => wavToBase64(exact.subarray(0, 47))).toThrow("local transfer limit");
+  });
+
   it("rejects empty, oversized, inconsistent and invalid input", () => {
     expect(() => encodeMonoPcm16([new Float32Array(0)], 16_000)).toThrow();
     expect(() => encodeMonoPcm16([new Float32Array(40 * 16_000)], 16_000)).toThrow();
@@ -184,7 +200,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mockWebAudioCapture() {
+function mockWebAudioCapture(sampleRate = 48_000) {
   const endedListeners = new Set<() => void>();
   const mutedListeners = new Set<() => void>();
   const track = {
@@ -219,7 +235,7 @@ function mockWebAudioCapture() {
   const resume = vi.fn().mockResolvedValue(undefined);
   const close = vi.fn().mockResolvedValue(undefined);
   class FakeAudioContext {
-    sampleRate = 48_000;
+    sampleRate = sampleRate;
     destination = {};
     resume = resume;
     close = close;
@@ -378,6 +394,40 @@ describe("microphone Web Audio recording lifecycle", () => {
     expect(completed).not.toHaveBeenCalled();
     expect(failed).not.toHaveBeenCalled();
   });
+
+  it("rejects a fractional native sample rate before allocating or starting capture", async () => {
+    const audio = mockWebAudioCapture(48_000.5);
+    const completed = vi.fn(), failed = vi.fn();
+    await expect(beginMicrophoneCapture(completed, failed))
+      .rejects.toThrow("Microphone audio capture could not start");
+    expect(audio.resume).not.toHaveBeenCalled();
+    expect(audio.track.stop).toHaveBeenCalledOnce();
+    expect(audio.close).toHaveBeenCalledOnce();
+    expect(completed).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it.each(["usable", "empty", "silent"] as const)(
+    "suppresses queued %s capture results when consent is withdrawn after Stop",
+    async kind => {
+      const audio = mockWebAudioCapture();
+      const controller = new AbortController();
+      const completed = vi.fn(), failed = vi.fn();
+      const session = await beginMicrophoneCapture(completed, failed, controller.signal);
+      if (kind === "usable") {
+        audio.sendSamples(Float32Array.from({ length: 480 }, (_, i) => i % 2 ? -0.3 : 0.3));
+      } else if (kind === "silent") {
+        audio.sendSamples(new Float32Array(480));
+      }
+      session.stop();
+      controller.abort();
+      await Promise.resolve();
+      expect(completed).not.toHaveBeenCalled();
+      expect(failed).not.toHaveBeenCalled();
+      expect(audio.track.stop).toHaveBeenCalledOnce();
+      expect(audio.close).toHaveBeenCalledOnce();
+    },
+  );
 
   it("aborts an active recording and leaves neither audio nor live tracks", async () => {
     const audio = mockWebAudioCapture();
