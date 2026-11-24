@@ -230,6 +230,7 @@ def test_missing_model_fails_before_inference(tmp_path: Path) -> None:
 @pytest.mark.parametrize("code_point", [
     0x00, 0x80, 0x00AD, 0x034F, 0x061C, 0x200B, 0x200E, 0x200F,
     0x202A, 0x202E, 0x2060, 0x2066, 0x2069, 0x206A, 0x206F, 0xFEFF,
+    0xD800, 0xDFFF,  # lone surrogates must not reach UTF-8 JSON/export
 ])
 def test_rejects_untrusted_model_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code_point: int,
@@ -255,7 +256,7 @@ def test_indic_joiners_and_devanagari_marks_remain_valid_in_transcripts(
     """Legitimate Hindi conjuncts need ZWNJ/ZWJ; do not over-sanitize them."""
     path = wav_file(tmp_path)
     model = model_folder(tmp_path)
-    words = "क्" + chr(0x200D) + "षत्रिय क्" + chr(0x200C) + "ष हिंदी"
+    words = "क्" + chr(0x200D) + "षत्रिय क्" + chr(0x200C) + "ष हिंदी" + " 🎙️"
 
     class FakeModel:
         def __init__(self, *_: object, **__: object) -> None:
