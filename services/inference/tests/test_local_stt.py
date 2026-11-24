@@ -4,6 +4,8 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import struct
 import sys
 import wave
@@ -12,7 +14,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from kathasvara.local_stt import inspect_stt_setup, inspect_stt_wav, transcribe_hindi_wav
+from kathasvara.local_stt import (
+    MAX_STT_WAV_BYTES,
+    _read_verified_stt_snapshot,
+    inspect_stt_setup,
+    inspect_stt_wav,
+    transcribe_hindi_wav,
+)
 
 
 def wav_file(root: Path, *, frames: int = 16_000, channels: int = 1,
@@ -146,8 +154,9 @@ def test_offline_asr_uses_local_model_and_real_segment_text(
             used.append((path, kwargs))
             self.model = SimpleNamespace(is_multilingual=True)
 
-        def transcribe(self, path: str, **kwargs: object) -> tuple[list[object], object]:
-            assert path == str(audio)
+        def transcribe(self, source: io.BytesIO, **kwargs: object) -> tuple[list[object], object]:
+            assert isinstance(source, io.BytesIO)
+            assert source.read() == audio.read_bytes()
             assert kwargs["language"] == "hi" and kwargs["task"] == "transcribe"
             return [SimpleNamespace(text=" नमस्ते "), SimpleNamespace(text="भारत")], None
 
@@ -368,3 +377,127 @@ def test_transcript_limit_counts_only_emitted_text_and_spaces(
     else:
         with pytest.raises(ValueError, match="8000-character review limit"):
             transcribe_hindi_wav(str(audio), str(folder))
+
+
+@pytest.mark.parametrize("change", ["different_bytes", "missing", "directory", "oversize"])
+def test_verified_stt_snapshot_rejects_changed_input(tmp_path: Path, change: str) -> None:
+    audio = wav_file(tmp_path)
+    digest = hashlib.sha256(audio.read_bytes()).hexdigest()
+    if change == "different_bytes":
+        altered = bytearray(audio.read_bytes())
+        altered[44:46] = struct.pack("<h", 700)
+        audio.write_bytes(altered)
+    elif change == "missing":
+        audio.unlink()
+    elif change == "directory":
+        audio.unlink()
+        audio.mkdir()
+    else:
+        with audio.open("ab") as stream:
+            stream.truncate(MAX_STT_WAV_BYTES + 1)
+
+    with pytest.raises(ValueError, match="Recording changed during offline transcription"):
+        _read_verified_stt_snapshot(audio, digest)
+
+
+def test_verified_stt_snapshot_rejects_symlink_to_identical_recording(tmp_path: Path) -> None:
+    audio = wav_file(tmp_path)
+    digest = hashlib.sha256(audio.read_bytes()).hexdigest()
+    other = tmp_path / "other.wav"
+    audio.rename(other)
+    try:
+        audio.symlink_to(other)
+    except (NotImplementedError, OSError):
+        pytest.skip("Symbolic links are unavailable on this runner.")
+    with pytest.raises(ValueError, match="Recording changed during offline transcription"):
+        _read_verified_stt_snapshot(audio, digest)
+
+
+def test_verified_stt_snapshot_is_exact_and_independent_of_later_edits(tmp_path: Path) -> None:
+    audio = wav_file(tmp_path)
+    original = audio.read_bytes()
+    snapshot = _read_verified_stt_snapshot(audio, hashlib.sha256(original).hexdigest())
+    audio.write_bytes(b"replacement")
+    assert type(snapshot) is bytes
+    assert snapshot == original
+
+
+def test_stt_decoder_cannot_read_transient_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even a replace/restore during lazy decoding cannot alter the input stream."""
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    original = audio.read_bytes()
+    replacement = bytearray(original)
+    replacement[44:46] = struct.pack("<h", 700)
+    observed: list[io.BytesIO] = []
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, source: io.BytesIO, **_: object):
+            observed.append(source)
+
+            def lazy_segments():
+                audio.write_bytes(replacement)
+                try:
+                    assert source.read() == original
+                    assert not source.closed
+                    yield SimpleNamespace(text="नमस्ते")
+                finally:
+                    audio.write_bytes(original)
+
+            return lazy_segments(), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    result = transcribe_hindi_wav(str(audio), str(folder))
+    assert result["text"] == "नमस्ते"
+    assert observed[0].closed
+    assert audio.read_bytes() == original
+
+
+def test_stt_closes_snapshot_stream_on_lazy_recognition_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    observed: list[io.BytesIO] = []
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object) -> None:
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, source: io.BytesIO, **_: object):
+            observed.append(source)
+
+            def lazy_segments():
+                yield SimpleNamespace(text="नमस्ते")
+                raise RuntimeError("Private decoder error")
+
+            return lazy_segments(), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    with pytest.raises(RuntimeError, match="Local STT inference failed"):
+        transcribe_hindi_wav(str(audio), str(folder))
+    assert observed[0].closed
+
+
+def test_stt_snapshot_failure_precedes_optional_model_loading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+
+    def reject_snapshot(*_: object) -> bytes:
+        raise ValueError("Recording changed during offline transcription")
+
+    class MustNotLoad:
+        def __init__(self, *_: object, **__: object) -> None:
+            pytest.fail("The local model must not load after a snapshot failure.")
+
+    monkeypatch.setattr("kathasvara.local_stt._read_verified_stt_snapshot", reject_snapshot)
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=MustNotLoad))
+    with pytest.raises(ValueError, match="Recording changed during offline transcription"):
+        transcribe_hindi_wav(str(audio), str(folder))
