@@ -6,7 +6,10 @@ SPDX-License-Identifier: MPL-2.0
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
+import io
+import os
 import stat
 import sys
 from pathlib import Path
@@ -109,6 +112,48 @@ def _require_unchanged_recording(path: Path, expected_sha256: str) -> None:
         raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
 
 
+def _read_verified_stt_snapshot(path: Path, expected_sha256: str) -> bytes:
+    """Read a bounded in-memory copy of exactly the inspected WAV.
+
+    Passing the original filename to a decoder creates a check/use gap:
+    a file can be replaced during decoding and restored before the final
+    fingerprint check. Pass a verified private byte stream instead, without
+    creating another on-disk recording. This does not provide a filesystem
+    lock or guarantee erasure of Python-managed memory.
+    """
+    flags = (
+        os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+        getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        selected = path.lstat()
+        if not stat.S_ISREG(selected.st_mode):
+            raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as source:
+            opened = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or not 44 <= opened.st_size <= MAX_STT_WAV_BYTES
+                or (selected.st_dev, selected.st_ino) != (opened.st_dev, opened.st_ino)
+            ):
+                raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
+            content = source.read(MAX_STT_WAV_BYTES + 1)
+            final = os.fstat(source.fileno())
+            if (
+                len(content) != opened.st_size
+                or len(content) > MAX_STT_WAV_BYTES
+                or final.st_size != opened.st_size
+                or final.st_mtime_ns != opened.st_mtime_ns
+                or final.st_ctime_ns != opened.st_ctime_ns
+                or hashlib.sha256(content).hexdigest() != expected_sha256
+            ):
+                raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
+    except OSError as exc:
+        raise ValueError(STT_CHANGED_RECORDING_MESSAGE) from exc
+    return content
+
+
 def verify_local_model_folder(model_folder: Path) -> None:
     """Accept only local CTranslate2 model directories, never a Hub model ID."""
     if not model_folder.is_absolute() or not model_folder.is_dir() or model_folder.is_symlink():
@@ -207,6 +252,7 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
             "Recording has no usable speech-level signal. Check microphone input and try again."
         )
     verify_local_model_folder(model_folder)
+    snapshot = _read_verified_stt_snapshot(recording, recording_sha256)
     try:
         from faster_whisper import WhisperModel
     except (ImportError, OSError) as exc:
@@ -223,26 +269,29 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
         if getattr(getattr(model, "model", None), "is_multilingual", None) is not True:
             raise ValueError(STT_HINDI_MODEL_REQUIRED_MESSAGE)
         _require_unchanged_recording(recording, recording_sha256)
-        segments, _ = model.transcribe(str(recording), language="hi", task="transcribe",
-                                        beam_size=3, vad_filter=False)
-        pieces: list[str] = []
-        length = 0
-        for index, segment in enumerate(segments):
-            if index >= 200:
-                raise ValueError("Transcription exceeds the 200-segment review limit.")
-            text = segment.text
-            if not isinstance(text, str) or _contains_untrusted_transcript_control(text):
-                raise ValueError("Speech model produced invalid transcription text.")
-            cleaned = text.strip()
-            if cleaned:
-                # Count only the separators actually emitted by join(): the
-                # last segment has no trailing space. A valid transcript of
-                # exactly MAX_TRANSCRIPT_CHARS must remain reviewable.
-                extra = len(cleaned) + (1 if pieces else 0)
-                if length + extra > MAX_TRANSCRIPT_CHARS:
-                    raise ValueError("Transcription exceeds the 8000-character review limit.")
-                length += extra
-                pieces.append(cleaned)
+        # Keep the stream open until lazy recognition has consumed every segment.
+        # faster-whisper >=1.1 supports file-like audio inputs.
+        with io.BytesIO(snapshot) as source:
+            segments, _ = model.transcribe(source, language="hi", task="transcribe",
+                                            beam_size=3, vad_filter=False)
+            pieces: list[str] = []
+            length = 0
+            for index, segment in enumerate(segments):
+                if index >= 200:
+                    raise ValueError("Transcription exceeds the 200-segment review limit.")
+                text = segment.text
+                if not isinstance(text, str) or _contains_untrusted_transcript_control(text):
+                    raise ValueError("Speech model produced invalid transcription text.")
+                cleaned = text.strip()
+                if cleaned:
+                    # Count only the separators actually emitted by join(): the
+                    # last segment has no trailing space. A valid transcript of
+                    # exactly MAX_TRANSCRIPT_CHARS must remain reviewable.
+                    extra = len(cleaned) + (1 if pieces else 0)
+                    if length + extra > MAX_TRANSCRIPT_CHARS:
+                        raise ValueError("Transcription exceeds the 8000-character review limit.")
+                    length += extra
+                    pieces.append(cleaned)
         _require_unchanged_recording(recording, recording_sha256)
     except (ValueError, TypeError):
         raise
