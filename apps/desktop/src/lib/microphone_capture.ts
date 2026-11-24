@@ -112,7 +112,8 @@ export function encodeMonoPcm16(
 }
 
 export function wavToBase64(wav: Uint8Array): string {
-  if (wav.length < 46 || wav.length > 2 * 1024 * 1024) {
+  if (wav.length < 46 || (wav.length - 44) % 2 !== 0 ||
+      wav.length > 44 + MICROPHONE_RATE * MICROPHONE_MAX_SECONDS * 2) {
     throw new Error("Recording exceeds the local transfer limit.");
   }
   const pieces: string[] = [];
@@ -138,7 +139,7 @@ export function classifyMicrophoneSignal(wav: Uint8Array): MicrophoneSignal {
     throw new Error("Invalid recorded WAV signal.");
   }
   const frames = (wav.byteLength - 44) / 2;
-  if (frames > MICROPHONE_RATE * (MICROPHONE_MAX_SECONDS + 1)) {
+  if (frames > MICROPHONE_RATE * MICROPHONE_MAX_SECONDS) {
     throw new Error("Recorded WAV exceeds the microphone limit.");
   }
   const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength);
@@ -287,23 +288,23 @@ export async function beginMicrophoneCapture(
       release();
       try {
         if (!samples || !context || received === 0) {
-          queueMicrotask(() => { if (!cancelled) failed("empty"); });
+          queueMicrotask(() => { if (!cancelled && !signal?.aborted) failed("empty"); });
           return;
         }
         const wav = encodeMonoPcm16([samples.subarray(0, received)], context.sampleRate);
         const quality = classifyMicrophoneSignal(wav);
         if (quality !== "ok") {
-          queueMicrotask(() => { if (!cancelled) failed(quality); });
+          queueMicrotask(() => { if (!cancelled && !signal?.aborted) failed(quality); });
           return;
         }
         const encoded = wavToBase64(wav);
         // The UI marks stop as "processing" immediately after this call.
         // Deliver results in the next microtask so "ready" wins, and allow
         // a synchronous discard/navigation to cancel even a queued result.
-        queueMicrotask(() => { if (!cancelled) completed(encoded); });
+        queueMicrotask(() => { if (!cancelled && !signal?.aborted) completed(encoded); });
       } catch {
         queueMicrotask(() => {
-          if (!cancelled) failed("capture_failed");
+          if (!cancelled && !signal?.aborted) failed("capture_failed");
         });
       } finally {
         samples?.fill(0);
@@ -332,7 +333,7 @@ export async function beginMicrophoneCapture(
   try {
     context = new AudioContext();
     const rate = context.sampleRate;
-    if (!Number.isFinite(rate) || rate < 8_000 || rate > 192_000 ||
+    if (!Number.isInteger(rate) || rate < 8_000 || rate > 192_000 ||
         typeof context.createScriptProcessor !== "function") {
       throw new Error("Unsupported microphone audio graph.");
     }
