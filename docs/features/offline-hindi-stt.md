@@ -141,6 +141,16 @@ you to reselect the WAV. This protects against ordinary concurrent edits; it
 does not lock the file against malicious replacement or prove Hindi accuracy.
 The fingerprint remains internal and is not added to public setup results.
 
+The recognition decoder also receives a bounded in-memory copy of the
+fingerprint-verified WAV, rather than reopening the selected filename.
+Even a transient replacement of the original file during decoding cannot
+change the bytes supplied to the model. The stream remains open through
+lazy segment iteration and closes on success or failure. No new disk copy
+or public fingerprint is produced. This does not guarantee secure memory
+erasure, stop every possible filesystem race, or establish recognition
+accuracy. Ordinary persistent changes to the source still invalidate the
+transcript.
+
 The first post-v0.5.6 STT development change supported an **existing file** only.
 Later development added a short microphone capture path with
 explicit permission and a separate transcription action. User-selected audio
