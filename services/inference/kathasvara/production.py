@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .audio_stream import StreamingWav
+from .cache_audio import read_cached_pcm
 from .cache_lock import exclusive_cache_access
 from .engine import ChatterboxHindi, VoiceSettings
 from .pcm_signal import effectively_silent_pcm
@@ -197,23 +198,17 @@ def render_story(
                     segment_samples = None
                     was_cached = False
                     cached_over_budget = False
-                    if (use_cache and not cached.is_symlink() and cached.exists()
-                        and seg.id not in (force_segment_ids or set())):
+                    if use_cache and seg.id not in (force_segment_ids or set()):
                         try:
-                            info = sf.info(str(cached))
-                            if (info.format == "WAV" and info.subtype == "PCM_16" and
-                                info.channels == 1 and info.samplerate == rate and
-                                0 < info.frames <= rate * MAX_OUTPUT_SECONDS):
-                                if info.frames > remaining_frames:
-                                    cached_over_budget = True
-                                else:
-                                    candidate, _ = sf.read(
-                                        str(cached), dtype="float32", always_2d=False,
-                                    )
-                                    segment_samples = _samples(candidate, np)
-                                    was_cached = True
+                            candidate, cached_over_budget = read_cached_pcm(
+                                cached, rate, remaining_frames,
+                                rate * MAX_OUTPUT_SECONDS, sf,
+                            )
+                            if candidate is not None:
+                                segment_samples = _samples(candidate, np)
+                                was_cached = True
                         except (OSError, RuntimeError, ValueError):
-                            # A corrupt cache is never used as valid speech.
+                            # A corrupt or concurrently changed cache is a miss.
                             segment_samples = None
                     if cached_over_budget:
                         raise ValueError("Render exceeds the 20-minute audio limit.")
