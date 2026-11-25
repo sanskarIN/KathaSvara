@@ -141,14 +141,14 @@ def test_cached_audio_over_remaining_budget_rejected_before_pcm_read(
     render_story(doc, tmp_path / "original.wav", cache, FakeEngine())
     assert len(list(cache.glob("*.wav"))) == 2
 
-    calls: list[str] = []
-    original = sf.read
+    calls: list[int] = []
+    original = sf.SoundFile.read
 
-    def traced_read(path: str, *args: object, **kwargs: object):
-        calls.append(path)
-        return original(path, *args, **kwargs)
+    def traced_read(stream, *args: object, **kwargs: object):
+        calls.append(kwargs["frames"])
+        return original(stream, *args, **kwargs)
 
-    monkeypatch.setattr(sf, "read", traced_read)
+    monkeypatch.setattr(sf.SoundFile, "read", traced_read)
     # Each segment contributes 2,400 frames. The first has a 3,360-frame
     # pause, leaving only 720 frames for the cached second segment.
     monkeypatch.setattr(production, "MAX_OUTPUT_SECONDS", 0.27)
@@ -156,7 +156,7 @@ def test_cached_audio_over_remaining_budget_rejected_before_pcm_read(
         render_story(
             doc, tmp_path / "too_long.wav", cache, FakeEngine(),
         )
-    assert len(calls) == 1, "Only the cache entry that fits may be read as PCM."
+    assert calls == [2400], "Only the cache entry that fits may be read as PCM."
     assert not (tmp_path / "too_long.wav").exists()
     assert len(list(cache.glob("*.wav"))) == 2
 

@@ -14,8 +14,8 @@ import soundfile as sf
 
 from kathasvara import cache_audio
 from kathasvara.cache_audio import read_cached_pcm
-from kathasvara.production import render_story
 from kathasvara.dialogue import parse_dialogue
+from kathasvara.production import render_story
 from kathasvara.story import narrator
 
 RATE = 24_000
@@ -204,7 +204,7 @@ def test_story_recovers_from_truncated_cache(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     render_story(doc, tmp_path / "first.wav", cache, MockEngine())
     path, = cache.glob("*.wav")
-    path.write_bytes(path.read_bytes()[:40])
+    path.write_bytes(path.read_bytes()[:-2])
     engine = MockEngine()
     result = render_story(doc, tmp_path / "recovered.wav", cache, engine)
     assert engine.calls == 1
@@ -215,3 +215,29 @@ def test_story_recovers_from_truncated_cache(tmp_path: Path) -> None:
     result = render_story(doc, tmp_path / "reused.wav", cache, engine)
     assert engine.calls == 0
     assert result["segments"][0]["cached"] is True
+
+
+@pytest.mark.parametrize("mutation", ["truncated", "trailing", "duplicate_data", "bad_rate"])
+def test_cache_rejects_ambiguous_riff_before_native_decode(
+    tmp_path: Path, mutation: str,
+) -> None:
+    path = tmp_path / "cache.wav"
+    make_wav(path)
+    data = path.read_bytes()
+    if mutation == "truncated":
+        data = data[:-2]
+    elif mutation == "trailing":
+        data += b"extra"
+    elif mutation == "duplicate_data":
+        data += b"data" + (2).to_bytes(4, "little") + b"\x00\x00"
+        data = data[:4] + (len(data) - 8).to_bytes(4, "little") + data[8:]
+    else:
+        data = data[:28] + (1).to_bytes(4, "little") + data[32:]
+    path.write_bytes(data)
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("Malformed RIFF must not reach the native decoder")
+
+    assert read_cached_pcm(
+        path, RATE, RATE, RATE, SimpleNamespace(SoundFile=unexpected),
+    ) == (None, False)

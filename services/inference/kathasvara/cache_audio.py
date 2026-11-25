@@ -11,6 +11,8 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from .wav_acceptance import _validate_pcm16_riff
+
 # Generated mono PCM16 caches have tiny headers. Allow reasonable container
 # overhead but avoid opening unexpectedly huge files in native decoders.
 MAX_CACHE_WAV_OVERHEAD = 1024 * 1024
@@ -56,6 +58,14 @@ def read_cached_pcm(
         opened = os.fstat(source.fileno())
         if not _same_state(selected, opened):
             return None, False
+        # Check the declared RIFF length and every chunk first. Native decoders
+        # may silently shorten truncated data to the available complete frames.
+        try:
+            expected_rate, expected_frames = _validate_pcm16_riff(source, opened.st_size)
+        except ValueError:
+            return None, False
+        if expected_rate != rate or expected_frames > max_frames:
+            return None, False
         with sf.SoundFile(source, mode="r") as stream:
             frames = stream.frames
             if (
@@ -63,6 +73,7 @@ def read_cached_pcm(
                 or stream.subtype != "PCM_16"
                 or stream.channels != 1
                 or stream.samplerate != rate
+                or frames != expected_frames
                 or not 0 < frames <= max_frames
                 or 44 + 2 * frames > opened.st_size
             ):
