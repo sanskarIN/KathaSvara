@@ -127,7 +127,8 @@ def _validate_pcm16_riff(raw, file_bytes: int) -> tuple[int, int]:
                 raise ValueError(invalid)
             sample_rate = rate
         elif chunk_header[:4] == b"data":
-            if frame_count is not None or chunk_size < 2 or chunk_size % 2:
+            if (sample_rate is None or frame_count is not None or
+                chunk_size < 2 or chunk_size % 2):
                 raise ValueError(invalid)
             frame_count = chunk_size // 2
         cursor = next_chunk
@@ -140,23 +141,43 @@ def _validate_pcm16_riff(raw, file_bytes: int) -> tuple[int, int]:
     return sample_rate, frame_count
 
 
+def _same_file_state(before: os.stat_result, after: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(after.st_mode)
+        and (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        and before.st_size == after.st_size
+        and before.st_mtime_ns == after.st_mtime_ns
+        and before.st_ctime_ns == after.st_ctime_ns
+    )
+
+
 def inspect_wav_candidate(path: Path) -> dict[str, object]:
     """Validate actual PCM bytes and report structure without interpreting audio."""
     if not path.is_absolute() or path.suffix.lower() != ".wav":
         raise ValueError("Choose an absolute .wav filename.")
-    if path.is_symlink():
+    try:
+        selected = path.lstat()
+    except OSError as exc:
+        raise ValueError("Cannot open candidate WAV as a local file.") from exc
+    if not stat.S_ISREG(selected.st_mode):
         raise ValueError("A WAV acceptance candidate must be a regular non-symlink file.")
-    # NOFOLLOW is available on POSIX; on Windows the initial symlink rejection
-    # still avoids ordinary directory/link shortcuts. fstat checks the opened FD.
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if not 44 <= selected.st_size <= MAX_WAV_BYTES:
+        raise ValueError("Candidate WAV is not a bounded regular audio file.")
+    # O_NONBLOCK avoids waiting on a FIFO substituted between lstat and open.
+    # On platforms without O_NOFOLLOW, descriptor identity still detects
+    # ordinary persistent substitutions. These checks are not a file lock.
+    flags = (
+        os.O_RDONLY | getattr(os, "O_BINARY", 0) |
+        getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         fd = os.open(path, flags)
     except OSError as exc:
         raise ValueError("Cannot open candidate WAV as a local file.") from exc
     with os.fdopen(fd, "rb") as raw:
         info = os.fstat(raw.fileno())
-        if not stat.S_ISREG(info.st_mode) or not 44 <= info.st_size <= MAX_WAV_BYTES:
-            raise ValueError("Candidate WAV is not a bounded regular audio file.")
+        if not _same_file_state(selected, info):
+            raise ValueError("WAV changed during inspection.")
         try:
             expected_rate, expected_frames = _validate_pcm16_riff(raw, info.st_size)
             with wave.open(raw, "rb") as wav:
@@ -227,20 +248,25 @@ def inspect_wav_candidate(path: Path) -> dict[str, object]:
             raise ValueError("WAV contains an unsupported or invalid PCM header.") from exc
         raw.seek(0)
         digest = hashlib.sha256()
-        while chunk := raw.read(1024 * 1024):
+        remaining = info.st_size
+        while remaining:
+            chunk = raw.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                raise ValueError("WAV changed during inspection.")
             digest.update(chunk)
+            remaining -= len(chunk)
         # File length alone misses same-size rewrites while the level scan and
         # SHA-256 pass are running. Compare opened-file identity and mutation
         # times, excluding access time (which reads may legitimately update).
         # This detects common concurrent edits, not adversarial timestamp
         # restoration or a mutation that occurs after this final fstat.
-        final_info = os.fstat(raw.fileno())
-        if (
-            (final_info.st_dev, final_info.st_ino) != (info.st_dev, info.st_ino)
-            or final_info.st_size != info.st_size
-            or final_info.st_mtime_ns != info.st_mtime_ns
-            or final_info.st_ctime_ns != info.st_ctime_ns
-        ):
+        if not _same_file_state(info, os.fstat(raw.fileno())):
+            raise ValueError("WAV changed during inspection.")
+        try:
+            current = path.lstat()
+        except OSError as exc:
+            raise ValueError("WAV changed during inspection.") from exc
+        if not _same_file_state(info, current):
             raise ValueError("WAV changed during inspection.")
     return {
         "format": "kathasvara-wav-structural-inspection",
