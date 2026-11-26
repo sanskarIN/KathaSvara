@@ -416,6 +416,7 @@ def test_nonregular_candidate_rejected_before_open(
 
 def test_shared_riff_validator_rejects_data_before_format(tmp_path: Path) -> None:
     import io
+
     from kathasvara.wav_acceptance import _validate_pcm16_riff
 
     path = wav_file(tmp_path / "reordered.wav")
