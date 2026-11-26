@@ -391,3 +391,95 @@ def test_long_gap_report_does_not_leak_private_path_or_claim_speech(
     assert report["hindi_listening_verified"] is False
     assert report["distinct_voices_verified"] is False
     assert report["human_review_required"] is True
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo"])
+def test_nonregular_candidate_rejected_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    path = tmp_path / "not-a-recording.wav"
+    if kind == "directory":
+        path.mkdir()
+    elif hasattr(os, "mkfifo"):
+        os.mkfifo(path)
+    else:
+        pytest.skip("Named pipes unavailable")
+    from kathasvara import wav_acceptance
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("Nonregular input must never be opened")
+
+    monkeypatch.setattr(wav_acceptance.os, "open", unexpected)
+    with pytest.raises(ValueError, match="regular non-symlink"):
+        inspect_wav_candidate(path)
+
+
+def test_shared_riff_validator_rejects_data_before_format(tmp_path: Path) -> None:
+    import io
+    from kathasvara.wav_acceptance import _validate_pcm16_riff
+
+    path = wav_file(tmp_path / "reordered.wav")
+    original = path.read_bytes()
+    reordered = original[:12] + original[36:] + original[12:36]
+    with pytest.raises(ValueError, match="invalid PCM header"):
+        _validate_pcm16_riff(io.BytesIO(reordered), len(reordered))
+
+
+def test_checksum_never_reads_past_original_file_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import wav_acceptance
+
+    path = wav_file(tmp_path / "growing.wav", samples=600000)
+    original_size = path.stat().st_size
+    observed: list[int] = []
+    real_sha = hashlib.sha256
+
+    class GrowingDigest:
+        def __init__(self):
+            self.inner = real_sha()
+
+        def update(self, chunk: bytes) -> None:
+            observed.append(len(chunk))
+            self.inner.update(chunk)
+            if len(observed) == 1:
+                with path.open("ab") as writer:
+                    writer.write(b"extra" * 1000)
+
+        def hexdigest(self) -> str:
+            return self.inner.hexdigest()
+
+    monkeypatch.setattr(wav_acceptance.hashlib, "sha256", GrowingDigest)
+    with pytest.raises(ValueError, match="changed during inspection"):
+        inspect_wav_candidate(path)
+    assert sum(observed) == original_size
+    assert max(observed) <= 1024 * 1024
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Open-file replacement is platform dependent")
+def test_replaced_path_is_not_reported_as_current_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import wav_acceptance
+
+    path = wav_file(tmp_path / "original.wav")
+    replacement = wav_file(tmp_path / "replacement.wav", samples=3200)
+    real_sha = hashlib.sha256
+
+    class ReplacingDigest:
+        def __init__(self):
+            self.inner = real_sha()
+            self.replaced = False
+
+        def update(self, chunk: bytes) -> None:
+            self.inner.update(chunk)
+            if not self.replaced:
+                replacement.replace(path)
+                self.replaced = True
+
+        def hexdigest(self) -> str:
+            return self.inner.hexdigest()
+
+    monkeypatch.setattr(wav_acceptance.hashlib, "sha256", ReplacingDigest)
+    with pytest.raises(ValueError, match="changed during inspection"):
+        inspect_wav_candidate(path)
