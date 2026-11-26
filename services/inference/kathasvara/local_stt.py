@@ -35,6 +35,10 @@ STT_HINDI_MODEL_REQUIRED_MESSAGE = (
 )
 
 
+class _SttValidationError(ValueError):
+    """Only fixed, application-owned validation errors escape model execution."""
+
+
 def _inspect_stt_wav_with_digest(path: Path) -> tuple[dict[str, object], str]:
     """Inspect only bounded local PCM16 audio; do not load recognition weights.
 
@@ -100,16 +104,22 @@ def inspect_stt_wav(path: Path) -> dict[str, object]:
 def _require_unchanged_recording(path: Path, expected_sha256: str) -> None:
     """Reject a WAV rewritten during expensive model loading or recognition.
 
-    Reuse the existing descriptor-based structural and SHA-256 inspector.
-    Never expose the private recording path or checksum through IPC. This
-    catches ordinary edits/replacements; it is not an atomic filesystem lock.
+    The original fingerprint already identifies the validated WAV. Recheck
+    at most 6 MiB without repeating the expensive per-sample signal analysis
+    or invoking the general-purpose 512 MiB acceptance inspector again.
+    This catches ordinary edits/replacements, not an atomic filesystem lock.
     """
-    try:
-        report = inspect_wav_candidate(path)
-    except (OSError, ValueError) as exc:
-        raise ValueError(STT_CHANGED_RECORDING_MESSAGE) from exc
-    if report["sha256"] != expected_sha256:
-        raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
+    _read_verified_stt_snapshot(path, expected_sha256)
+
+
+def _same_recording_state(before: os.stat_result, after: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(after.st_mode)
+        and (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        and before.st_size == after.st_size
+        and before.st_mtime_ns == after.st_mtime_ns
+        and before.st_ctime_ns == after.st_ctime_ns
+    )
 
 
 def _read_verified_stt_snapshot(path: Path, expected_sha256: str) -> bytes:
@@ -127,30 +137,27 @@ def _read_verified_stt_snapshot(path: Path, expected_sha256: str) -> bytes:
     )
     try:
         selected = path.lstat()
-        if not stat.S_ISREG(selected.st_mode):
-            raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
+        if (
+            not stat.S_ISREG(selected.st_mode)
+            or not 44 <= selected.st_size <= MAX_STT_WAV_BYTES
+        ):
+            raise _SttValidationError(STT_CHANGED_RECORDING_MESSAGE)
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as source:
             opened = os.fstat(source.fileno())
-            if (
-                not stat.S_ISREG(opened.st_mode)
-                or not 44 <= opened.st_size <= MAX_STT_WAV_BYTES
-                or (selected.st_dev, selected.st_ino) != (opened.st_dev, opened.st_ino)
-            ):
-                raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
-            content = source.read(MAX_STT_WAV_BYTES + 1)
-            final = os.fstat(source.fileno())
+            if not _same_recording_state(selected, opened):
+                raise _SttValidationError(STT_CHANGED_RECORDING_MESSAGE)
+            # Read only the approved length, even if a writer appends data.
+            content = source.read(opened.st_size)
             if (
                 len(content) != opened.st_size
-                or len(content) > MAX_STT_WAV_BYTES
-                or final.st_size != opened.st_size
-                or final.st_mtime_ns != opened.st_mtime_ns
-                or final.st_ctime_ns != opened.st_ctime_ns
                 or hashlib.sha256(content).hexdigest() != expected_sha256
+                or not _same_recording_state(opened, os.fstat(source.fileno()))
+                or not _same_recording_state(opened, path.lstat())
             ):
-                raise ValueError(STT_CHANGED_RECORDING_MESSAGE)
+                raise _SttValidationError(STT_CHANGED_RECORDING_MESSAGE)
     except OSError as exc:
-        raise ValueError(STT_CHANGED_RECORDING_MESSAGE) from exc
+        raise _SttValidationError(STT_CHANGED_RECORDING_MESSAGE) from exc
     return content
 
 
@@ -255,7 +262,9 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
     snapshot = _read_verified_stt_snapshot(recording, recording_sha256)
     try:
         from faster_whisper import WhisperModel
-    except (ImportError, OSError) as exc:
+    except Exception as exc:
+        # Optional native packages can raise more than ImportError/OSError
+        # during initialization. Do not return their private loader messages.
         raise RuntimeError(
             "Offline transcription is unavailable. Install the optional STT Python dependencies."
         ) from exc
@@ -267,7 +276,7 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
         # model exposes the actual multilingual capability after loading.
         # Fail closed if an incompatible/unknown model cannot confirm Hindi.
         if getattr(getattr(model, "model", None), "is_multilingual", None) is not True:
-            raise ValueError(STT_HINDI_MODEL_REQUIRED_MESSAGE)
+            raise _SttValidationError(STT_HINDI_MODEL_REQUIRED_MESSAGE)
         _require_unchanged_recording(recording, recording_sha256)
         # Keep the stream open until lazy recognition has consumed every segment.
         # faster-whisper >=1.1 supports file-like audio inputs.
@@ -278,10 +287,10 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
             length = 0
             for index, segment in enumerate(segments):
                 if index >= 200:
-                    raise ValueError("Transcription exceeds the 200-segment review limit.")
+                    raise _SttValidationError("Transcription exceeds the 200-segment review limit.")
                 text = segment.text
                 if not isinstance(text, str) or _contains_untrusted_transcript_control(text):
-                    raise ValueError("Speech model produced invalid transcription text.")
+                    raise _SttValidationError("Speech model produced invalid transcription text.")
                 cleaned = text.strip()
                 if cleaned:
                     # Count only the separators actually emitted by join(): the
@@ -289,11 +298,11 @@ def transcribe_hindi_wav(wav_path: str, model_path: str) -> dict[str, object]:
                     # exactly MAX_TRANSCRIPT_CHARS must remain reviewable.
                     extra = len(cleaned) + (1 if pieces else 0)
                     if length + extra > MAX_TRANSCRIPT_CHARS:
-                        raise ValueError("Transcription exceeds the 8000-character review limit.")
+                        raise _SttValidationError("Transcription exceeds the 8000-character review limit.")
                     length += extra
                     pieces.append(cleaned)
         _require_unchanged_recording(recording, recording_sha256)
-    except (ValueError, TypeError):
+    except _SttValidationError:
         raise
     except Exception as exc:
         raise RuntimeError(
