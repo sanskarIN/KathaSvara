@@ -501,3 +501,112 @@ def test_stt_snapshot_failure_precedes_optional_model_loading(
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=MustNotLoad))
     with pytest.raises(ValueError, match="Recording changed during offline transcription"):
         transcribe_hindi_wav(str(audio), str(folder))
+
+
+def test_recognition_only_runs_expensive_signal_inspection_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import local_stt
+
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    original_inspector = local_stt.inspect_wav_candidate
+    inspected: list[Path] = []
+
+    def inspect(path: Path):
+        inspected.append(path)
+        return original_inspector(path)
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object):
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, *_: object, **__: object):
+            return [SimpleNamespace(text="नमस्ते भारत")], None
+
+    monkeypatch.setattr(local_stt, "inspect_wav_candidate", inspect)
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    result = transcribe_hindi_wav(str(audio), str(folder))
+    assert result["text"] == "नमस्ते भारत"
+    assert inspected == [audio]
+
+
+@pytest.mark.parametrize("when", ["load", "transcribe", "lazy_segment"])
+@pytest.mark.parametrize("error_type", [ValueError, TypeError, RuntimeError])
+def test_model_owned_errors_are_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, when: str, error_type: type[Exception],
+) -> None:
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    private_error = "Private model failure: " + str(folder)
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object):
+            if when == "load":
+                raise error_type(private_error)
+            self.model = SimpleNamespace(is_multilingual=True)
+
+        def transcribe(self, *_: object, **__: object):
+            if when == "transcribe":
+                raise error_type(private_error)
+
+            def segments():
+                yield SimpleNamespace(text="नमस्ते")
+                raise error_type(private_error)
+
+            return segments(), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    with pytest.raises(RuntimeError, match="Local STT inference failed") as caught:
+        transcribe_hindi_wav(str(audio), str(folder))
+    assert str(folder) not in str(caught.value)
+    assert "Private model failure" not in str(caught.value)
+
+
+def test_snapshot_refuses_oversized_file_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import local_stt
+
+    audio = wav_file(tmp_path)
+    digest = hashlib.sha256(audio.read_bytes()).hexdigest()
+    with audio.open("ab") as stream:
+        stream.truncate(MAX_STT_WAV_BYTES + 1)
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("Oversized recording must not be opened")
+
+    monkeypatch.setattr(local_stt.os, "open", unexpected)
+    with pytest.raises(ValueError, match="Recording changed"):
+        _read_verified_stt_snapshot(audio, digest)
+
+
+def test_revalidation_detects_growth_after_model_load_without_signal_rescan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kathasvara import local_stt
+
+    audio = wav_file(tmp_path)
+    folder = model_folder(tmp_path)
+    inspector = local_stt.inspect_wav_candidate
+    calls = []
+
+    def inspect(path: Path):
+        calls.append(path)
+        assert len(calls) == 1
+        return inspector(path)
+
+    class FakeModel:
+        def __init__(self, *_: object, **__: object):
+            self.model = SimpleNamespace(is_multilingual=True)
+            with audio.open("ab") as stream:
+                stream.truncate(MAX_STT_WAV_BYTES + 1)
+
+        def transcribe(self, *_: object, **__: object):
+            pytest.fail("Changed recording must not be transcribed")
+
+    monkeypatch.setattr(local_stt, "inspect_wav_candidate", inspect)
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    with pytest.raises(ValueError, match="Recording changed"):
+        transcribe_hindi_wav(str(audio), str(folder))
+    assert calls == [audio]
